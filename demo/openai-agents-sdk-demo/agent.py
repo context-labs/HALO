@@ -37,8 +37,10 @@ def list_files(
         cwd=target,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    if result.returncode == 2:
+        raise RuntimeError(f"rg failed: {result.stderr.strip()}")
     return result.stdout.splitlines()
 
 
@@ -56,6 +58,8 @@ def read_file(
         start: First line (1-indexed).
         end: Last line inclusive; defaults to start + 499. Capped at start + 499.
     """
+    if start < 1:
+        raise ValueError(f"start must be >= 1, got {start}")
     target = _resolve_within_root(ctx.context.root, path)
     lines = target.read_text().splitlines()
     max_end = min(start + 499, len(lines))
@@ -87,6 +91,8 @@ def grep(
         text=True,
         check=False,
     )
+    if result.returncode == 2:
+        raise RuntimeError(f"rg failed: {result.stderr.strip()}")
     return result.stdout.splitlines()
 
 
