@@ -1,0 +1,13 @@
+[project]
+name = "halo-claude-agents-demo"
+version = "0.1.0"
+description = "HALO demo: Claude Agent SDK with OTEL tracing (Claude Code native telemetry + OpenInference AGENT wrapper)"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk[otel]",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+    "typer",
+    "rich",
+    "python-dotenv",
+]
