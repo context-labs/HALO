@@ -35,13 +35,6 @@ uv run main.py "..." --root ../..
 
 Or put those two variables in `.env` instead of exporting.
 
-## Smoke test without any receiver
-
-```bash
-OTEL_TRACES_EXPORTER=console uv run main.py "list the python files" --root ../..
-```
-Spans print to stdout as JSON-ish blocks. Useful to sanity-check that tracing is wired up without running the interceptor.
-
 ## Requirements
 
 - Python 3.12+ (managed by uv)
@@ -50,7 +43,7 @@ Spans print to stdout as JSON-ish blocks. Useful to sanity-check that tracing is
 
 ## How it works
 
-- `tracing.py` — ~25 lines wiring OpenInference's OpenAI Agents instrumentor onto an OTEL `TracerProvider` with either an OTLP HTTP exporter or a console exporter.
+- `tracing.py` — ~20 lines wiring OpenInference's OpenAI Agents instrumentor onto an OTEL `TracerProvider` with an OTLP HTTP exporter.
 - `agent.py` — three `@function_tool`s scoped to a `--root` directory; one `Agent` with instructions that push toward a list/grep → read → answer loop.
 - `main.py` — typer CLI that loads `.env`, calls `setup_tracing()`, and runs the agent via `Runner.run_sync`.
 
