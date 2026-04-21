@@ -35,7 +35,7 @@ def setup_tracing(service_name: str = "halo-claude-agents-demo") -> TracerProvid
 
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(resource=resource)
-    endpoint = f"{os.environ['OTEL_EXPORTER_OTLP_ENDPOINT']}/v1/traces"
+    endpoint = f"{os.environ['OTEL_EXPORTER_OTLP_ENDPOINT'].rstrip('/')}/v1/traces"
     provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
     trace.set_tracer_provider(provider)
     return provider
