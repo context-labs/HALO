@@ -34,6 +34,7 @@ async def _run(question: str, root: Path, model: str) -> str:
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         last_text = block.text
+    assert last_text, "agent produced no assistant text"
     return last_text
 
 
