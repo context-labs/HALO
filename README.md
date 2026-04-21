@@ -1,2 +1,15 @@
 # HALO
-Hierarchal Agent Loop Optimizer
+
+**H**ierarchical **A**gent **L**oop **O**ptimizer — open-source tooling for capturing, reviewing, and improving agent traces.
+
+HALO ships minimal demos that show how to wire any agent framework to OpenTelemetry using [OpenInference](https://github.com/Arize-ai/openinference) attribute conventions. Traces can be captured locally with the [otel-interceptor](https://github.com/context-labs/otel-interceptor) or sent to the HALO hosted ingest service.
+
+## Demos
+
+- [`demo/openai-agents-sdk-demo/`](demo/openai-agents-sdk-demo) — OpenAI Agents SDK with OTEL tracing. Multi-turn tool calls over a local codebase.
+
+More demos (Claude Agent SDK, integration guides) coming soon.
+
+## License
+
+MIT. See `LICENSE` when added.
