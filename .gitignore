@@ -1,0 +1,12 @@
+# Personal design/planning docs — not part of the open-source surface
+docs/superpowers/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Local environment files (but keep the template)
+.env
+!.env.example

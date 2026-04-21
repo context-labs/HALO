@@ -1,0 +1,14 @@
+[project]
+name = "halo-openai-agents-demo"
+version = "0.1.0"
+description = "HALO demo: OpenAI Agents SDK with OpenInference OTEL tracing"
+requires-python = ">=3.12"
+dependencies = [
+    "openai-agents",
+    "openinference-instrumentation-openai-agents",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+    "typer",
+    "rich",
+    "python-dotenv",
+]
