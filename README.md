@@ -2,13 +2,14 @@
 
 **H**ierarchical **A**gent **L**oop **O**ptimizer — open-source tooling for capturing, reviewing, and improving agent traces.
 
-HALO ships minimal demos that show how to wire any agent framework to OpenTelemetry using [OpenInference](https://github.com/Arize-ai/openinference) attribute conventions. Traces can be captured locally with the [otel-interceptor](https://github.com/context-labs/otel-interceptor) or sent to the HALO hosted ingest service.
+HALO ships minimal demos that show how to wire any agent framework to OpenTelemetry. Traces can be captured locally with the [otel-interceptor](https://github.com/context-labs/otel-interceptor) or sent to the HALO hosted ingest service.
 
 ## Demos
 
-- [`demo/openai-agents-sdk-demo/`](demo/openai-agents-sdk-demo) — OpenAI Agents SDK with OTEL tracing. Multi-turn tool calls over a local codebase.
+- [`demo/openai-agents-sdk-demo/`](demo/openai-agents-sdk-demo) — OpenAI Agents SDK with OpenInference tracing. Multi-turn tool calls over a local codebase; custom `@function_tool`s for `list_files`/`grep`/`read_file`.
+- [`demo/claude-agent-sdk-demo/`](demo/claude-agent-sdk-demo) — Claude Agent SDK with Claude Code native telemetry plus an OpenInference `AGENT` wrapper span. Multi-turn tool calls over a local codebase using Claude Code's built-in `Read`/`Grep`/`Glob`.
 
-More demos (Claude Agent SDK, integration guides) coming soon.
+Integration guides (one per framework) land in `docs/` in the next phase.
 
 ## RLM harness
 
