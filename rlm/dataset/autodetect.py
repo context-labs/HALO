@@ -20,12 +20,37 @@ from typing import Any
 
 from dataset._fastjson import loads as _loads
 from dataset.descriptor import (
+    ClaudeCodeMapping,
     DatasetDescriptor,
     HFMapping,
     Label,
     Metric,
     OpenInferenceMapping,
 )
+
+
+def _sniff_otlp_format(records: list[dict[str, Any]]) -> str | None:
+    """Peek at sampled records and return ``"claude_code"`` /
+    ``"openinference"`` when the data looks like an OTLP span-tree JSONL,
+    or ``None`` when it's not OTLP (HF-style flat records).
+
+    The decision is cheap: any span whose ``name`` starts with
+    ``claude_code.`` wins the Claude Code path (stable signature of the
+    Claude Code CLI's native telemetry). If the records look like OTLP
+    span trees (``spans`` array present) but no ``claude_code.*`` span
+    is seen, fall back to OpenInference.
+    """
+    otlp_votes = 0
+    for r in records[:8]:
+        spans = r.get("spans") if isinstance(r, dict) else None
+        if not isinstance(spans, list):
+            continue
+        otlp_votes += 1
+        for span in spans:
+            name = str((span or {}).get("name") or "")
+            if name.startswith("claude_code."):
+                return "claude_code"
+    return "openinference" if otlp_votes >= 1 else None
 
 
 # Name hints (ordered by preference). We check if the hint path exists on
@@ -255,6 +280,30 @@ def infer_descriptor(
     did = dataset_id or _slug_from_path(jsonl_path)
     disp_name = name or jsonl_path.stem
 
+    # OTLP span-tree fast path: skip the HF-style field detection entirely.
+    # OpenInference / Claude Code span-tree files have canonical attribute
+    # names, so the mapping itself is the whole descriptor.
+    otlp_fmt = _sniff_otlp_format(records)
+    if otlp_fmt is not None:
+        mapping: OpenInferenceMapping | ClaudeCodeMapping = (
+            ClaudeCodeMapping() if otlp_fmt == "claude_code"
+            else OpenInferenceMapping()
+        )
+        descriptor = DatasetDescriptor(
+            id=did,
+            name=disp_name,
+            source_path=jsonl_path,
+            mapping=mapping,
+            source_model=source_model,
+            description=description,
+            primary_metric=None,
+            ground_truth_source=None,
+            labels=[],
+        )
+        report.fields = {"format": otlp_fmt, "mapping": type(mapping).__name__}
+        report.notes.append(f"detected OTLP span-tree format: {otlp_fmt}")
+        return descriptor, report
+
     id_field = _first_present(records, _ID_HINTS) or "id"
     query_field = _first_present(records, _QUERY_HINTS) or "query"
     messages_field = _detect_messages_field(records)
@@ -384,6 +433,14 @@ def descriptor_to_python(descriptor: DatasetDescriptor) -> str:
             f"    ),\n"
         )
         imports = "from dataset import DatasetDescriptor, HFMapping, Label, Metric"
+    elif isinstance(d.mapping, ClaudeCodeMapping):
+        m = d.mapping
+        mapping_block = (
+            f"    mapping=ClaudeCodeMapping(\n"
+            f"        id_attribute={m.id_attribute!r},\n"
+            f"    ),\n"
+        )
+        imports = "from dataset import ClaudeCodeMapping, DatasetDescriptor, Label, Metric"
     else:
         assert isinstance(d.mapping, OpenInferenceMapping)
         m = d.mapping

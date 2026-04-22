@@ -31,3 +31,10 @@ packages = ["cli.py", "registry.py", "catalog", "dataset", "inference", "utils",
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    # Pulled in by ``dataset.translators.hf_to_openinference`` in the test suite.
+    "datasets>=2.0",
+]
