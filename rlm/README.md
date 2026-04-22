@@ -1,14 +1,25 @@
 # HALO RLM
 
 The HALO Recursive Language Model harness — an LLM-driven agent for
-exploring large agent-trace datasets (OpenInference format).
+exploring large agent-trace datasets.
 
-Point it at a JSONL of traces (local path, or the file that
+Point it at a JSONL of OTLP span trees (local path, or the file that
 [`otel-interceptor`](https://github.com/context-labs/otel-interceptor) or
 the HALO hosted ingest dumps), register it with a ~30-line *descriptor*,
 and ask natural-language questions. The agent plans tool calls, drills
 into specific traces, runs sandboxed Python against the index, and
 synthesizes answers grounded in the data.
+
+**Supported trace formats** — auto-detected on ingest:
+
+| Format | When it's produced | Detected via |
+|---|---|---|
+| **OpenInference** | OpenAI Agents SDK, Anthropic, custom framework with [OpenInference](https://github.com/Arize-ai/openinference) conventions | `openinference.span.kind` attribute on spans |
+| **Claude Code** | Claude Agent SDK (Claude Code CLI's native OTel) | span names under the `claude_code.*` namespace |
+| **HF** | Flat JSONL (HuggingFace-style record-per-line) — no OTel | Fallback when no OTLP span tree is present |
+
+`halo ingest` sniffs the first parseable record and picks the right
+mapping automatically. No flags required.
 
 Answers stream token-by-token. Conversations are multi-turn with
 disk-persisted state and context compaction so long sessions don't blow
@@ -88,11 +99,21 @@ uv run halo serve            # http://localhost:8000
 Set `HALO_AUTH_USER` / `HALO_AUTH_PASS` in `.env` to gate the UI with
 HTTP Basic Auth.
 
+### Tests
+
+```bash
+uv sync --group dev          # adds pytest + datasets
+uv run pytest tests/         # 26 tests; covers indexer, autodetect,
+                             # compactor, sandbox, both OpenInference
+                             # and Claude Code views.
+```
+
 ## Hosted endpoint
 
 The same harness is productionized as a Modal HTTP endpoint so you can
 call it over HTTPS without running anything locally. Input: an S3 /
-R2 / HTTPS URL to an OpenInference JSONL + an OpenAI-format `messages`
+R2 / HTTPS URL to a JSONL of OTLP span trees (OpenInference or Claude
+Code native — auto-detected per request) + an OpenAI-format `messages`
 list. Output: the full agent run — events, tool calls, tool results,
 final assistant message, cost. The endpoint also exposes an
 OpenAI-compatible `/v1/chat/completions` shim so any OpenAI SDK can
@@ -119,7 +140,10 @@ print(resp.choices[0].message.content)
 
 | Module | Responsibility |
 |---|---|
-| `dataset/descriptor.py` | `DatasetDescriptor` — central abstraction for describing any trace JSONL. |
+| `dataset/descriptor.py` | `DatasetDescriptor` — central abstraction for describing any trace JSONL; holds a `HFMapping` / `OpenInferenceMapping` / `ClaudeCodeMapping`. |
+| `dataset/formats/openinference.py` | View over OpenInference-shaped OTLP span trees — `llm.input_messages.*`, `tool.name`, `openinference.span.kind`. |
+| `dataset/formats/claude_code.py` | View over Claude Code native OTel (`claude_code.interaction` / `llm_request` / `tool` spans + `tool.output` span events). |
+| `dataset/autodetect.py` | `halo ingest` sniff path — picks HF / OpenInference / Claude Code by looking at the first parseable record. |
 | `dataset/indexer.py` | Descriptor-driven one-pass scan; emits a `TraceSummary` per line with byte offsets. |
 | `dataset/reader.py` | Random-access fetch of one full record by byte offset. |
 | `dataset/store.py` | In-memory store + filter + `overview()` aggregates. |

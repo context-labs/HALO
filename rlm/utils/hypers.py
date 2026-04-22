@@ -1,10 +1,7 @@
-"""Dataclass-based configuration with automatic CLI generation and config file support.
+"""Dataclass-based configuration with automatic CLI generation.
 
-Define a config as a dataclass inheriting from Hypers. Every field becomes a CLI
-argument automatically. Config files (plain Python) can override defaults, and
-CLI arguments override everything.
-
-Layer order: defaults → config file → CLI args
+Define a config as a dataclass inheriting from Hypers. Every field becomes a
+CLI argument automatically. Values are resolved as: defaults → CLI args.
 
 Usage::
 
@@ -18,20 +15,13 @@ Usage::
     # Just defaults:
     #   uv run my-project generate
 
-    # With config file override:
-    #   uv run my-project generate configs/fast.py
+    # With a CLI override:
+    #   uv run my-project generate --temperature 0.5
 
-    # With config file + CLI override:
-    #   uv run my-project generate configs/fast.py --temperature 0.5
-
-Config files are plain Python with variable assignments::
-
-    # configs/fast.py
-    model = "gpt-4o-mini"
-    temperature = 0.2
-    workers = 16
-
-Vendored from https://github.com/vmasrani/machine_learning_helpers
+Vendored from https://github.com/vmasrani/machine_learning_helpers; the
+config-file loading path was removed because nobody used it and scanning
+argv for ``*.py`` tokens led to arbitrary code execution when other CLIs
+(pytest, modal) happened to pass file paths through.
 """
 
 from __future__ import annotations
@@ -39,24 +29,12 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import Field, dataclass, field, fields
-from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
 from rich.console import Console
 from rich.table import Table
 
 _console = Console()
-
-
-def _is_notebook() -> bool:
-    """Check if code is running inside a Jupyter notebook."""
-    try:
-        from IPython.core.getipython import get_ipython  # type: ignore[import-not-found]
-
-        shell = get_ipython()
-        return shell is not None and shell.__class__.__name__ == "ZMQInteractiveShell"
-    except ImportError:
-        return False
 
 
 def _resolve_type(type_hint: Any) -> type | None:
@@ -122,24 +100,6 @@ def _add_to_parser(
         parser.add_argument(f"--{name}", type=type(val), default=val)
 
 
-def read_config(file: str | Path) -> dict[str, Any]:
-    """Read a Python config file and return its variables as a dict.
-
-    Config files are plain Python files with variable assignments.
-    Variables starting with '_' are ignored.
-
-    Args:
-        file: Path to the Python config file.
-
-    Returns:
-        Dict of variable names to values.
-    """
-    variables: dict[str, Any] = {}
-    with open(file, encoding="utf-8") as f:
-        exec(f.read(), variables)  # noqa: S102
-    return {k: v for k, v in variables.items() if not k.startswith("_")}
-
-
 def TBD(default: Any = None) -> Any:  # noqa: N802
     """Mark a field as "to be determined" — excluded from CLI args and __init__.
 
@@ -161,13 +121,13 @@ def TBD(default: Any = None) -> Any:  # noqa: N802
 
 @dataclass(repr=False)
 class Hypers:
-    """Base class for configuration dataclasses with CLI and config file support.
+    """Base class for configuration dataclasses with automatic CLI generation.
 
     Subclass this with your config fields. On instantiation, fields are set
-    in order: defaults → config file → CLI args. Each layer overrides the previous.
+    in order: defaults → CLI args. CLI overrides everything.
 
-    The ``__str__`` method displays a color-coded table showing where each value
-    came from (default, config file, or CLI).
+    The ``__str__`` method displays a color-coded table showing where each
+    value came from (default vs. CLI).
 
     Example::
 
@@ -185,63 +145,50 @@ class Hypers:
             delattr(cls, "__repr__")
 
     def __post_init__(self) -> None:
-        """Apply the layered override: defaults → config file → CLI args."""
+        """Apply the layered override: defaults → CLI args."""
         self._raise_untyped()
 
-        argv, changed_args = self._init_argparse()
-        file_vars = self._parse_config_files(argv)
+        changed_args = self._init_argparse()
 
-        # Track where each value came from for display
+        # Track where each value came from for display.
         cli_names = {k for k, _ in changed_args}
-        config_names = {arg for var in file_vars.values() for arg in var}
         self._source: dict[str, str] = {}
         for f in self._all_fields():
-            if f.name in cli_names:
-                self._source[f.name] = "cli"
-            elif f.name in config_names:
-                self._source[f.name] = "config"
-            else:
-                self._source[f.name] = "default"
+            self._source[f.name] = "cli" if f.name in cli_names else "default"
 
-        # Apply config file values
-        for variables in file_vars.values():
-            for name, value in variables.items():
-                self.set(name, value)
-
-        # Apply CLI values (highest priority)
+        # Apply CLI values (highest priority).
         for k, v in changed_args:
             self.set(k, v)
 
-    def _init_argparse(self) -> tuple[list[str], list[tuple[str, Any]]]:
+    def _init_argparse(self) -> list[tuple[str, Any]]:
         """Build an argparse parser from dataclass fields and parse sys.argv.
 
+        Only dataclass fields become CLI args; anything else in argv (e.g.
+        ``pytest`` test-file paths, ``modal run`` entrypoint paths) is
+        ignored via ``parse_known_args``.
+
         Returns:
-            Tuple of (remaining argv not consumed by argparse, list of (name, value)
-            pairs for args explicitly passed on the command line).
+            List of ``(name, value)`` pairs for fields the caller
+            explicitly passed on the command line. Fields left at their
+            dataclass defaults don't appear here.
         """
         parser = argparse.ArgumentParser(allow_abbrev=False)
         hints = get_type_hints(type(self))
         for f in self._all_fields():
             _add_to_parser(parser, f.name, self.get(f.name), hints.get(f.name))
 
-        args, argv = parser.parse_known_args()
-        keys = [arg.replace("--", "").split("=")[0] for arg in sys.argv[1:] if arg.startswith("--")]
-        changed_args = [(k, getattr(args, k)) for k in keys if hasattr(args, k)]
-        return argv, changed_args
-
-    def _parse_config_files(self, argv: list[str]) -> dict[str, dict[str, Any]]:
-        """Extract and parse .py config files from the remaining argv.
-
-        Args:
-            argv: Remaining command line arguments after argparse consumed known args.
-
-        Returns:
-            Dict mapping config file paths to their parsed variables.
-        """
-        if _is_notebook():
-            return {}
-        configs = [f for f in argv if f.endswith(".py")]
-        return {cfg: read_config(cfg) for cfg in configs}
+        args, _ = parser.parse_known_args()
+        # "Explicit" means the flag was literally present in sys.argv.
+        # argparse alone can't tell — it fills in the default either way.
+        changed_args: list[tuple[str, Any]] = []
+        field_names = {f.name for f in self._all_fields()}
+        for raw in sys.argv[1:]:
+            if not raw.startswith("--"):
+                continue
+            key = raw.removeprefix("--").split("=", 1)[0]
+            if key in field_names and hasattr(args, key):
+                changed_args.append((key, getattr(args, key)))
+        return changed_args
 
     def _all_fields(self) -> list[Field[Any]]:
         """Return all dataclass fields that participate in __init__."""
@@ -307,7 +254,7 @@ class Hypers:
     def __str__(self) -> str:
         """Render a Rich table showing config values and their sources.
 
-        Color coding: [blue]default[/], [magenta]config file[/], [yellow]CLI override[/].
+        Color coding: [blue]default[/], [yellow]CLI override[/].
         """
         table = Table(title="Config", show_header=True, header_style="bold")
         table.add_column("Parameter", style="dim")
@@ -315,7 +262,7 @@ class Hypers:
         table.add_column("Source")
 
         source = getattr(self, "_source", {})
-        style_map = {"default": "blue", "config": "magenta", "cli": "yellow"}
+        style_map = {"default": "blue", "cli": "yellow"}
 
         for f in self._all_fields():
             name = f.name

@@ -173,7 +173,36 @@ class OpenInferenceMapping:
     id_attribute: str | None = None
 
 
-FormatMapping = Union[HFMapping, OpenInferenceMapping]
+@dataclass
+class ClaudeCodeMapping:
+    """How to read Claude Code native OTel span trees.
+
+    Claude Code's CLI subprocess emits traces under its own ``claude_code.*``
+    span namespace (see Anthropic's Claude Code OTel docs,
+    https://docs.claude.com/en/docs/claude-code/monitoring-usage). The shape
+    is ``claude_code.interaction → [claude_code.llm_request |
+    claude_code.tool{.blocked_on_user, .execution}]``. Semantic content
+    sits across span attributes *and* span events:
+
+    * ``user_prompt`` on the interaction span (gated by ``OTEL_LOG_USER_PROMPTS``)
+    * ``tool_name`` / ``file_path`` / ``full_command`` on ``claude_code.tool``
+      (details gated by ``OTEL_LOG_TOOL_DETAILS``)
+    * A ``tool.output`` span *event* on ``claude_code.tool`` carrying
+      ``content``/``output``/``bash_command``/``file_path`` (gated by
+      ``OTEL_LOG_TOOL_CONTENT``)
+    * token counts on each ``claude_code.llm_request``
+
+    These traces never carry assistant text messages (Claude Code doesn't
+    emit prompt/completion content in the stable span schema). Assistant
+    reasoning is only visible if the producer also enables
+    ``OTEL_LOG_RAW_API_BODIES``, which emits log events — a separate
+    signal out of scope for this view.
+    """
+
+    id_attribute: str | None = None
+
+
+FormatMapping = Union[HFMapping, OpenInferenceMapping, ClaudeCodeMapping]
 
 
 # ----------------------------------------------------------------------
@@ -226,8 +255,12 @@ class DatasetDescriptor:
     # --- Convenience ---
 
     @property
-    def format(self) -> Literal["hf", "openinference"]:
-        return "openinference" if isinstance(self.mapping, OpenInferenceMapping) else "hf"
+    def format(self) -> Literal["hf", "openinference", "claude_code"]:
+        if isinstance(self.mapping, ClaudeCodeMapping):
+            return "claude_code"
+        if isinstance(self.mapping, OpenInferenceMapping):
+            return "openinference"
+        return "hf"
 
     @property
     def has_documents(self) -> bool:
