@@ -196,7 +196,7 @@ See [utils/llm/README.md](llm/README.md) for full documentation: local models, t
 
 ## `utils.hypers`
 
-Dataclass-based configuration with layered overrides: **defaults -> config file -> CLI args**. Define your config once as a dataclass, and every field automatically becomes a CLI argument.
+Dataclass-based configuration with a simple two-layer override: **defaults -> CLI args**. Define your config once as a dataclass, and every field automatically becomes a CLI argument.
 
 ### Defining a config
 
@@ -215,41 +215,27 @@ class InferenceConfig(Hypers):
     output_path: str = "data/traces.jsonl"
 ```
 
-Instantiate it and the layered override kicks in automatically:
+Instantiate it and CLI parsing + override kicks in automatically:
 
 ```python
 config = InferenceConfig()
 print(config)  # prints a color-coded table
 ```
 
-### Config files
-
-Config files are plain Python with variable assignments. Any subset of fields can be overridden:
-
-```python
-# configs/fast.py
-model = "gpt-4o-mini"
-temperature = 0.2
-workers = 16
-```
-
-Pass config files as positional arguments on the command line:
-
-```bash
-uv run my-project generate configs/fast.py
-```
-
 ### CLI overrides
 
-Every field becomes a `--field_name` CLI argument automatically. CLI args take highest priority:
+Every field becomes a `--field_name` CLI argument automatically. CLI args override defaults:
 
 ```bash
-# Override a single field
+# Override one field
 uv run my-project generate --temperature 0.5
 
-# Config file + CLI override (CLI wins)
-uv run my-project generate configs/fast.py --temperature 0.5
+# Override several
+uv run my-project generate --model gpt-4o-mini --workers 16
 ```
+
+Unknown CLI args are silently ignored (via ``argparse.parse_known_args``) so
+you can embed a ``Hypers`` config inside a larger CLI without conflicts.
 
 ### `TBD()` for computed fields
 
@@ -288,7 +274,6 @@ print(config.output_path)  # Path("data/traces.jsonl")
 Printing a config displays a Rich table showing each parameter's value and where it came from:
 
 - **Blue**: default value
-- **Magenta**: from a config file
 - **Yellow**: from a CLI argument
 
 ```python
@@ -298,13 +283,13 @@ print(config)
 
 ```
          Config
-┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┓
-┃ Parameter   ┃ Value  ┃ Source  ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
-│ model       │ gpt-4o │ default │
-│ temperature │ 0.5    │ cli     │
-│ workers     │ 16     │ config  │
-└─────────────┴────────┴─────────┘
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┓
+┃ Parameter   ┃ Value       ┃ Source  ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━┩
+│ model       │ gpt-4o      │ default │
+│ temperature │ 0.5         │ cli     │
+│ workers     │ 16          │ cli     │
+└─────────────┴─────────────┴─────────┘
 ```
 
 ### API

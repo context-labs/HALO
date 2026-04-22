@@ -12,6 +12,7 @@ registering it in :func:`view_from_record`.
 from __future__ import annotations
 
 from dataset.descriptor import (
+    ClaudeCodeMapping,
     DatasetDescriptor,
     HFMapping,
     OpenInferenceMapping,
@@ -37,6 +38,9 @@ def view_from_record(record: dict, descriptor: DatasetDescriptor) -> TraceView:
     descriptor's ``mapping`` type. Sole entry point used by indexer + tools.
     """
     m = descriptor.mapping
+    if isinstance(m, ClaudeCodeMapping):
+        from dataset.formats.claude_code import ClaudeCodeTraceView
+        return ClaudeCodeTraceView(record, descriptor)
     if isinstance(m, OpenInferenceMapping):
         from dataset.formats.openinference import OpenInferenceTraceView
         return OpenInferenceTraceView(record, descriptor)
@@ -45,5 +49,6 @@ def view_from_record(record: dict, descriptor: DatasetDescriptor) -> TraceView:
         return HFTraceView(record, descriptor)
     raise TypeError(
         f"unknown format mapping type {type(m).__name__!r} on descriptor "
-        f"{descriptor.id!r}; expected HFMapping or OpenInferenceMapping"
+        f"{descriptor.id!r}; expected HFMapping, OpenInferenceMapping, or "
+        f"ClaudeCodeMapping"
     )

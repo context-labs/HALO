@@ -28,6 +28,7 @@ from typing import Any
 
 from dataset._fastjson import loads as _fast_loads
 from dataset.descriptor import (
+    ClaudeCodeMapping,
     DatasetDescriptor,
     HFMapping,
     Label,
@@ -59,15 +60,20 @@ def _sample_records(path: Path, n: int) -> list[dict[str, Any]]:
 
 
 def _detect_format(records: list[dict[str, Any]]) -> str:
-    """Return ``"openinference"`` if records look like OTLP span trees,
-    otherwise ``"hf"``."""
-    oi_votes = 0
+    """Return ``"claude_code"`` / ``"openinference"`` / ``"hf"`` based on
+    a cheap peek. OTLP span trees (``spans: [...]``) that contain any
+    span named ``claude_code.*`` are Claude Code native telemetry;
+    otherwise span-tree records are OpenInference. Everything else is
+    assumed to be flat HF records."""
+    otlp_votes = 0
     for r in records[:8]:
         if "spans" in r and isinstance(r.get("spans"), list):
-            oi_votes += 1
-        if "traceId" in r and "spans" in r:
-            oi_votes += 1
-    return "openinference" if oi_votes >= 4 else "hf"
+            otlp_votes += 1
+            for span in r.get("spans") or []:
+                name = str((span or {}).get("name") or "")
+                if name.startswith("claude_code."):
+                    return "claude_code"
+    return "openinference" if otlp_votes >= 3 else "hf"
 
 
 def _prompt(records: list[dict[str, Any]], fmt: str, filename: str) -> str:
@@ -87,7 +93,7 @@ Return a JSON object with the following shape (no prose around it):
 
 ```json
 {{
-  "format": "hf" | "openinference",
+  "format": "hf" | "openinference" | "claude_code",
   "id": "<url-safe slug based on the filename>",
   "name": "<short human-readable display name>",
   "description": "<1-2 sentence summary of what the agent is doing>",
@@ -106,8 +112,8 @@ Return a JSON object with the following shape (no prose around it):
     "tool_calls_total_field": "<dotted path>",
     "tool_errors_field": "<dotted path>"
 
-    // For openinference: leave id_attribute null unless a non-standard
-    // trace-id attribute is present on the root span
+    // For openinference or claude_code: leave id_attribute null unless
+    // a non-standard trace-id attribute is present on the root span
     // "id_attribute": "<attribute key or null>"
   }},
 
@@ -172,8 +178,12 @@ def _build_descriptor(spec: dict[str, Any], source_path: Path) -> DatasetDescrip
     """
     fmt = spec.get("format", "hf")
     mraw = spec.get("mapping") or {}
-    if fmt == "openinference":
-        mapping: OpenInferenceMapping | HFMapping = OpenInferenceMapping(
+    if fmt == "claude_code":
+        mapping: OpenInferenceMapping | HFMapping | ClaudeCodeMapping = ClaudeCodeMapping(
+            id_attribute=mraw.get("id_attribute"),
+        )
+    elif fmt == "openinference":
+        mapping = OpenInferenceMapping(
             id_attribute=mraw.get("id_attribute"),
         )
     else:
