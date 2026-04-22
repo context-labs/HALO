@@ -1,50 +1,25 @@
 # HALO demo: OpenAI Agents SDK with OTEL tracing
 
-A minimal OpenAI Agents SDK agent that answers questions about a local codebase using three read-only tools (`list_files`, `grep`, `read_file`). Every LLM call, tool call, and agent turn is exported as an OTEL trace with [OpenInference](https://github.com/Arize-ai/openinference) attributes.
+Runnable example for [`docs/integrations/openai-agents-sdk.md`](../../docs/integrations/openai-agents-sdk.md). A toy file-aware code helper: three tools (`list_files`, `grep`, `read_file`) scoped to `--root`; multi-turn loop that answers questions with file:line citations.
 
-## Run it locally (self-hosted sink)
+## Run it
 
-You need the [otel-interceptor](https://github.com/context-labs/otel-interceptor) running in another terminal.
+Prereqs: ripgrep on `$PATH`, an OpenAI API key, and a clone of [github.com/context-labs/otel-interceptor](https://github.com/context-labs/otel-interceptor).
 
 ```bash
 # Terminal 1 — interceptor
 cd ~/dev/otel-interceptor
-task install
-task start
+task install && task start
 
-# Terminal 2 — demo
+# Terminal 2 — compactor (one-line-per-trace JSONL)
+cd ~/dev/otel-interceptor
+task compact:watch:all
+
+# Terminal 3 — demo
 cd ~/dev/HALO/demo/openai-agents-sdk-demo
 uv sync
-cp .env.example .env      # fill in OPENAI_API_KEY
+cp .env.example .env                # fill in OPENAI_API_KEY
 uv run main.py "Where is tracing configured in this repo?" --root ../..
-
-# Terminal 3 (optional) — watch captured traces
-cd ~/dev/otel-interceptor
-task tail:traces
 ```
 
-Captured spans land in `~/dev/otel-interceptor/data/traces.ndjson`. Run `task compact:traces` in that repo to get one-line-per-trace JSONL.
-
-## Run it against the HALO hosted ingest (when available)
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.halo.inference.net/v1/traces
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer sk_live_..."
-uv run main.py "..." --root ../..
-```
-
-Or put those two variables in `.env` instead of exporting.
-
-## Requirements
-
-- Python 3.12+ (managed by uv)
-- `rg` (ripgrep) on `$PATH`
-- An OpenAI API key in `.env`
-
-## How it works
-
-- `tracing.py` — ~20 lines wiring OpenInference's OpenAI Agents instrumentor onto an OTEL `TracerProvider` with an OTLP HTTP exporter.
-- `agent.py` — three `@function_tool`s scoped to a `--root` directory; one `Agent` with instructions that push toward a list/grep → read → answer loop.
-- `main.py` — typer CLI that loads `.env`, calls `setup_tracing()`, and runs the agent via `Runner.run_sync`.
-
-The entirety of the "how do I add OTEL to my own OpenAI Agents app" integration lives in `tracing.py`. Copy that file into your project, import `setup_tracing()`, call it once at startup, done.
+Compacted traces land in `~/dev/otel-interceptor/data/traces-by-trace.jsonl`. For integration into your own app, hosted sink setup, and trace shape, see [`docs/integrations/openai-agents-sdk.md`](../../docs/integrations/openai-agents-sdk.md).
