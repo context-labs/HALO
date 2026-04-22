@@ -1,0 +1,31 @@
+"""Starter descriptor. Copy to ``<your-dataset-id>.py`` and edit.
+
+Any ``.py`` module in ``catalog/`` that exposes a ``DESCRIPTOR`` attribute is
+auto-registered. Modules starting with ``_`` are skipped.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from dataset import DatasetDescriptor, OutcomeSpec
+
+DESCRIPTOR = DatasetDescriptor(
+    id="my_dataset",
+    name="My Dataset",
+    source_path=Path("/path/to/traces.jsonl"),
+    source_model="some-model",
+    description="Short blurb shown in the UI.",
+    id_field="query_id",
+    query_field="query",
+    messages_field="messages",
+    final_answer_field="final_answer",
+    # Leave these as None if the dataset doesn't have them.
+    ground_truth_field=None,
+    outcome_field=None,
+    outcome=OutcomeSpec(kind="none"),
+    documents_field=None,
+    document_path_field=None,
+    label_fields=[],
+    seed_questions=[],
+)
