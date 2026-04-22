@@ -10,6 +10,7 @@ every dataset is described by a ``DatasetDescriptor`` and the rest adapts.
 from __future__ import annotations
 
 from dataset.descriptor import (
+    ClaudeCodeMapping,
     DatasetDescriptor,
     FormatMapping,
     HFMapping,
@@ -36,6 +37,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "ClaudeCodeMapping",
     "DatasetDescriptor",
     "FormatMapping",
     "HFMapping",
