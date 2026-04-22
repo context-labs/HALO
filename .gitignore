@@ -10,3 +10,6 @@ __pycache__/
 # Local environment files (but keep the template)
 .env
 !.env.example
+
+# RLM harness runtime artefacts — indexes, conversations, history
+rlm/data/
