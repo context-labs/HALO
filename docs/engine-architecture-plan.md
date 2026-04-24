@@ -394,10 +394,12 @@ Initial sandbox requirements:
 - No network.
 - Timeout.
 - Stdout/stderr caps.
+- Environment scrubbing: do not inherit host environment variables.
+- Read-only Python environment with `numpy`, `pandas`, and importable `TraceStore` modules.
 - Linux uses `bubblewrap`.
 - macOS uses `sandbox-exec`.
 
-The sandboxed code should only be able to read the trace JSONL file, the sidecar index file, and the minimal Python/runtime files needed to import `engine.traces`, `numpy`, and `pandas`. It should only be able to write inside its temporary working directory.
+The sandboxed code should only be able to read the trace JSONL file, the sidecar index file, a read-only Python environment, and the minimal Python/runtime files needed to import `engine.traces`, `numpy`, and `pandas`. It should only be able to write inside its temporary working directory. Do not bind the project root, home directory, or filesystem root into the sandbox.
 
 The sandbox Python environment should have `numpy` and `pandas` available. The bootstrap script should initialize and expose a `trace_store` variable so user code can inspect traces through the pure `TraceStore` API without manually loading files.
 
@@ -431,7 +433,9 @@ Execution flow:
 2. `SandboxRunner` creates a temporary working directory.
 3. `sandbox_bootstrap` writes a wrapper script that initializes `TraceStore`.
 4. `platform_commands` builds the Linux or macOS sandbox command.
-5. `sandbox_results` captures exit code, timeout, stdout, and stderr with configured output caps.
+5. `SandboxRunner` starts the process in its own session/process group.
+6. `sandbox_results` captures exit code, timeout, stdout, and stderr with configured output caps while reading output.
+7. On timeout, `SandboxRunner` kills the full process group, not just the immediate child process.
 
 ### Sandbox Package Components
 
@@ -468,27 +472,46 @@ def build_macos_sandbox_exec_command(
 
 `SandboxRunner` selects the right function based on `platform.system()`.
 
-Linux command construction should use `bubblewrap` with read-only binds for the trace/index inputs and a writable bind for the temp directory. The exact Python runtime mounts may vary by environment, but the policy shape should stay narrow:
+Linux command construction should use `bubblewrap` with read-only binds for the trace/index inputs, a read-only bind for the Python environment, and a writable bind for the temp directory. The exact Python runtime mounts may vary by environment, but the policy shape should stay narrow:
 
 ```text
 bwrap
   --die-with-parent
   --new-session
   --unshare-all
+  --unshare-net
+  --clearenv
   --ro-bind <trace_path> /mnt/trace/traces.jsonl
   --ro-bind <index_path> /mnt/trace/traces.jsonl.engine-index.jsonl
+  --ro-bind <python_environment_path> /venv
   --ro-bind <engine_traces_package_path> /opt/engine/traces
   --bind <temporary_work_dir> /workspace
+  --setenv PATH /venv/bin:/usr/bin:/bin
+  --setenv HOME /workspace
+  --setenv LANG C.UTF-8
+  --setenv PYTHONDONTWRITEBYTECODE 1
+  --setenv PYTHONUNBUFFERED 1
+  --setenv TMPDIR /workspace/tmp
   --chdir /workspace
   --proc /proc
   --dev /dev
-  -- <python_executable> /workspace/bootstrap.py
+  -- /venv/bin/python /workspace/bootstrap.py
 ```
 
-macOS command construction should use `sandbox-exec` with a generated profile that denies by default, allows read access only to the trace JSONL, index file, and required Python/package paths, allows writes only under the temp directory, and denies network access:
+`--unshare-net` is the explicit Linux network isolation. `--clearenv` prevents host secrets such as cloud credentials, API keys, and local configuration paths from leaking into the sandbox.
+
+macOS command construction should use `sandbox-exec` with a generated profile that denies by default, allows read access only to the trace JSONL, index file, read-only Python environment, and required Python/package paths, allows writes only under the temp directory, and denies network access. Use `env -i` to scrub the inherited host environment:
 
 ```text
-sandbox-exec -f <profile_path> <python_executable> <temporary_work_dir>/bootstrap.py
+sandbox-exec -f <profile_path>
+  env -i
+  PATH=<python_environment_path>/bin:/usr/bin:/bin
+  HOME=<temporary_work_dir>
+  LANG=C.UTF-8
+  PYTHONDONTWRITEBYTECODE=1
+  PYTHONUNBUFFERED=1
+  TMPDIR=<temporary_work_dir>/tmp
+  <python_environment_path>/bin/python <temporary_work_dir>/bootstrap.py
 ```
 
 The profile should follow this shape:
@@ -500,10 +523,13 @@ The profile should follow this shape:
 (deny network*)
 (allow file-read* (literal "<trace_path>"))
 (allow file-read* (literal "<index_path>"))
+(allow file-read* (subpath "<python_environment_path>"))
 (allow file-read* (subpath "<engine_traces_package_path>"))
 (allow file-read* (subpath "<python_runtime_path>"))
 (allow file-write* (subpath "<temporary_work_dir>"))
 ```
+
+Sandbox tests should include denied-operation cases for filesystem writes outside the temp directory, reads outside the allowed paths, and network access. These can be normal unit/integration tests rather than startup checks.
 
 `engine.sandbox.sandbox_bootstrap` owns the generated wrapper script that imports `TraceStore`, initializes it with the mounted trace/index paths, then runs user code.
 
