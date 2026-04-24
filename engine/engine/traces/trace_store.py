@@ -102,6 +102,22 @@ class TraceStore:
             total_output_tokens=sum(r.total_output_tokens for r in rows),
         )
 
+    def search_trace(self, trace_id: str, pattern: str) -> "TraceSearchResult":
+        from engine.traces.models.trace_query_models import TraceSearchResult
+
+        if trace_id not in self._rows_by_id:
+            raise KeyError(trace_id)
+        row = self._rows_by_id[trace_id]
+
+        matches: list[str] = []
+        with self._trace_path.open("rb") as fh:
+            for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
+                fh.seek(offset)
+                blob = fh.read(length).decode("utf-8", errors="replace")
+                if pattern in blob:
+                    matches.append(blob)
+        return TraceSearchResult(trace_id=trace_id, match_count=len(matches), matches=matches)
+
 
 def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
     if filters.has_errors is not None and row.has_errors != filters.has_errors:

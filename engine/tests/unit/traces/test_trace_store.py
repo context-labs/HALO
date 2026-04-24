@@ -79,3 +79,17 @@ async def test_overview_full(built_store: TraceStore) -> None:
     assert ov.error_trace_count == 1
     assert ov.total_input_tokens == 100 + 200 + 30
     assert ov.total_output_tokens == 50 + 40 + 10
+
+
+@pytest.mark.asyncio
+async def test_search_returns_matches(built_store: TraceStore) -> None:
+    result = built_store.search_trace("t-bbbb", "tool failure")
+    assert result.match_count >= 1
+    assert any("tool failure" in m for m in result.matches)
+
+
+@pytest.mark.asyncio
+async def test_search_no_match(built_store: TraceStore) -> None:
+    result = built_store.search_trace("t-aaaa", "nonexistent-needle")
+    assert result.match_count == 0
+    assert result.matches == []
