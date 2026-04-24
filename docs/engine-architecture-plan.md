@@ -246,6 +246,14 @@ There is one supported trace input format: flat JSONL with one canonical span pe
 
 No descriptors. No trace format adapters. No Claude Code / inference.net conversion layer.
 
+### Trace Schema Notes
+
+Each JSONL row is one span. `trace_id` groups spans into a trace, `span_id` identifies the span, and `parent_span_id` preserves the span tree. `attributes` preserves upstream OTel/OpenInference fields verbatim plus the `inference.*` canonical projections we can reliably extract.
+
+The trace models should keep this shape strongly typed without hiding the raw attributes. `SpanRecord` should model the top-level OTel fields, while `attributes` and `resource.attributes` remain typed JSON maps so tools can inspect original exported values when needed.
+
+The canonical `inference.*` attributes are the fields the index should prefer for summaries and filters. Original `llm.*` and OpenInference attributes are still available through `view_trace`, `search_trace`, and `render_trace`.
+
 ## Trace Architecture
 
 Trace functionality is split into two responsibilities.
@@ -288,7 +296,16 @@ Indexing does:
 - Store slim summary fields for query/count/overview.
 - Write sidecar index and meta files.
 
-`ensure_index_exists` only checks whether the index path exists. Existing indexes are loaded as-is. There is no freshness check.
+Default paths:
+
+- Index: `<trace_path>.engine-index.jsonl`
+- Metadata: `<trace_path>.engine-index.meta.json`
+
+Index files are build-once. `ensure_index_exists` only checks whether the index path exists. Existing indexes are loaded as-is. There is no freshness check.
+
+Index writing should be atomic: write temporary index/meta files first, then rename them into place. Read the trace file in binary mode so `byte_offset` and `byte_length` are exact for later `TraceStore` reads.
+
+If an existing index has an unsupported schema version, fail fast instead of rebuilding implicitly.
 
 ### TraceStore
 
@@ -355,6 +372,10 @@ trace_store = TraceStore.load(
     index_path=Path("/mnt/trace/traces.jsonl.engine-index.jsonl"),
 )
 
+# numpy and pandas are available for analysis code.
+import numpy as np
+import pandas as pd
+
 # User code can call:
 # trace_store.get_overview(...)
 # trace_store.query_traces(...)
@@ -368,12 +389,49 @@ Initial sandbox requirements:
 
 - Read-only trace file.
 - Read-only index file.
+- Read-only access to the minimal importable `engine.traces` modules, either through installed package files or a read-only source mount.
 - Writable temp dir.
 - No network.
 - Timeout.
 - Stdout/stderr caps.
 - Linux uses `bubblewrap`.
 - macOS uses `sandbox-exec`.
+
+The sandboxed code should only be able to read the trace JSONL file, the sidecar index file, and the minimal Python/runtime files needed to import `engine.traces`, `numpy`, and `pandas`. It should only be able to write inside its temporary working directory.
+
+The sandbox Python environment should have `numpy` and `pandas` available. The bootstrap script should initialize and expose a `trace_store` variable so user code can inspect traces through the pure `TraceStore` API without manually loading files.
+
+Basic sandbox models:
+
+```python
+class SandboxConfig(BaseModel):
+    timeout_seconds: float = 10.0
+    maximum_stdout_bytes: int = 64_000
+    maximum_stderr_bytes: int = 64_000
+    python_executable: Path | None = None
+
+
+class SandboxPolicy(BaseModel):
+    readonly_paths: list[Path]
+    writable_paths: list[Path]
+    network_enabled: Literal[False] = False
+    timeout_seconds: float
+
+
+class CodeExecutionResult(BaseModel):
+    exit_code: int
+    stdout: str
+    stderr: str
+    timed_out: bool
+```
+
+Execution flow:
+
+1. `run_code_tool` receives typed `RunCodeArguments`.
+2. `SandboxRunner` creates a temporary working directory.
+3. `sandbox_bootstrap` writes a wrapper script that initializes `TraceStore`.
+4. `platform_commands` builds the Linux or macOS sandbox command.
+5. `sandbox_results` captures exit code, timeout, stdout, and stderr with configured output caps.
 
 ### Sandbox Package Components
 
@@ -409,6 +467,43 @@ def build_macos_sandbox_exec_command(
 ```
 
 `SandboxRunner` selects the right function based on `platform.system()`.
+
+Linux command construction should use `bubblewrap` with read-only binds for the trace/index inputs and a writable bind for the temp directory. The exact Python runtime mounts may vary by environment, but the policy shape should stay narrow:
+
+```text
+bwrap
+  --die-with-parent
+  --new-session
+  --unshare-all
+  --ro-bind <trace_path> /mnt/trace/traces.jsonl
+  --ro-bind <index_path> /mnt/trace/traces.jsonl.engine-index.jsonl
+  --ro-bind <engine_traces_package_path> /opt/engine/traces
+  --bind <temporary_work_dir> /workspace
+  --chdir /workspace
+  --proc /proc
+  --dev /dev
+  -- <python_executable> /workspace/bootstrap.py
+```
+
+macOS command construction should use `sandbox-exec` with a generated profile that denies by default, allows read access only to the trace JSONL, index file, and required Python/package paths, allows writes only under the temp directory, and denies network access:
+
+```text
+sandbox-exec -f <profile_path> <python_executable> <temporary_work_dir>/bootstrap.py
+```
+
+The profile should follow this shape:
+
+```scheme
+(version 1)
+(deny default)
+(allow process*)
+(deny network*)
+(allow file-read* (literal "<trace_path>"))
+(allow file-read* (literal "<index_path>"))
+(allow file-read* (subpath "<engine_traces_package_path>"))
+(allow file-read* (subpath "<python_runtime_path>"))
+(allow file-write* (subpath "<temporary_work_dir>"))
+```
 
 `engine.sandbox.sandbox_bootstrap` owns the generated wrapper script that imports `TraceStore`, initializes it with the mounted trace/index paths, then runs user code.
 
@@ -509,6 +604,8 @@ Compaction uses two independent keep-last thresholds:
 - `text_message_compaction_keep_last_messages`: how many recent non-tool-call text messages remain uncompacted.
 - `tool_call_compaction_keep_last_messages`: how many recent tool-call-related messages remain uncompacted. Tool-call-related means assistant messages with non-empty `tool_calls` and `tool` role result messages.
 
+System messages are never compacted.
+
 `AgentContextItem` is the stored representation. `AgentMessage` is the OpenAI/HF-compatible message sent to the model. Available tool definitions are not stored on messages; they live on the OpenAI Agents SDK `Agent`.
 
 Compaction never removes an item from `AgentContext.items`. It only replaces `content` with a compacted summary and/or clears compacted `tool_calls`, then stores the original payload fields in `uncompacted_map[item_id]`. The item itself keeps the role, tool call id, name, and lineage metadata.
@@ -517,7 +614,7 @@ Compaction never removes an item from `AgentContext.items`. It only replaces `co
 
 The compacted summary string should include any tool names, arguments, or result details that matter for future reasoning. The original structured tool calls stay in `uncompacted_map[item_id].tool_calls`.
 
-For compacted `tool` role results, `to_messages_array` should preserve `role="tool"` only when its matching assistant message still emits a real tool call with the same `tool_call_id`. If the matching tool call was compacted, the tool result should render as an assistant summary message to avoid invalid provider message arrays.
+Message-array validity matters for tool calls. A `role="tool"` message is only valid when the message array also contains the matching assistant message with a real `tool_calls` entry for the same `tool_call_id`. If that assistant tool-call message was compacted, the corresponding tool result must render as an assistant summary message instead of a `tool` message.
 
 ### AgentContext Examples
 
@@ -760,6 +857,59 @@ tools/run_code_tool.py        # sandboxed python
 
 Keep tool implementation files readable. Each tool should be a small class with a typed arguments model and typed result model.
 
+Core tool functions should have explicit typed boundaries:
+
+```python
+async def get_dataset_overview(
+    tool_context: ToolContext,
+    arguments: DatasetOverviewArguments,
+) -> DatasetOverviewResult: ...
+
+
+async def query_traces(
+    tool_context: ToolContext,
+    arguments: QueryTracesArguments,
+) -> QueryTracesResult: ...
+
+
+async def count_traces(
+    tool_context: ToolContext,
+    arguments: CountTracesArguments,
+) -> CountTracesResult: ...
+
+
+async def view_trace(
+    tool_context: ToolContext,
+    arguments: ViewTraceArguments,
+) -> ViewTraceResult: ...
+
+
+async def search_trace(
+    tool_context: ToolContext,
+    arguments: SearchTraceArguments,
+) -> SearchTraceResult: ...
+
+
+async def get_context_item(
+    tool_context: ToolContext,
+    arguments: GetContextItemArguments,
+) -> GetContextItemResult: ...
+
+
+async def synthesize_traces(
+    tool_context: ToolContext,
+    arguments: SynthesizeTracesArguments,
+) -> SynthesizeTracesResult: ...
+
+
+async def run_code(
+    tool_context: ToolContext,
+    arguments: RunCodeArguments,
+) -> CodeExecutionResult: ...
+```
+
+The exact argument/result fields can evolve during implementation, but every tool should expose Pydantic argument and result models. Tool functions should call `TraceStore`, `AgentContext`, or `SandboxRunner`; they should not parse raw dictionaries internally.
+
 ## Subagents
 
 Use OpenAI Agents SDK `Agent.as_tool(...)`.
@@ -815,6 +965,18 @@ parent_tool_call_id
 depth
 sequence
 ```
+
+## Error Handling
+
+Root run failures should fail the stream. `stream_engine_async` starts the root agent in a background task and must call `EngineOutputBus.fail(error)` if that task raises, then re-raise the error to the stream consumer.
+
+Tool failures should be represented consistently at the tool boundary. If the SDK converts tool exceptions into tool result messages, use that behavior. Otherwise, catch tool exceptions in the tool adapter and return a typed failed tool result message so the parent model can continue when appropriate.
+
+Subagent failures should return typed failure information to the parent tool call when recovery is reasonable. Fatal runtime errors, cancellation, and invalid SDK state should fail the stream rather than being hidden inside a summary string.
+
+`EngineOutputBus.close()` is only for successful completion. `EngineOutputBus.fail(error)` closes the queue and stores the error so `stream()` raises after yielding already-emitted items.
+
+`run_engine_async` should not have separate error behavior. It collects `stream_engine_async`, so it returns collected items on success and raises the same stream error on failure.
 
 ## Path Of Execution
 
