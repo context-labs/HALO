@@ -760,6 +760,42 @@ message = AgentMessage(
 )
 ```
 
+### OpenAI Agents SDK Boundary
+
+The OpenAI Agents SDK should not directly own or mutate `AgentContextItem`. `AgentContextItem` is the Engine's stored representation; `AgentMessage` is the OpenAI/HF-compatible message shape passed to the SDK.
+
+Before a model run, `AgentContext.to_messages_array()` converts stored items into SDK-compatible messages:
+
+```python
+messages = agent_context.to_messages_array()
+stream = Runner.run_streamed(sdk_agent, input=messages)
+```
+
+Available tools are configured on the SDK `Agent`, not on individual messages:
+
+```python
+sdk_agent = Agent(
+    name=agent_config.name,
+    instructions=agent_config.instructions,
+    tools=[query_traces_tool, view_trace_tool, run_code_tool],
+)
+```
+
+During execution, `OpenAiEventMapper` converts SDK stream events back into `AgentContextItem` and `AgentOutputItem`:
+
+```python
+context_item = openai_event_mapper.to_context_item(sdk_event, agent_execution)
+agent_context.append(context_item)
+
+await output_bus.emit(
+    openai_event_mapper.to_output_item(context_item, agent_execution)
+)
+```
+
+Assistant tool calls become one assistant `AgentContextItem` with `tool_calls`. Tool outputs become `role="tool"` `AgentContextItem`s with `tool_call_id` and `name`. If an item is compacted, `to_messages_array()` sends only the `compaction_summary` to the SDK while the full original fields remain available on the stored context item.
+
+Subagents follow the same boundary with separate contexts. The parent context stores the parent assistant tool-call message and the final subagent tool result message. The child context stores the child execution messages, and child outputs stream to the caller through the shared `EngineOutputBus`.
+
 ## Engine Output Item
 
 Keep the public output model small and lineage-rich. The item itself is always an OpenAI/HF-compatible message shape.
