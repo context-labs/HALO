@@ -38,7 +38,7 @@ class OpenAiAgentRunner:
         is_root: bool,
         run_context: Any | None = None,
     ) -> None:
-        messages = [m.model_dump() for m in agent_context.to_messages_array()]
+        messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
         last_exc: BaseException | None = None
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
