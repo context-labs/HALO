@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 
 from engine.traces.models.trace_index_config import TraceIndexConfig
+from engine.traces.models.trace_query_models import TraceFilters
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
@@ -38,3 +39,25 @@ async def test_view_trace_returns_span_records(built_store: TraceStore) -> None:
 async def test_view_trace_unknown_raises(built_store: TraceStore) -> None:
     with pytest.raises(KeyError):
         built_store.view_trace("unknown")
+
+
+@pytest.mark.asyncio
+async def test_query_filter_has_errors(built_store: TraceStore) -> None:
+    result = built_store.query_traces(
+        filters=TraceFilters(has_errors=True),
+        limit=10,
+        offset=0,
+    )
+    assert result.total == 1
+    assert len(result.traces) == 1
+    assert result.traces[0].trace_id == "t-bbbb"
+
+
+@pytest.mark.asyncio
+async def test_query_filter_model_intersection(built_store: TraceStore) -> None:
+    result = built_store.query_traces(
+        filters=TraceFilters(model_names=["claude-haiku-4-5"]),
+        limit=10,
+        offset=0,
+    )
+    assert {t.trace_id for t in result.traces} == {"t-cccc"}
