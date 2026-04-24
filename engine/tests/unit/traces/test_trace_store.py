@@ -93,3 +93,18 @@ async def test_search_no_match(built_store: TraceStore) -> None:
     result = built_store.search_trace("t-aaaa", "nonexistent-needle")
     assert result.match_count == 0
     assert result.matches == []
+
+
+@pytest.mark.asyncio
+async def test_render_trace_under_budget(built_store: TraceStore) -> None:
+    rendered = built_store.render_trace("t-aaaa", budget=4000)
+    assert "t-aaaa" in rendered
+    assert "s-aaaa-1" in rendered
+    assert "s-aaaa-2" in rendered
+
+
+@pytest.mark.asyncio
+async def test_render_trace_truncates_when_over_budget(built_store: TraceStore) -> None:
+    rendered = built_store.render_trace("t-aaaa", budget=200)
+    assert rendered.endswith("... [truncated]")
+    assert len(rendered) <= 200 + len("... [truncated]")

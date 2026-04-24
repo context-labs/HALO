@@ -118,6 +118,28 @@ class TraceStore:
                     matches.append(blob)
         return TraceSearchResult(trace_id=trace_id, match_count=len(matches), matches=matches)
 
+    def render_trace(self, trace_id: str, budget: int) -> str:
+        view = self.view_trace(trace_id)
+        lines: list[str] = [f"trace_id: {trace_id}", f"spans: {len(view.spans)}"]
+        for s in view.spans:
+            lines.append(
+                f"- span_id={s.span_id} parent={s.parent_span_id or '∅'} "
+                f"name={s.name} kind={s.kind} status={s.status.code}"
+            )
+            lines.append(f"  start={s.start_time} end={s.end_time}")
+            model = s.attributes.get("inference.llm.model_name") or s.attributes.get("llm.model_name")
+            if model:
+                lines.append(f"  model={model}")
+            in_tok = s.attributes.get("inference.llm.input_tokens")
+            out_tok = s.attributes.get("inference.llm.output_tokens")
+            if in_tok is not None or out_tok is not None:
+                lines.append(f"  tokens: input={in_tok} output={out_tok}")
+
+        rendered = "\n".join(lines)
+        if len(rendered) > budget:
+            return rendered[:budget] + "... [truncated]"
+        return rendered
+
 
 def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
     if filters.has_errors is not None and row.has_errors != filters.has_errors:
