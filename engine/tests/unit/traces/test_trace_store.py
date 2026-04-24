@@ -23,3 +23,18 @@ async def built_store(tmp_path: Path, fixtures_dir: Path) -> TraceStore:
 @pytest.mark.asyncio
 async def test_load_sets_trace_count(built_store: TraceStore) -> None:
     assert built_store.trace_count == 3
+
+
+@pytest.mark.asyncio
+async def test_view_trace_returns_span_records(built_store: TraceStore) -> None:
+    view = built_store.view_trace("t-bbbb")
+    assert view.trace_id == "t-bbbb"
+    assert len(view.spans) == 2
+    assert view.spans[0].span_id == "s-bbbb-1"
+    assert view.spans[1].attributes["llm.model_name"] == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_view_trace_unknown_raises(built_store: TraceStore) -> None:
+    with pytest.raises(KeyError):
+        built_store.view_trace("unknown")
