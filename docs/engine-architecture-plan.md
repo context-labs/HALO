@@ -67,7 +67,7 @@ engine/
   tools/
     tool_protocol.py      # EngineTool interface and OpenAI SDK adapter
     trace_tools.py        # overview/query/count/view/search tools
-    agent_context_tools.py # list context items, get context item
+    agent_context_tools.py # get context item
     synthesis_tool.py     # summarize selected traces
     subagent_tool_factory.py # Agent.as_tool streaming/extractor wiring
     run_code_tool.py      # run_code tool
@@ -618,9 +618,6 @@ class AgentContext:
     def to_messages_array(self) -> list[AgentMessage]:
         ...
 
-    def list_items(self) -> list[AgentContextItemSummary]:
-        ...
-
     def get_item(self, item_id: str) -> AgentContextItem:
         ...
 ```
@@ -634,13 +631,15 @@ System messages are never compacted.
 
 `AgentContextItem` is the stored representation. `AgentMessage` is the OpenAI/HF-compatible message sent to the model. Available tool definitions are not stored on messages; they live on the OpenAI Agents SDK `Agent`.
 
-Compaction never removes an item from `AgentContext.items`. It only replaces `content` with a compacted summary and/or clears compacted `tool_calls`, then stores the original payload fields in `uncompacted_map[item_id]`. The item itself keeps the role, tool call id, name, and lineage metadata.
+Compaction never removes an item from `AgentContext.items`. It strips the original `content`, `tool_calls`, and `tool_call_id` into `uncompacted_map[item_id]`, then replaces `content` with `CompactedMessageContent`. The item itself keeps the role, name, compaction flags, and lineage metadata.
+
+`get_item(item_id)` returns the context item with any compacted-away `content`, `tool_calls`, and `tool_call_id` restored from `uncompacted_map[item_id]`. The restored item keeps the metadata from `AgentContext.items`.
 
 `to_messages_array` converts stored items into provider-compatible messages. Uncompacted items map directly to `AgentMessage`. Compacted text content is rendered into message `content`. Compacted tool calls also use `CompactedMessageContent` and are rendered as an assistant summary message with no `tool_calls`, because compacted tool calls are not executable tool requests.
 
 The compacted summary string should include any tool names, arguments, or result details that matter for future reasoning. The original structured tool calls stay in `uncompacted_map[item_id].tool_calls`.
 
-Message-array validity matters for tool calls. A `role="tool"` message is only valid when the message array also contains the matching assistant message with a real `tool_calls` entry for the same `tool_call_id`. If that assistant tool-call message was compacted, the corresponding tool result must render as an assistant summary message instead of a `tool` message.
+Message-array validity matters for tool calls. A `role="tool"` message is only valid when the message array also contains the matching assistant message with a real `tool_calls` entry for the same `tool_call_id`. Since compacted items strip `tool_call_id`, compacted tool results must render as assistant summary messages instead of `tool` messages.
 
 ### AgentContext Examples
 
@@ -715,6 +714,7 @@ context_item = AgentContextItem(
     content=CompactedMessageContent(
         content_summary="User asked to find failing traces."
     ),
+    tool_calls=None,
     tool_call_id=None,
     is_content_compacted=True,
 )
@@ -744,6 +744,7 @@ context_item = AgentContextItem(
 )
 
 uncompacted_map["msg_2"] = UncompactedContextPayload(
+    content=None,
     tool_calls=[
         AgentToolCall(
             id="call_1",
@@ -774,13 +775,14 @@ context_item = AgentContextItem(
         content_summary="query_traces returned trace ids t1, t2, and t3."
     ),
     tool_calls=None,
-    tool_call_id="call_1",
+    tool_call_id=None,
     name="query_traces",
     is_content_compacted=True,
 )
 
 uncompacted_map["msg_3"] = UncompactedContextPayload(
-    content='{"trace_ids":["t1","t2","t3"]}'
+    content='{"trace_ids":["t1","t2","t3"]}',
+    tool_call_id="call_1",
 )
 
 message = AgentMessage(
@@ -875,7 +877,7 @@ Tool groups:
 
 ```text
 tools/trace_tools.py          # overview, query, count, view, search
-tools/agent_context_tools.py  # list context items, get context item
+tools/agent_context_tools.py  # get context item
 tools/synthesis_tool.py       # summarize selected traces
 tools/subagent_tool_factory.py # agent-as-tool wiring
 tools/run_code_tool.py        # sandboxed python
