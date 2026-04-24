@@ -42,3 +42,31 @@ class EngineTool(Protocol):
     result_model: type[BaseModel]
 
     async def run(self, tool_context: ToolContext, arguments: Any) -> BaseModel: ...
+
+
+from collections.abc import Callable
+
+from agents import FunctionTool, RunContextWrapper
+
+
+def to_sdk_function_tool(
+    tool: EngineTool,
+    *,
+    context_factory: Callable[[RunContextWrapper[Any]], ToolContext],
+) -> FunctionTool:
+    arguments_model = tool.arguments_model
+
+    async def _invoke(ctx: RunContextWrapper[Any], raw_arguments: str) -> str:
+        parsed = arguments_model.model_validate_json(raw_arguments or "{}")
+        tool_context = context_factory(ctx)
+        result = await tool.run(tool_context, parsed)
+        return result.model_dump_json()
+
+    schema = arguments_model.model_json_schema()
+    return FunctionTool(
+        name=tool.name,
+        description=tool.description,
+        params_json_schema=schema,
+        on_invoke_tool=_invoke,
+        strict_json_schema=False,
+    )
