@@ -543,11 +543,6 @@ Parent and child contexts are separate.
 
 ```python
 
-# Compacted message content
-class CompactedMessageContent(BaseModel):
-    content_summary: str
-
-
 class AgentToolFunction(BaseModel):
     name: str
     arguments: str
@@ -566,22 +561,15 @@ class AgentMessage(BaseModel):
     tool_call_id: str | None = None
     name: str | None = None
 
-class UncompactedContextPayload(BaseModel):
-    content: MessageContent | None = None
-    tool_calls: list[AgentToolCall] | None = None
-    tool_call_id: str | None = None
-
-# When we compact items, we strip content, tool_calls and tool_call_id, and insert a CompactedMessageContent in content instead.
-# The uncompacted versions get added into UncompactedContextPayload.
 class AgentContextItem(BaseModel):
     item_id: str
     role: Literal["system", "user", "assistant", "tool"]
-    content: MessageContent | CompactedMessageContent | None = None
+    content: MessageContent | None = None
     tool_calls: list[AgentToolCall] | None = None
     tool_call_id: str | None = None
     name: str | None = None
-    is_content_compacted: bool = False
-    is_tool_calls_compacted: bool = False
+    is_compacted: bool = False
+    compaction_summary: str | None = None
     agent_id: str | None = None
     parent_agent_id: str | None = None
     parent_tool_call_id: str | None = None
@@ -589,9 +577,6 @@ class AgentContextItem(BaseModel):
 
 class AgentContext:
     items: list[AgentContextItem]
-
-    # item_id as key; only compacted-away payload fields are stored here.
-    uncompacted_map: dict[str, UncompactedContextPayload]
     compaction_model: ModelConfig
     text_message_compaction_keep_last_messages: int
     tool_call_compaction_keep_last_messages: int
@@ -599,7 +584,6 @@ class AgentContext:
     def __init__(
         self,
         items: list[AgentContextItem],
-        uncompacted_map: dict[str, UncompactedContextPayload],
         compaction_model: ModelConfig,
         text_message_compaction_keep_last_messages: int,
         tool_call_compaction_keep_last_messages: int,
@@ -631,15 +615,15 @@ System messages are never compacted.
 
 `AgentContextItem` is the stored representation. `AgentMessage` is the OpenAI/HF-compatible message sent to the model. Available tool definitions are not stored on messages; they live on the OpenAI Agents SDK `Agent`.
 
-Compaction never removes an item from `AgentContext.items`. It strips the original `content`, `tool_calls`, and `tool_call_id` into `uncompacted_map[item_id]`, then replaces `content` with `CompactedMessageContent`. The item itself keeps the role, name, compaction flags, and lineage metadata.
+Compaction never removes an item from `AgentContext.items` and does not strip the original fields. It sets `is_compacted=True` and writes a `compaction_summary`, while preserving the original `content`, `tool_calls`, `tool_call_id`, role, name, and lineage metadata on the item.
 
-`get_item(item_id)` returns the context item with any compacted-away `content`, `tool_calls`, and `tool_call_id` restored from `uncompacted_map[item_id]`. The restored item keeps the metadata from `AgentContext.items`.
+`get_item(item_id)` returns the full stored `AgentContextItem`, including original content/tool-call fields and any compaction summary.
 
-`to_messages_array` converts stored items into provider-compatible messages. Uncompacted items map directly to `AgentMessage`. Compacted text content is rendered into message `content`. Compacted tool calls also use `CompactedMessageContent` and are rendered as an assistant summary message with no `tool_calls`, because compacted tool calls are not executable tool requests.
+`to_messages_array` converts stored items into provider-compatible messages. If `is_compacted=False`, the item maps directly to `AgentMessage` using its original fields. If `is_compacted=True`, the model-facing message uses `compaction_summary` instead of the original content/tool calls.
 
-The compacted summary string should include any tool names, arguments, or result details that matter for future reasoning. The original structured tool calls stay in `uncompacted_map[item_id].tool_calls`.
+The compacted summary string should include any tool names, arguments, or result details that matter for future reasoning. The original structured fields remain available on the `AgentContextItem` for context tools and debugging.
 
-Message-array validity matters for tool calls. A `role="tool"` message is only valid when the message array also contains the matching assistant message with a real `tool_calls` entry for the same `tool_call_id`. Since compacted items strip `tool_call_id`, compacted tool results must render as assistant summary messages instead of `tool` messages.
+Message-array validity matters for tool calls. A `role="tool"` message is only valid when the message array also contains the matching assistant message with a real `tool_calls` entry for the same `tool_call_id`. Compacted assistant tool-call messages render as assistant summary messages with no `tool_calls`, so compacted tool results should also render as assistant summary messages instead of `tool` messages.
 
 ### AgentContext Examples
 
@@ -711,16 +695,10 @@ Compacted text item:
 context_item = AgentContextItem(
     item_id="msg_1",
     role="user",
-    content=CompactedMessageContent(
-        content_summary="User asked to find failing traces."
-    ),
-    tool_calls=None,
+    content="Find failing traces.",
     tool_call_id=None,
-    is_content_compacted=True,
-)
-
-uncompacted_map["msg_1"] = UncompactedContextPayload(
-    content="Find failing traces."
+    is_compacted=True,
+    compaction_summary="User asked to find failing traces.",
 )
 
 message = AgentMessage(
@@ -735,15 +713,6 @@ Compacted assistant tool-call item:
 context_item = AgentContextItem(
     item_id="msg_2",
     role="assistant",
-    content=CompactedMessageContent(
-        content_summary="Called query_traces with has_errors=true."
-    ),
-    tool_calls=None,
-    tool_call_id=None,
-    is_tool_calls_compacted=True,
-)
-
-uncompacted_map["msg_2"] = UncompactedContextPayload(
     content=None,
     tool_calls=[
         AgentToolCall(
@@ -753,7 +722,10 @@ uncompacted_map["msg_2"] = UncompactedContextPayload(
                 arguments='{"filters":{"has_errors":true}}',
             ),
         )
-    ]
+    ],
+    tool_call_id=None,
+    is_compacted=True,
+    compaction_summary="Called query_traces with has_errors=true.",
 )
 
 message = AgentMessage(
@@ -771,18 +743,12 @@ Compacted tool result item whose matching tool call was also compacted:
 context_item = AgentContextItem(
     item_id="msg_3",
     role="tool",
-    content=CompactedMessageContent(
-        content_summary="query_traces returned trace ids t1, t2, and t3."
-    ),
-    tool_calls=None,
-    tool_call_id=None,
-    name="query_traces",
-    is_content_compacted=True,
-)
-
-uncompacted_map["msg_3"] = UncompactedContextPayload(
     content='{"trace_ids":["t1","t2","t3"]}',
+    tool_calls=None,
     tool_call_id="call_1",
+    name="query_traces",
+    is_compacted=True,
+    compaction_summary="query_traces returned trace ids t1, t2, and t3.",
 )
 
 message = AgentMessage(
