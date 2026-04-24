@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
+
+from agents import FunctionTool, RunContextWrapper
 
 if TYPE_CHECKING:
     from engine.agents.agent_context import AgentContext
@@ -42,11 +45,6 @@ class EngineTool(Protocol):
     result_model: type[BaseModel]
 
     async def run(self, tool_context: ToolContext, arguments: Any) -> BaseModel: ...
-
-
-from collections.abc import Callable
-
-from agents import FunctionTool, RunContextWrapper
 
 
 def to_sdk_function_tool(

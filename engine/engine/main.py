@@ -15,7 +15,6 @@ from engine.agents.prompt_templates import render_root_system_prompt
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
-from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
