@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-import pytest_asyncio
 
 from engine.sandbox.sandbox_config import CodeExecutionResult, RunCodeArguments, SandboxConfig
 from engine.tools.run_code_tool import RunCodeTool

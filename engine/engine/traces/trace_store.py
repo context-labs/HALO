@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from engine.traces.models.trace_index_models import TraceIndexRow
+
+if TYPE_CHECKING:
+    from engine.traces.models.trace_query_models import (
+        DatasetOverview,
+        TraceCountResult,
+        TraceFilters,
+        TraceQueryResult,
+        TraceSearchResult,
+        TraceView,
+    )
 
 
 class TraceStore:

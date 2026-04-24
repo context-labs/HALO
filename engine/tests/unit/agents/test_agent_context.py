@@ -58,8 +58,6 @@ def test_to_messages_array_assistant_tool_call_item() -> None:
     assert msgs[1].role == "tool" and msgs[1].tool_call_id == "c1"
 
 
-from engine.agents.agent_context import AgentContext
-from engine.agents.agent_context_items import AgentContextItem
 
 
 class _StubCompactor:
