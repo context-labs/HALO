@@ -89,6 +89,12 @@ class TraceIndexBuilder:
         meta_path = cls._meta_path_for(index_path)
 
         if index_path.exists() and meta_path.exists():
+            existing = TraceIndexMeta.model_validate_json(meta_path.read_text())
+            if existing.schema_version != config.schema_version:
+                raise ValueError(
+                    f"existing index schema_version={existing.schema_version} "
+                    f"does not match requested {config.schema_version}"
+                )
             return index_path
 
         await cls.build_index(
