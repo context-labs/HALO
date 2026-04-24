@@ -34,6 +34,39 @@ class AgentContext:
     def to_messages_array(self) -> list[AgentMessage]:
         return [_render_item(item) for item in self.items]
 
+    async def compact_old_items(self, compactor: "Compactor") -> None:
+        text_positions: list[int] = []
+        tool_positions: list[int] = []
+        for idx, item in enumerate(self.items):
+            if item.is_compacted or item.role == "system":
+                continue
+            if _is_tool_related(item):
+                tool_positions.append(idx)
+            else:
+                text_positions.append(idx)
+
+        eligible: list[int] = []
+        if len(text_positions) > self.text_message_compaction_keep_last_messages:
+            cutoff = len(text_positions) - self.text_message_compaction_keep_last_messages
+            eligible.extend(text_positions[:cutoff])
+        if len(tool_positions) > self.tool_call_compaction_keep_last_messages:
+            cutoff = len(tool_positions) - self.tool_call_compaction_keep_last_messages
+            eligible.extend(tool_positions[:cutoff])
+
+        for idx in sorted(eligible):
+            item = self.items[idx]
+            summary = await compactor(item)
+            self.items[idx] = item.model_copy(update={"is_compacted": True, "compaction_summary": summary})
+            self._index[item.item_id] = self.items[idx]
+
+
+def _is_tool_related(item: AgentContextItem) -> bool:
+    if item.role == "tool":
+        return True
+    if item.role == "assistant" and item.tool_calls:
+        return True
+    return False
+
 
 def _render_item(item: AgentContextItem) -> AgentMessage:
     if not item.is_compacted:
