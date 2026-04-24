@@ -61,3 +61,9 @@ async def test_query_filter_model_intersection(built_store: TraceStore) -> None:
         offset=0,
     )
     assert {t.trace_id for t in result.traces} == {"t-cccc"}
+
+
+@pytest.mark.asyncio
+async def test_count_traces_with_and_without_filter(built_store: TraceStore) -> None:
+    assert built_store.count_traces(TraceFilters()).total == 3
+    assert built_store.count_traces(TraceFilters(has_errors=True)).total == 1
