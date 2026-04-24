@@ -70,6 +70,38 @@ class TraceStore:
         total = sum(1 for row in self._rows if _matches_filters(row, filters))
         return TraceCountResult(total=total)
 
+    def get_overview(self, filters: "TraceFilters") -> "DatasetOverview":
+        from engine.traces.models.trace_query_models import DatasetOverview
+
+        rows = [r for r in self._rows if _matches_filters(r, filters)]
+        if not rows:
+            return DatasetOverview(
+                total_traces=0, total_spans=0, earliest_start_time="",
+                latest_end_time="", service_names=[], model_names=[], agent_names=[],
+                error_trace_count=0, total_input_tokens=0, total_output_tokens=0,
+            )
+
+        services: set[str] = set()
+        models: set[str] = set()
+        agents: set[str] = set()
+        for r in rows:
+            services.update(r.service_names)
+            models.update(r.model_names)
+            agents.update(r.agent_names)
+
+        return DatasetOverview(
+            total_traces=len(rows),
+            total_spans=sum(r.span_count for r in rows),
+            earliest_start_time=min(r.start_time for r in rows),
+            latest_end_time=max(r.end_time for r in rows),
+            service_names=sorted(services),
+            model_names=sorted(models),
+            agent_names=sorted(agents),
+            error_trace_count=sum(1 for r in rows if r.has_errors),
+            total_input_tokens=sum(r.total_input_tokens for r in rows),
+            total_output_tokens=sum(r.total_output_tokens for r in rows),
+        )
+
 
 def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
     if filters.has_errors is not None and row.has_errors != filters.has_errors:

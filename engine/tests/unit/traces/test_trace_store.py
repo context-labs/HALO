@@ -67,3 +67,15 @@ async def test_query_filter_model_intersection(built_store: TraceStore) -> None:
 async def test_count_traces_with_and_without_filter(built_store: TraceStore) -> None:
     assert built_store.count_traces(TraceFilters()).total == 3
     assert built_store.count_traces(TraceFilters(has_errors=True)).total == 1
+
+
+@pytest.mark.asyncio
+async def test_overview_full(built_store: TraceStore) -> None:
+    ov = built_store.get_overview(TraceFilters())
+    assert ov.total_traces == 3
+    assert ov.total_spans == 6
+    assert "agent-a" in ov.agent_names
+    assert "gpt-5.4" in ov.model_names
+    assert ov.error_trace_count == 1
+    assert ov.total_input_tokens == 100 + 200 + 30
+    assert ov.total_output_tokens == 50 + 40 + 10
