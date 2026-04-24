@@ -10,7 +10,7 @@
 
 **Pre-decided constraints (do not rediscover):**
 - Package lives at `/home/declan/dev/HALO/engine/`, publishable to PyPI as `halo-engine`.
-- The existing `/home/declan/dev/HALO/rlm/` directory is deleted entirely in Task 0.1.
+- The existing `/home/declan/dev/HALO/rlm/` directory is left in place as reference material. No imports from it, no test runs against it — it simply coexists.
 - Input to public entrypoints is `list[AgentMessage]` (validate dicts with `AgentMessage.model_validate` at boundary if needed).
 - `MessageContent` follows OpenAI Chat Completions shape: `str | list[OpenAIContentPart] | None`. Use `openai.types.chat` content part types directly.
 - Streaming yields a discriminated `AgentOutputItem | AgentTextDelta`; deltas never enter `AgentContext`. `run_engine_async` filters deltas out.
@@ -109,34 +109,11 @@ engine/
 
 ---
 
-## Phase 0 — Repo surgery and package skeleton
+## Phase 0 — Package skeleton
 
-### Task 0.1: Remove legacy `rlm/` directory
+The existing `rlm/` directory stays in place as reference material. The new `engine/` package is a sibling that neither imports from nor depends on `rlm/`.
 
-**Files:**
-- Delete: `/home/declan/dev/HALO/rlm/` (entire tree)
-- Modify: `/home/declan/dev/HALO/README.md` if it references `rlm/` (leave demo/ alone)
-
-- [ ] **Step 1: Verify no external references to `rlm/` remain inside `docs/` and `demo/`**
-
-Run: `rg -n '\brlm\b|halo-rlm' /home/declan/dev/HALO/docs /home/declan/dev/HALO/demo /home/declan/dev/HALO/README.md`
-Expected: zero matches, or matches only in the architecture plan doc (OK to leave).
-
-- [ ] **Step 2: Delete the directory**
-
-Run: `rm -rf /home/declan/dev/HALO/rlm`
-Expected: clean exit.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git -C /home/declan/dev/HALO add -A
-git -C /home/declan/dev/HALO commit -m "chore: remove legacy rlm package ahead of engine rewrite"
-```
-
----
-
-### Task 0.2: Create `engine/` uv package skeleton
+### Task 0.1: Create `engine/` uv package skeleton
 
 **Files:**
 - Create: `engine/pyproject.toml`
@@ -256,7 +233,7 @@ git -C /home/declan/dev/HALO commit -m "feat(engine): scaffold halo-engine uv pa
 
 ---
 
-### Task 0.3: Add tiny trace fixture used throughout tests
+### Task 0.2: Add tiny trace fixture used throughout tests
 
 **Files:**
 - Create: `engine/tests/fixtures/tiny_traces.jsonl`
@@ -6078,7 +6055,7 @@ git -C /home/declan/dev/HALO commit -am "chore(engine): green suite + ruff clean
 | Spec section | Task(s) |
 |---|---|
 | Public entrypoints (`stream_engine_async`, `run_engine_async`, sync) | 7.2 |
-| Package structure | 0.2; file tree above |
+| Package structure | 0.1; file tree above |
 | Naming (`Engine*` prefix, avoid RLM) | Applied throughout |
 | Typing (Pydantic everywhere) | 1.1–1.12, 4.x, 5.x |
 | Config (`ModelConfig`, `AgentConfig`, `TraceIndexConfig`, `SandboxConfig`, `EngineConfig`) | 1.4, 1.5, 1.6, 1.7, 1.8 |

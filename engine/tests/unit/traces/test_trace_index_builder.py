@@ -76,3 +76,19 @@ async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path)
         blob = fh.read(bb.byte_lengths[0])
     span = json.loads(blob)
     assert span["span_id"] == "s-bbbb-1"
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_rejects_unsupported_existing_schema(tmp_path: Path) -> None:
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_text("")
+    index_path = Path(str(trace_path) + ".engine-index.jsonl")
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+    index_path.write_text("")
+    meta_path.write_text('{"schema_version":999,"trace_count":0}')
+
+    with pytest.raises(ValueError, match="schema_version"):
+        await TraceIndexBuilder.ensure_index_exists(
+            trace_path=trace_path,
+            config=TraceIndexConfig(schema_version=1),
+        )
