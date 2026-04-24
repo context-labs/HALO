@@ -64,6 +64,12 @@ class TraceStore:
         ]
         return TraceQueryResult(traces=summaries, total=len(filtered))
 
+    def count_traces(self, filters: "TraceFilters") -> "TraceCountResult":
+        from engine.traces.models.trace_query_models import TraceCountResult
+
+        total = sum(1 for row in self._rows if _matches_filters(row, filters))
+        return TraceCountResult(total=total)
+
 
 def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
     if filters.has_errors is not None and row.has_errors != filters.has_errors:
