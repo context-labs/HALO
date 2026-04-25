@@ -6094,6 +6094,562 @@ git -C /home/declan/dev/HALO commit -am "chore(engine): green suite + ruff clean
 
 ---
 
+## Phase 11 — Hardening (post-E2E amendments)
+
+Added 2026-04-25 after E2E revealed gaps. Tasks target real-risk issues surfaced in the first live run.
+
+**Design decision (circuit breaker & failure propagation):**
+- **4xx errors are not retried.** They are permanent — retrying wastes time and floods logs. Only `openai.APIConnectionError`, `openai.APITimeoutError`, `openai.RateLimitError`, and 5xx `openai.APIStatusError` are retriable.
+- **Only root-agent exhaustion raises.** Subagent failures (including circuit-breaker exhaustion or 4xx) are caught inside `guarded_invoke` and returned to the parent as a `SubagentToolResult` with an `answer` that describes the failure. The parent agent then decides whether to retry, try a different approach, or report back.
+- `EngineAgentExhaustedError` stays as the exception type for root exhaustion; it closes the stream via `EngineOutputBus.fail(error)`.
+
+### Task 11.1: Classify retriable vs non-retriable errors in `OpenAiAgentRunner`
+
+**Files:**
+- Modify: `engine/engine/agents/openai_agent_runner.py`
+- Modify: `engine/tests/unit/agents/test_openai_agent_runner.py`
+
+- [ ] **Step 1: Append failing tests**
+
+```python
+from openai import APIConnectionError, BadRequestError
+import httpx
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_retry_on_bad_request() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root", agent_name="root", depth=0,
+        parent_agent_id=None, parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
+
+    async def raise_400(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        raise BadRequestError(
+            message="bad field",
+            response=fake_response,
+            body={"error": {"message": "bad field"}},
+        )
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=raise_400,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(BadRequestError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1  # no retries
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_on_connection_error_then_fails() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root", agent_name="root", depth=0,
+        parent_agent_id=None, parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def raise_connection(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        raise APIConnectionError(request=fake_request)
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=raise_connection,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 10  # full retry budget consumed
+```
+
+- [ ] **Step 2: Run — expect fail**
+
+- [ ] **Step 3: Patch impl**
+
+Add at module top:
+
+```python
+from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
+
+
+def _is_retriable_llm_error(exc: BaseException) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code >= 500
+    return False
+```
+
+Modify the `except Exception as exc:` branch of `run` to:
+
+```python
+            except Exception as exc:
+                if not _is_retriable_llm_error(exc):
+                    raise
+                last_exc = exc
+                agent_execution.record_llm_failure()
+                logger.warning(
+                    "llm call failed for agent_id={} (failure {} of {})",
+                    agent_execution.agent_id,
+                    agent_execution.consecutive_llm_failures,
+                    MAX_CONSECUTIVE_LLM_FAILURES,
+                )
+                continue
+```
+
+- [ ] **Step 4: Run — expect `4 passed`** (2 pre-existing + 2 new)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C /home/declan/dev/HALO commit -am "fix(engine): do not retry non-retriable LLM errors (4xx)"
+```
+
+---
+
+### Task 11.2: Subagent failures become tool errors, not stream crashes
+
+**Files:**
+- Modify: `engine/engine/tools/subagent_tool_factory.py`
+- Modify: `engine/tests/unit/tools/test_subagent_tool_factory.py`
+
+The goal: wrap the `guarded_invoke` body in a try/except. On any exception, return a `SubagentToolResult` whose `answer` describes the failure, so the parent agent keeps running.
+
+- [ ] **Step 1: Append failing test**
+
+```python
+@pytest.mark.asyncio
+async def test_guarded_invoke_returns_failure_on_exception() -> None:
+    # Construct a minimal run_state + subagent tool, then monkeypatch Runner.run_streamed
+    # to raise. The tool's on_invoke_tool must NOT raise — it must return a serialized
+    # SubagentToolResult with the failure described in `answer`.
+    import asyncio
+    from engine.agents.engine_output_bus import EngineOutputBus
+    from engine.agents.engine_run_state import EngineRunState
+    from engine.agents.agent_config import AgentConfig
+    from engine.engine_config import EngineConfig
+    from engine.model_config import ModelConfig
+    from engine.tools.subagent_result import SubagentToolResult
+    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
+    from engine.traces.trace_store import TraceStore
+
+    cfg = EngineConfig(
+        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
+
+    # Patch Runner.run_streamed to raise
+    from engine.tools import subagent_tool_factory as mod
+
+    class _Boom:
+        pass
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("SDK exploded")
+
+    orig = mod.Runner.run_streamed
+    mod.Runner.run_streamed = _raise
+    try:
+        result_json = await tool.on_invoke_tool(None, "{}")
+    finally:
+        mod.Runner.run_streamed = orig
+
+    result = SubagentToolResult.model_validate_json(result_json)
+    assert "SDK exploded" in result.answer or "failed" in result.answer.lower()
+```
+
+- [ ] **Step 2: Run — expect fail**
+
+- [ ] **Step 3: Wrap `guarded_invoke`'s body in try/except**
+
+Inside the `async with semaphore:` block of `guarded_invoke`, wrap everything in try/except. On failure, build and return a `SubagentToolResult` describing the error. See the patch below:
+
+```python
+        async with semaphore:
+            child_execution = AgentExecution(
+                agent_id=f"sub-{uuid.uuid4().hex[:8]}",
+                agent_name=engine_config.subagent.name,
+                depth=child_depth,
+                parent_agent_id=None,
+                parent_tool_call_id=None,
+            )
+            run_state.register(child_execution)
+            start_seq: int | None = None
+            end_seq: int | None = None
+            try:
+                stream = Runner.run_streamed(
+                    starting_agent=child_agent,
+                    input=raw_arguments,
+                    context=run_state,
+                )
+                async for ev in stream.stream_events():
+                    mapped = mapper.to_mapped_event(ev, execution=child_execution, is_root=False)
+                    if mapped.output_item is not None:
+                        emitted = await output_bus.emit(mapped.output_item)
+                        if start_seq is None:
+                            start_seq = emitted.sequence
+                        end_seq = emitted.sequence
+                    if mapped.delta is not None:
+                        await output_bus.emit(mapped.delta)
+
+                run_result = stream
+                if hasattr(stream, "wait_for_final_output"):
+                    run_result = await stream.wait_for_final_output()
+
+                extracted_json = await custom_output_extractor(run_result)
+                result = SubagentToolResult.model_validate_json(extracted_json).model_copy(update={
+                    "child_agent_id": child_execution.agent_id,
+                    "output_start_sequence": start_seq or 0,
+                    "output_end_sequence": end_seq or 0,
+                    "turns_used": child_execution.turns_used,
+                    "tool_calls_made": child_execution.tool_calls_made,
+                })
+                return result.model_dump_json()
+            except Exception as exc:
+                from loguru import logger
+
+                logger.warning(
+                    "subagent {} failed at depth={}: {}",
+                    child_execution.agent_id, child_depth, exc,
+                )
+                failure = SubagentToolResult(
+                    child_agent_id=child_execution.agent_id,
+                    answer=f"Subagent failed: {type(exc).__name__}: {exc}",
+                    output_start_sequence=start_seq or 0,
+                    output_end_sequence=end_seq or 0,
+                    turns_used=child_execution.turns_used,
+                    tool_calls_made=child_execution.tool_calls_made,
+                )
+                return failure.model_dump_json()
+```
+
+- [ ] **Step 4: Run — expect pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C /home/declan/dev/HALO commit -am "fix(engine): subagent failures return tool errors instead of crashing"
+```
+
+---
+
+### Task 11.3: Track `turns_used` and `tool_calls_made` in subagent execution
+
+**Files:**
+- Modify: `engine/engine/tools/subagent_tool_factory.py`
+- Modify: `engine/tests/unit/tools/test_subagent_tool_factory.py`
+
+- [ ] **Step 1: Append failing test**
+
+```python
+@pytest.mark.asyncio
+async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from engine.agents.engine_output_bus import EngineOutputBus
+    from engine.agents.engine_run_state import EngineRunState
+    from engine.agents.agent_config import AgentConfig
+    from engine.engine_config import EngineConfig
+    from engine.model_config import ModelConfig
+    from engine.tools.subagent_result import SubagentToolResult
+    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
+    from engine.traces.trace_store import TraceStore
+    from engine.tools import subagent_tool_factory as mod
+
+    cfg = EngineConfig(
+        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    # Synthesize 1 tool_call event and 1 message_output event, then completion
+    events = [
+        SimpleNamespace(type="run_item_stream_event", item=SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(call_id="c1", id="c1", name="query_traces", arguments="{}"),
+        )),
+        SimpleNamespace(type="run_item_stream_event", item=SimpleNamespace(
+            type="message_output_item",
+            raw_item=SimpleNamespace(id="m1", role="assistant", content=[
+                SimpleNamespace(type="output_text", text="done")
+            ]),
+        )),
+    ]
+
+    class _Stream:
+        new_items: list = []
+
+        async def stream_events(self_inner):
+            for e in events:
+                yield e
+
+        async def wait_for_final_output(self_inner):
+            return self_inner
+
+    def fake_run_streamed(*args, **kwargs):
+        return _Stream()
+
+    monkeypatch.setattr(mod.Runner, "run_streamed", fake_run_streamed)
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
+    result_json = await tool.on_invoke_tool(None, "{}")
+    result = SubagentToolResult.model_validate_json(result_json)
+    assert result.turns_used == 1
+    assert result.tool_calls_made == 1
+```
+
+- [ ] **Step 2: Run — expect fail**
+
+- [ ] **Step 3: Update `guarded_invoke` to count events before each dispatch to bus**
+
+Inside the `async for ev in stream.stream_events():` loop, add:
+
+```python
+                    # Count turns and tool calls on the child execution
+                    if isinstance(mapped.output_item, AgentOutputItem):
+                        item = mapped.output_item.item
+                        if item.role == "assistant" and item.tool_calls:
+                            child_execution.tool_calls_made += len(item.tool_calls)
+                        elif item.role == "assistant":
+                            child_execution.turns_used += 1
+```
+
+Add the import at the top of the module:
+
+```python
+from engine.models.engine_output import AgentOutputItem
+```
+
+- [ ] **Step 4: Run — expect pass**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C /home/declan/dev/HALO commit -am "feat(engine): subagent counts turns_used and tool_calls_made"
+```
+
+---
+
+### Task 11.4: Compaction E2E test
+
+Trigger compaction in a real conversation by setting thresholds very low and asking the agent a multi-turn question. Assert that at least one `AgentContextItem` ends up `is_compacted=True` after the run. Because we can't easily read the internal context from outside, we instead verify compaction fires by using a *fake* compactor callable and counting calls. This is the unit-level test we already have; the E2E version runs the whole engine with a real model and asserts no crash with tight thresholds.
+
+**Files:**
+- Create: `engine/tests/integration/test_engine_compaction.py`
+
+```python
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+import pytest
+
+from engine.agents.agent_config import AgentConfig
+from engine.engine_config import EngineConfig
+from engine.main import run_engine_async
+from engine.model_config import ModelConfig
+from engine.models.messages import AgentMessage
+
+
+E2E_MODEL = os.environ.get("HALO_E2E_MODEL", "gpt-5.4-mini")
+E2E_TIMEOUT_SECONDS = float(os.environ.get("HALO_E2E_TIMEOUT", "90"))
+
+
+@pytest.mark.asyncio
+async def test_engine_compaction_fires_without_crash(tmp_path: Path, fixtures_dir: Path) -> None:
+    if not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
+
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
+
+    agent = AgentConfig(
+        name="root",
+        instructions="Answer concisely.",
+        model=ModelConfig(name=E2E_MODEL),
+        maximum_turns=4,
+    )
+    cfg = EngineConfig(
+        root_agent=agent,
+        subagent=agent.model_copy(update={"name": "sub"}),
+        synthesis_model=ModelConfig(name=E2E_MODEL),
+        compaction_model=ModelConfig(name=E2E_MODEL),
+        # Force compaction to trigger even on small conversations
+        text_message_compaction_keep_last_messages=1,
+        tool_call_compaction_keep_last_messages=1,
+        maximum_depth=0,
+        maximum_parallel_subagents=1,
+    )
+
+    messages = [AgentMessage(
+        role="user",
+        content=(
+            "Call get_dataset_overview, then count_traces with has_errors=true, "
+            "then tell me the two numbers and end with <final/>."
+        ),
+    )]
+
+    async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
+        results = await run_engine_async(messages, cfg, trace_path)
+
+    assert any(item.final for item in results)
+```
+
+- [ ] **Step 1: Create the test**
+
+- [ ] **Step 2: Run it**
+
+`cd /home/declan/dev/HALO/engine && uv run pytest tests/integration/test_engine_compaction.py -v`
+Expected: `1 passed` against live API. If it fails, capture the error — a likely candidate is the compaction prompt shape breaking on the chosen model.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git -C /home/declan/dev/HALO commit -am "test(engine): e2e compaction does not crash with tight thresholds"
+```
+
+---
+
+### Task 11.5: Depth=1 subagent E2E
+
+**Files:**
+- Modify: `engine/tests/integration/test_engine_e2e.py` OR create `engine/tests/integration/test_engine_subagent.py`
+
+Create a new test file rather than modifying the existing happy-path E2E:
+
+```python
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+import pytest
+
+from engine.agents.agent_config import AgentConfig
+from engine.engine_config import EngineConfig
+from engine.main import run_engine_async
+from engine.model_config import ModelConfig
+from engine.models.messages import AgentMessage
+
+
+E2E_MODEL = os.environ.get("HALO_E2E_MODEL", "gpt-5.4-mini")
+E2E_TIMEOUT_SECONDS = float(os.environ.get("HALO_E2E_TIMEOUT", "120"))
+
+
+@pytest.mark.asyncio
+async def test_root_delegates_to_subagent(tmp_path: Path, fixtures_dir: Path) -> None:
+    if not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
+
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
+
+    agent = AgentConfig(
+        name="root",
+        instructions="Answer briefly.",
+        model=ModelConfig(name=E2E_MODEL),
+        maximum_turns=6,
+    )
+    cfg = EngineConfig(
+        root_agent=agent,
+        subagent=agent.model_copy(update={"name": "sub"}),
+        synthesis_model=ModelConfig(name=E2E_MODEL),
+        compaction_model=ModelConfig(name=E2E_MODEL),
+        maximum_depth=1,
+        maximum_parallel_subagents=2,
+    )
+
+    messages = [AgentMessage(
+        role="user",
+        content=(
+            "Delegate this question to a subagent via call_subagent: "
+            "'How many traces have errors? Use count_traces with has_errors=true.' "
+            "Then report the subagent's answer to me and end with <final/>."
+        ),
+    )]
+
+    async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
+        results = await run_engine_async(messages, cfg, trace_path)
+
+    # A subagent tool call should have been made at depth 0 by the root
+    subagent_calls = [
+        item for item in results
+        if item.depth == 0 and item.item.tool_calls and any(
+            tc.function.name == "call_subagent" for tc in item.item.tool_calls
+        )
+    ]
+    assert subagent_calls, "root did not call call_subagent"
+
+    # The child agent should have emitted output items at depth 1
+    child_items = [item for item in results if item.depth == 1]
+    assert child_items, "no depth=1 items streamed — child stream not forwarded to bus"
+
+    assert any(item.final for item in results)
+```
+
+- [ ] **Step 1: Create the test**
+
+- [ ] **Step 2: Run**
+
+`cd /home/declan/dev/HALO/engine && uv run pytest tests/integration/test_engine_subagent.py -v`
+
+- [ ] **Step 3: If the test reveals more wiring bugs (common expected: `ctx.context` vs `ctx` confusion, tool arg shape for `call_subagent`, etc.), investigate and fix in a follow-up task rather than hacking around it.**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git -C /home/declan/dev/HALO commit -am "test(engine): e2e subagent delegation at depth 1"
+```
+
+---
+
 ## Execution Handoff
 
 Plan complete and saved to `docs/superpowers/plans/2026-04-24-halo-engine.md`. Two execution options:
