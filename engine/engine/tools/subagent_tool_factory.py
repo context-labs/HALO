@@ -112,10 +112,13 @@ def _build_subagent_as_tool(
         final_text = ""
         for item in getattr(run_result, "new_items", []):
             if getattr(item, "type", None) == "message_output_item":
+                raw_item = getattr(item, "raw_item", None)
+                if raw_item is None:
+                    continue
                 parts = [
                     getattr(p, "text", "")
-                    for p in (getattr(item.message, "content", None) or [])
-                    if getattr(p, "type", None) == "output_text"
+                    for p in (getattr(raw_item, "content", None) or [])
+                    if getattr(p, "type", None) in ("output_text", "text")
                 ]
                 text = "".join(parts).strip()
                 if text:
