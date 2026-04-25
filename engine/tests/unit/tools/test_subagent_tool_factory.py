@@ -70,3 +70,45 @@ async def test_semaphore_wrapper_limits_parallelism() -> None:
 
     await asyncio.gather(*[wrapped(None, "{}") for _ in range(6)])
     assert peak <= 2
+
+
+@pytest.mark.asyncio
+async def test_guarded_invoke_returns_failure_on_exception() -> None:
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from engine.agents.engine_output_bus import EngineOutputBus
+    from engine.agents.engine_run_state import EngineRunState
+    from engine.agents.agent_config import AgentConfig
+    from engine.engine_config import EngineConfig
+    from engine.model_config import ModelConfig
+    from engine.tools.subagent_result import SubagentToolResult
+    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
+    from engine.traces.trace_store import TraceStore
+    from engine.tools import subagent_tool_factory as mod
+
+    cfg = EngineConfig(
+        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("SDK exploded")
+
+    orig = mod.Runner.run_streamed
+    mod.Runner.run_streamed = _raise
+    try:
+        result_json = await tool.on_invoke_tool(None, "{}")
+    finally:
+        mod.Runner.run_streamed = orig
+
+    result = SubagentToolResult.model_validate_json(result_json)
+    assert "SDK exploded" in result.answer

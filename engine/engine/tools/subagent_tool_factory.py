@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agents import Agent, FunctionTool, RunContextWrapper, Runner
+from loguru import logger
 
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_run_state import EngineRunState
@@ -148,36 +149,55 @@ def _build_subagent_as_tool(
                 parent_tool_call_id=None,
             )
             run_state.register(child_execution)
-            # Runner.run_streamed is synchronous — it returns RunResultStreaming directly
-            stream = Runner.run_streamed(
-                starting_agent=child_agent,
-                input=raw_arguments,
-                context=run_state,
-            )
             start_seq: int | None = None
             end_seq: int | None = None
-            async for ev in stream.stream_events():
-                mapped = mapper.to_mapped_event(ev, execution=child_execution, is_root=False)
-                if mapped.output_item is not None:
-                    emitted = await output_bus.emit(mapped.output_item)
-                    if start_seq is None:
-                        start_seq = emitted.sequence
-                    end_seq = emitted.sequence
-                if mapped.delta is not None:
-                    await output_bus.emit(mapped.delta)
+            try:
+                stream = Runner.run_streamed(
+                    starting_agent=child_agent,
+                    input=raw_arguments,
+                    context=run_state,
+                )
+                async for ev in stream.stream_events():
+                    mapped = mapper.to_mapped_event(ev, execution=child_execution, is_root=False)
+                    if mapped.output_item is not None:
+                        emitted = await output_bus.emit(mapped.output_item)
+                        if start_seq is None:
+                            start_seq = emitted.sequence
+                        end_seq = emitted.sequence
+                    if mapped.delta is not None:
+                        await output_bus.emit(mapped.delta)
 
-            child_execution.output_start_sequence = start_seq
-            child_execution.output_end_sequence = end_seq
+                child_execution.output_start_sequence = start_seq
+                child_execution.output_end_sequence = end_seq
 
-            extracted_json = await custom_output_extractor(stream)
-            result = SubagentToolResult.model_validate_json(extracted_json).model_copy(update={
-                "child_agent_id": child_execution.agent_id,
-                "output_start_sequence": start_seq or 0,
-                "output_end_sequence": end_seq or 0,
-                "turns_used": child_execution.turns_used,
-                "tool_calls_made": child_execution.tool_calls_made,
-            })
-            return result.model_dump_json()
+                run_result = stream
+                if hasattr(stream, "wait_for_final_output"):
+                    run_result = await stream.wait_for_final_output()
+
+                extracted_json = await custom_output_extractor(run_result)
+                result = SubagentToolResult.model_validate_json(extracted_json).model_copy(update={
+                    "child_agent_id": child_execution.agent_id,
+                    "output_start_sequence": start_seq or 0,
+                    "output_end_sequence": end_seq or 0,
+                    "turns_used": child_execution.turns_used,
+                    "tool_calls_made": child_execution.tool_calls_made,
+                })
+                return result.model_dump_json()
+            except Exception as exc:
+                logger.warning(
+                    "subagent {} failed at depth={}: {}: {}",
+                    child_execution.agent_id, child_depth,
+                    type(exc).__name__, exc,
+                )
+                failure = SubagentToolResult(
+                    child_agent_id=child_execution.agent_id,
+                    answer=f"Subagent failed: {type(exc).__name__}: {exc}",
+                    output_start_sequence=start_seq or 0,
+                    output_end_sequence=end_seq or 0,
+                    turns_used=child_execution.turns_used,
+                    tool_calls_made=child_execution.tool_calls_made,
+                )
+                return failure.model_dump_json()
 
     sdk_tool.on_invoke_tool = guarded_invoke
     return sdk_tool
