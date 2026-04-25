@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import APIConnectionError, BadRequestError
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
@@ -88,8 +90,10 @@ async def test_runner_circuit_breaker() -> None:
         parent_agent_id=None, parent_tool_call_id=None,
     )
 
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
     async def always_fail(*, agent, input, context):
-        raise RuntimeError("provider 500")
+        raise APIConnectionError(request=fake_request)
 
     async def noop_compactor(_):
         return ""
@@ -107,3 +111,80 @@ async def test_runner_circuit_breaker() -> None:
             output_bus=bus,
             is_root=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_retry_on_bad_request() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root", agent_name="root", depth=0,
+        parent_agent_id=None, parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
+
+    async def raise_400(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        raise BadRequestError(
+            message="bad field",
+            response=fake_response,
+            body={"error": {"message": "bad field"}},
+        )
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=raise_400,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(BadRequestError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_on_connection_error_then_fails() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root", agent_name="root", depth=0,
+        parent_agent_id=None, parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def raise_connection(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        raise APIConnectionError(request=fake_request)
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=raise_connection,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 10

@@ -4,12 +4,22 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
+from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from engine.agents.agent_context import AgentContext, Compactor
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.openai_event_mapper import OpenAiEventMapper
 from engine.errors import EngineAgentExhaustedError
+
+
+def _is_retriable_llm_error(exc: BaseException) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code >= 500
+    return False
+
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
@@ -45,6 +55,8 @@ class OpenAiAgentRunner:
             try:
                 stream = await self._run_streamed(agent=sdk_agent, input=messages, context=run_context)
             except Exception as exc:
+                if not _is_retriable_llm_error(exc):
+                    raise
                 last_exc = exc
                 agent_execution.record_llm_failure()
                 logger.warning(
