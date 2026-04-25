@@ -112,3 +112,65 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
 
     result = SubagentToolResult.model_validate_json(result_json)
     assert "SDK exploded" in result.answer
+
+
+@pytest.mark.asyncio
+async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from engine.agents.engine_output_bus import EngineOutputBus
+    from engine.agents.engine_run_state import EngineRunState
+    from engine.agents.agent_config import AgentConfig
+    from engine.engine_config import EngineConfig
+    from engine.model_config import ModelConfig
+    from engine.tools.subagent_result import SubagentToolResult
+    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
+    from engine.traces.trace_store import TraceStore
+    from engine.tools import subagent_tool_factory as mod
+
+    cfg = EngineConfig(
+        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    events = [
+        SimpleNamespace(type="run_item_stream_event", item=SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(call_id="c1", id="c1", name="query_traces", arguments="{}"),
+        )),
+        SimpleNamespace(type="run_item_stream_event", item=SimpleNamespace(
+            type="message_output_item",
+            raw_item=SimpleNamespace(id="m1", role="assistant", content=[
+                SimpleNamespace(type="output_text", text="done")
+            ]),
+        )),
+    ]
+
+    class _Stream:
+        new_items: list = []
+
+        async def stream_events(self_inner):
+            for e in events:
+                yield e
+
+        async def wait_for_final_output(self_inner):
+            return self_inner
+
+    def fake_run_streamed(*args, **kwargs):
+        return _Stream()
+
+    monkeypatch.setattr(mod.Runner, "run_streamed", fake_run_streamed)
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
+    result_json = await tool.on_invoke_tool(None, "{}")
+    result = SubagentToolResult.model_validate_json(result_json)
+    assert result.turns_used == 1
+    assert result.tool_calls_made == 1

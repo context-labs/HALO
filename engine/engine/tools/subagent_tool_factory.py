@@ -11,6 +11,7 @@ from loguru import logger
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_event_mapper import OpenAiEventMapper
+from engine.models.engine_output import AgentOutputItem
 from engine.agents.prompt_templates import render_subagent_system_prompt
 from engine.errors import EngineMaxDepthExceededError
 from engine.tools.agent_context_tools import GetContextItemTool
@@ -164,6 +165,13 @@ def _build_subagent_as_tool(
                         if start_seq is None:
                             start_seq = emitted.sequence
                         end_seq = emitted.sequence
+                        # Track turns + tool calls for SubagentToolResult
+                        item = mapped.output_item.item
+                        if item.role == "assistant":
+                            if item.tool_calls:
+                                child_execution.tool_calls_made += len(item.tool_calls)
+                            else:
+                                child_execution.turns_used += 1
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
 
