@@ -8,16 +8,19 @@ here="${0:a:h}"
 root="${here}/.."
 venv="${root}/.sandbox-venv"
 
-if [[ -d "${venv}/bin" ]]; then
+if [[ -d "${venv}/bin" && -x "${venv}/bin/python" ]]; then
   echo "sandbox venv already exists at ${venv}"
   exit 0
 fi
 
+# Fresh build: remove any partial venv first.
+rm -rf "${venv}"
+
 uv venv --python 3.12 "${venv}"
-"${venv}/bin/pip" install --no-cache-dir \
+uv pip install --python "${venv}/bin/python" --no-cache \
   "numpy>=2.0" \
   "pandas>=2.2" \
   "pydantic>=2.8"
-"${venv}/bin/pip" install --no-cache-dir -e "${root}"
+uv pip install --python "${venv}/bin/python" --no-cache -e "${root}"
 
 echo "sandbox venv built at ${venv}"
