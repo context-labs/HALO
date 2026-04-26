@@ -69,14 +69,34 @@ def test_to_messages_array_first_call() -> None:
     ]
 
 
-def test_to_messages_array_dedups_caller_system() -> None:
+def test_to_messages_array_preserves_caller_system() -> None:
+    cfg = _cfg()
+    # Caller's own system prompt — not the engine's
+    custom_system = "You are a pirate. Rhyme."
+    inputs = [
+        AgentMessage(role="system", content=custom_system),
+        AgentMessage(role="user", content="Q1"),
+        AgentMessage(role="assistant", content="A1"),
+    ]
+    results = [_output_item("assistant", "A2")]
+    out = main.to_messages_array(inputs, results, cfg)
+    # Caller's system kept verbatim; engine does NOT overwrite it.
+    assert sum(1 for m in out if m.role == "system") == 1
+    assert out[0].content == custom_system
+    assert [(m.role, m.content) for m in out[1:]] == [
+        ("user", "Q1"),
+        ("assistant", "A1"),
+        ("assistant", "A2"),
+    ]
+
+
+def test_to_messages_array_continuation_with_engine_system() -> None:
     cfg = _cfg()
     sys_text = render_root_system_prompt(
         instructions=cfg.root_agent.instructions,
         maximum_depth=cfg.maximum_depth,
         maximum_parallel_subagents=cfg.maximum_parallel_subagents,
     )
-    # Caller passes back the prior conversation including the system message
     inputs = [
         AgentMessage(role="system", content=sys_text),
         AgentMessage(role="user", content="Q1"),
@@ -84,10 +104,9 @@ def test_to_messages_array_dedups_caller_system() -> None:
     ]
     results = [_output_item("assistant", "A2")]
     out = main.to_messages_array(inputs, results, cfg)
-    # Only one system message; rest in order
     assert sum(1 for m in out if m.role == "system") == 1
-    assert [(m.role, m.content) for m in out] == [
-        ("system", sys_text),
+    assert out[0].content == sys_text
+    assert [(m.role, m.content) for m in out[1:]] == [
         ("user", "Q1"),
         ("assistant", "A1"),
         ("assistant", "A2"),

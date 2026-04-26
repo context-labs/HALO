@@ -200,24 +200,17 @@ def test_from_input_messages_continuation_passes_through() -> None:
     ]
 
 
-def test_from_input_messages_foreign_system_replaced() -> None:
+def test_from_input_messages_caller_system_left_alone() -> None:
     cfg = _engine_config()
+    custom_system = "You are a pirate. Speak in rhymes."
     messages = [
-        AgentMessage(role="system", content="You are a pirate. Speak in rhymes."),
+        AgentMessage(role="system", content=custom_system),
         AgentMessage(role="user", content="Hi"),
     ]
-    from loguru import logger as _logger
-
-    captured: list[str] = []
-    sink_id = _logger.add(lambda m: captured.append(m), level="WARNING")
-    try:
-        ctx = AgentContext.from_input_messages(messages, cfg)
-    finally:
-        _logger.remove(sink_id)
-
+    ctx = AgentContext.from_input_messages(messages, cfg)
+    # Caller's system preserved verbatim, engine does NOT replace it
     assert ctx.items[0].role == "system"
-    assert ctx.items[0].content == _expected_system(cfg)
+    assert ctx.items[0].content == custom_system
     roles = [i.role for i in ctx.items]
     assert roles == ["system", "user"]
     assert ctx.items[1].content == "Hi"
-    assert any("foreign system message" in m for m in captured)
