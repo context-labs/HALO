@@ -8,12 +8,14 @@ from typing import Any
 from agents import Agent, FunctionTool, RunContextWrapper, Runner
 from loguru import logger
 
+from engine.agents.agent_context import AgentContext
+from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_run_state import EngineRunState
-from engine.agents.openai_event_mapper import OpenAiEventMapper
-from engine.models.engine_output import AgentOutputItem
+from engine.agents.openai_agent_runner import OpenAiAgentRunner
+from engine.agents.openai_compactor import build_openai_compactor_factory
 from engine.agents.prompt_templates import render_subagent_system_prompt
-from engine.errors import EngineMaxDepthExceededError
+from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
 from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
@@ -93,49 +95,24 @@ def _build_subagent_as_tool(
     semaphore: asyncio.Semaphore,
 ) -> FunctionTool:
     engine_config = run_state.config
+    subagent_system_prompt = render_subagent_system_prompt(
+        instructions=engine_config.subagent.instructions,
+        depth=child_depth,
+        maximum_depth=engine_config.maximum_depth,
+        maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+    )
+    # The system prompt lives in the AgentContext (case 1 of from_input_messages-style
+    # construction below), so the SDK Agent itself uses an empty `instructions`.
     child_agent = Agent[EngineRunState](
         name=engine_config.subagent.name,
-        instructions=render_subagent_system_prompt(
-            instructions=engine_config.subagent.instructions,
-            depth=child_depth,
-            maximum_depth=engine_config.maximum_depth,
-            maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
-        ),
+        instructions="",
         model=engine_config.subagent.model.name,
         tools=_child_tools_for_depth(depth=child_depth, run_state=run_state, semaphore=semaphore),
     )
 
-    mapper = OpenAiEventMapper()
-    output_bus = run_state.output_bus
-
-    async def custom_output_extractor(run_result) -> str:
-        final_text = ""
-        for item in getattr(run_result, "new_items", []):
-            if getattr(item, "type", None) == "message_output_item":
-                raw_item = getattr(item, "raw_item", None)
-                if raw_item is None:
-                    continue
-                parts = [
-                    getattr(p, "text", "")
-                    for p in (getattr(raw_item, "content", None) or [])
-                    if getattr(p, "type", None) in ("output_text", "text")
-                ]
-                text = "".join(parts).strip()
-                if text:
-                    final_text = text
-        return SubagentToolResult(
-            child_agent_id="",
-            answer=final_text,
-            output_start_sequence=0,
-            output_end_sequence=0,
-            turns_used=0,
-            tool_calls_made=0,
-        ).model_dump_json()
-
     sdk_tool = child_agent.as_tool(
         tool_name="call_subagent",
         tool_description="Delegate a focused question to a subagent. Returns the subagent's answer.",
-        custom_output_extractor=custom_output_extractor,
     )
 
     async def guarded_invoke(ctx: RunContextWrapper[Any], raw_arguments: str) -> str:
@@ -153,65 +130,82 @@ def _build_subagent_as_tool(
                 parent_tool_call_id=None,
             )
             run_state.register(child_execution)
-            start_seq: int | None = None
-            end_seq: int | None = None
+
+            child_context = AgentContext(
+                items=[
+                    AgentContextItem(item_id="sys-0", role="system", content=subagent_system_prompt),
+                    AgentContextItem(item_id="in-0", role="user", content=raw_arguments),
+                ],
+                compaction_model=engine_config.compaction_model,
+                text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
+                tool_call_compaction_keep_last_messages=engine_config.tool_call_compaction_keep_last_messages,
+            )
+
+            async def _run_streamed(*, agent, input, context):
+                return Runner.run_streamed(starting_agent=agent, input=input, context=context)
+
+            runner = OpenAiAgentRunner(
+                run_streamed=_run_streamed,
+                compactor_factory=build_openai_compactor_factory(engine_config),
+            )
+
             try:
-                stream = Runner.run_streamed(
-                    starting_agent=child_agent,
-                    input=raw_arguments,
-                    context=run_state,
+                await runner.run(
+                    sdk_agent=child_agent,
+                    agent_context=child_context,
+                    agent_execution=child_execution,
+                    output_bus=run_state.output_bus,
+                    is_root=False,
+                    run_context=run_state,
                 )
-                async for ev in stream.stream_events():
-                    mapped = mapper.to_mapped_event(ev, execution=child_execution, is_root=False)
-                    if mapped.output_item is not None:
-                        emitted = await output_bus.emit(mapped.output_item)
-                        if start_seq is None:
-                            start_seq = emitted.sequence
-                        end_seq = emitted.sequence
-                        # Track turns + tool calls for SubagentToolResult
-                        item = mapped.output_item.item
-                        if item.role == "assistant":
-                            if item.tool_calls:
-                                child_execution.tool_calls_made += len(item.tool_calls)
-                            else:
-                                child_execution.turns_used += 1
-                    if mapped.delta is not None:
-                        await output_bus.emit(mapped.delta)
-
-                child_execution.output_start_sequence = start_seq
-                child_execution.output_end_sequence = end_seq
-
-                run_result = stream
-                if hasattr(stream, "wait_for_final_output"):
-                    run_result = await stream.wait_for_final_output()
-
-                extracted_json = await custom_output_extractor(run_result)
-                result = SubagentToolResult.model_validate_json(extracted_json).model_copy(update={
-                    "child_agent_id": child_execution.agent_id,
-                    "output_start_sequence": start_seq or 0,
-                    "output_end_sequence": end_seq or 0,
-                    "turns_used": child_execution.turns_used,
-                    "tool_calls_made": child_execution.tool_calls_made,
-                })
-                return result.model_dump_json()
+            except EngineAgentExhaustedError as exc:
+                logger.warning(
+                    "subagent {} exhausted retries at depth={}: {}",
+                    child_execution.agent_id, child_depth, exc,
+                )
+                return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
             except Exception as exc:
                 logger.warning(
                     "subagent {} failed at depth={}: {}: {}",
                     child_execution.agent_id, child_depth,
                     type(exc).__name__, exc,
                 )
-                failure = SubagentToolResult(
-                    child_agent_id=child_execution.agent_id,
-                    answer=f"Subagent failed: {type(exc).__name__}: {exc}",
-                    output_start_sequence=start_seq or 0,
-                    output_end_sequence=end_seq or 0,
-                    turns_used=child_execution.turns_used,
-                    tool_calls_made=child_execution.tool_calls_made,
-                )
-                return failure.model_dump_json()
+                return _failure_result(child_execution, f"Subagent failed: {type(exc).__name__}: {exc}")
+
+            answer = _extract_final_answer(child_context)
+            result = SubagentToolResult(
+                child_agent_id=child_execution.agent_id,
+                answer=answer,
+                output_start_sequence=child_execution.output_start_sequence or 0,
+                output_end_sequence=child_execution.output_end_sequence or 0,
+                turns_used=child_execution.turns_used,
+                tool_calls_made=child_execution.tool_calls_made,
+            )
+            return result.model_dump_json()
 
     sdk_tool.on_invoke_tool = guarded_invoke
     return sdk_tool
+
+
+def _extract_final_answer(context: AgentContext) -> str:
+    """Walk the context backwards and return the last assistant text message."""
+    for item in reversed(context.items):
+        if item.role != "assistant" or item.tool_calls:
+            continue
+        if isinstance(item.content, str) and item.content.strip():
+            return item.content.strip()
+    return ""
+
+
+def _failure_result(execution: AgentExecution, message: str) -> str:
+    return SubagentToolResult(
+        child_agent_id=execution.agent_id,
+        answer=message,
+        output_start_sequence=execution.output_start_sequence or 0,
+        output_end_sequence=execution.output_end_sequence or 0,
+        turns_used=execution.turns_used,
+        tool_calls_made=execution.tool_calls_made,
+    ).model_dump_json()
 
 
 def _wrap_with_semaphore(
