@@ -126,21 +126,20 @@ def to_messages_array(
 ) -> list[AgentMessage]:
     """Reconstruct a messages list suitable for a follow-up engine call.
 
-    Returns the engine-rendered system message + the caller's non-system input
-    messages + every depth=0 item the engine emitted, in order. Append a new
-    user message and pass the result back to `run_engine_async` to continue
-    the conversation.
+    Returns a leading system message + the caller's non-system input messages
+    + every depth=0 item the engine emitted, in order. If the caller supplied
+    their own system message, it is preserved as-is; otherwise the
+    engine-rendered system prompt is prepended. Append a new user message and
+    pass the result back to `run_engine_async` to continue the conversation.
     """
-    expected_system = render_root_system_prompt(
-        instructions=engine_config.root_agent.instructions,
-        maximum_depth=engine_config.maximum_depth,
-        maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
-    )
-    body = (
-        input_messages[1:]
-        if input_messages and input_messages[0].role == "system"
-        else input_messages
-    )
-    out: list[AgentMessage] = [AgentMessage(role="system", content=expected_system), *body]
+    if input_messages and input_messages[0].role == "system":
+        out: list[AgentMessage] = list(input_messages)
+    else:
+        rendered = render_root_system_prompt(
+            instructions=engine_config.root_agent.instructions,
+            maximum_depth=engine_config.maximum_depth,
+            maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+        )
+        out = [AgentMessage(role="system", content=rendered), *input_messages]
     out.extend(r.item for r in results if r.depth == 0)
     return out

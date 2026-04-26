@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-from loguru import logger
-
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.prompt_templates import render_root_system_prompt
 from engine.model_config import ModelConfig
@@ -38,33 +36,31 @@ class AgentContext:
     ) -> "AgentContext":
         """Build a root AgentContext from caller-supplied messages.
 
-        Three cases:
+        Two cases:
           1. No system message at front: prepend the engine-rendered system prompt.
-          2. Front message is a system message identical to what the engine would
-             render (continuation case): pass through unchanged.
-          3. Front message is a foreign system message: replace it with the
-             engine-rendered one and warn.
+          2. Front message is already a system message: pass through unchanged.
+             The caller is responsible for whatever it contains. This supports
+             continuations and lets users supply their own system prompts.
         """
-        expected_system = render_root_system_prompt(
-            instructions=engine_config.root_agent.instructions,
-            maximum_depth=engine_config.maximum_depth,
-            maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
-        )
-        caller_system = messages[0] if messages and messages[0].role == "system" else None
+        has_system = bool(messages) and messages[0].role == "system"
 
-        if caller_system is None:
-            body = messages
-        elif isinstance(caller_system.content, str) and caller_system.content == expected_system:
-            body = messages[1:]
-        else:
-            logger.warning(
-                "halo-engine: replacing foreign system message with engine-rendered one"
+        if has_system:
+            sys_item = AgentContextItem(
+                item_id="sys-0",
+                role="system",
+                content=messages[0].content,
             )
             body = messages[1:]
+        else:
+            rendered = render_root_system_prompt(
+                instructions=engine_config.root_agent.instructions,
+                maximum_depth=engine_config.maximum_depth,
+                maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+            )
+            sys_item = AgentContextItem(item_id="sys-0", role="system", content=rendered)
+            body = messages
 
-        items: list[AgentContextItem] = [
-            AgentContextItem(item_id="sys-0", role="system", content=expected_system)
-        ]
+        items: list[AgentContextItem] = [sys_item]
         for i, msg in enumerate(body):
             items.append(AgentContextItem(
                 item_id=f"in-{i}",
