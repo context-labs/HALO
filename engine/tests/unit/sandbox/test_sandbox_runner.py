@@ -9,12 +9,14 @@ import pytest
 from engine.sandbox.sandbox_config import SandboxConfig
 from engine.sandbox.sandbox_runner import SandboxRunner
 
+from .conftest import bwrap_can_sandbox
+
 
 @pytest.mark.asyncio
 async def test_sandboxed_hello_world(tmp_path: Path, fixtures_dir: Path) -> None:
     system = platform.system()
-    if system == "Linux" and shutil.which("bwrap") is None:
-        pytest.skip("bubblewrap not installed")
+    if system == "Linux" and not bwrap_can_sandbox():
+        pytest.skip("bubblewrap unavailable or kernel disallows user-namespace sandboxing")
     if system == "Darwin" and shutil.which("sandbox-exec") is None:
         pytest.skip("sandbox-exec unavailable")
     if system not in ("Linux", "Darwin"):
