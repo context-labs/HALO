@@ -80,10 +80,15 @@ class OpenAiAgentRunner:
                     if agent_execution.output_start_sequence is None:
                         agent_execution.output_start_sequence = emitted.sequence
                     agent_execution.output_end_sequence = emitted.sequence
+                    item = mapped.output_item.item
+                    if item.role == "assistant":
+                        if item.tool_calls:
+                            agent_execution.tool_calls_made += len(item.tool_calls)
+                        else:
+                            agent_execution.turns_used += 1
                 if mapped.delta is not None:
                     await output_bus.emit(mapped.delta)
 
-            agent_execution.turns_used += 1
             await agent_context.compact_old_items(self._compactor_factory(agent_execution))
             return
 
