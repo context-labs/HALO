@@ -13,7 +13,6 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.openai_compactor import build_openai_compactor_factory
-from engine.agents.prompt_templates import render_root_system_prompt
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
@@ -117,29 +116,3 @@ def run_engine(
     trace_path: Path,
 ) -> list[AgentOutputItem]:
     return asyncio.run(run_engine_async(messages, engine_config, trace_path))
-
-
-def to_messages_array(
-    input_messages: list[AgentMessage],
-    results: list[AgentOutputItem],
-    engine_config: EngineConfig,
-) -> list[AgentMessage]:
-    """Reconstruct a messages list suitable for a follow-up engine call.
-
-    Returns a leading system message + the caller's non-system input messages
-    + every depth=0 item the engine emitted, in order. If the caller supplied
-    their own system message, it is preserved as-is; otherwise the
-    engine-rendered system prompt is prepended. Append a new user message and
-    pass the result back to `run_engine_async` to continue the conversation.
-    """
-    if input_messages and input_messages[0].role == "system":
-        out: list[AgentMessage] = list(input_messages)
-    else:
-        rendered = render_root_system_prompt(
-            instructions=engine_config.root_agent.instructions,
-            maximum_depth=engine_config.maximum_depth,
-            maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
-        )
-        out = [AgentMessage(role="system", content=rendered), *input_messages]
-    out.extend(r.item for r in results if r.depth == 0)
-    return out
