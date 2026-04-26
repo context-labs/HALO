@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import platform
-import shutil
 from pathlib import Path
 
 import pytest
@@ -11,11 +10,13 @@ from engine.sandbox.sandbox_runner import SandboxRunner
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 
+from .conftest import bwrap_can_sandbox
+
 
 def _sandbox_ready(tmp_path: Path, fixtures_dir: Path) -> tuple[SandboxRunner, Path, Path]:
     system = platform.system()
-    if system == "Linux" and shutil.which("bwrap") is None:
-        pytest.skip("bubblewrap not installed")
+    if system == "Linux" and not bwrap_can_sandbox():
+        pytest.skip("bubblewrap unavailable or kernel disallows user-namespace sandboxing")
     if system not in ("Linux", "Darwin"):
         pytest.skip(f"unsupported platform {system}")
     venv = Path(__file__).resolve().parents[3] / ".sandbox-venv"
