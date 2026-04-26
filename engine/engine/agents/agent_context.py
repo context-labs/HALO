@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
+
+from loguru import logger
 
 from engine.agents.agent_context_items import AgentContextItem
+from engine.agents.prompt_templates import render_root_system_prompt
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
+
+if TYPE_CHECKING:
+    from engine.engine_config import EngineConfig
 
 Compactor: TypeAlias = Callable[[AgentContextItem], Awaitable[str]]
 
@@ -23,6 +29,58 @@ class AgentContext:
         self.text_message_compaction_keep_last_messages = text_message_compaction_keep_last_messages
         self.tool_call_compaction_keep_last_messages = tool_call_compaction_keep_last_messages
         self._index: dict[str, AgentContextItem] = {item.item_id: item for item in items}
+
+    @classmethod
+    def from_input_messages(
+        cls,
+        messages: list[AgentMessage],
+        engine_config: "EngineConfig",
+    ) -> "AgentContext":
+        """Build a root AgentContext from caller-supplied messages.
+
+        Three cases:
+          1. No system message at front: prepend the engine-rendered system prompt.
+          2. Front message is a system message identical to what the engine would
+             render (continuation case): pass through unchanged.
+          3. Front message is a foreign system message: replace it with the
+             engine-rendered one and warn.
+        """
+        expected_system = render_root_system_prompt(
+            instructions=engine_config.root_agent.instructions,
+            maximum_depth=engine_config.maximum_depth,
+            maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+        )
+        caller_system = messages[0] if messages and messages[0].role == "system" else None
+
+        if caller_system is None:
+            body = messages
+        elif isinstance(caller_system.content, str) and caller_system.content == expected_system:
+            body = messages[1:]
+        else:
+            logger.warning(
+                "halo-engine: replacing foreign system message with engine-rendered one"
+            )
+            body = messages[1:]
+
+        items: list[AgentContextItem] = [
+            AgentContextItem(item_id="sys-0", role="system", content=expected_system)
+        ]
+        for i, msg in enumerate(body):
+            items.append(AgentContextItem(
+                item_id=f"in-{i}",
+                role=msg.role,
+                content=msg.content,
+                tool_calls=msg.tool_calls,
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            ))
+
+        return cls(
+            items=items,
+            compaction_model=engine_config.compaction_model,
+            text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
+            tool_call_compaction_keep_last_messages=engine_config.tool_call_compaction_keep_last_messages,
+        )
 
     def append(self, item: AgentContextItem) -> None:
         self.items.append(item)

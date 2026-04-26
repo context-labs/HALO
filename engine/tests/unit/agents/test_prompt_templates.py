@@ -17,7 +17,7 @@ def test_final_sentinel_constant() -> None:
 
 def test_root_prompt_includes_sentinel_instruction() -> None:
     text = render_root_system_prompt(
-        user_instructions="Investigate failing traces.",
+        instructions="Investigate failing traces.",
         maximum_depth=2,
         maximum_parallel_subagents=4,
     )
@@ -27,7 +27,7 @@ def test_root_prompt_includes_sentinel_instruction() -> None:
 
 def test_subagent_prompt_reports_depth() -> None:
     text = render_subagent_system_prompt(
-        user_instructions="You are a sub.",
+        instructions="You are a sub.",
         depth=1,
         maximum_depth=2,
         maximum_parallel_subagents=4,
@@ -40,4 +40,4 @@ def test_compaction_and_synthesis_prompts_are_strings() -> None:
     assert isinstance(COMPACTION_SYSTEM_PROMPT, str) and COMPACTION_SYSTEM_PROMPT
     assert isinstance(SYNTHESIS_SYSTEM_PROMPT, str) and SYNTHESIS_SYSTEM_PROMPT
     assert "<final/>" in ROOT_SYSTEM_PROMPT_TEMPLATE
-    assert "{user_instructions}" in SUBAGENT_SYSTEM_PROMPT_TEMPLATE
+    assert "{instructions}" in SUBAGENT_SYSTEM_PROMPT_TEMPLATE

@@ -17,8 +17,8 @@ Output rules:
   assistant message with a single line containing only: <final/>
 - Do not emit <final/> in intermediate messages.
 
-User instructions:
-{user_instructions}
+Instructions:
+{instructions}
 """
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
@@ -29,8 +29,8 @@ your depth permits, a call_subagent tool.
 When finished, return a concise answer. Do not emit <final/> — that
 sentinel is reserved for the root agent.
 
-User instructions:
-{user_instructions}
+Instructions:
+{instructions}
 """
 
 COMPACTION_SYSTEM_PROMPT = """\
@@ -48,12 +48,12 @@ patterns, model names, and token counts when available.
 
 def render_root_system_prompt(
     *,
-    user_instructions: str,
+    instructions: str,
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
-        user_instructions=user_instructions,
+        instructions=instructions,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
     )
@@ -61,13 +61,13 @@ def render_root_system_prompt(
 
 def render_subagent_system_prompt(
     *,
-    user_instructions: str,
+    instructions: str,
     depth: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
-        user_instructions=user_instructions,
+        instructions=instructions,
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
