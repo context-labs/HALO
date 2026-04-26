@@ -3,3 +3,5 @@
 __pycache__/
 .pytest_cache/
 *.egg-info/
+*.engine-index.jsonl
+*.engine-index.meta.json
