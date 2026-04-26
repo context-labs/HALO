@@ -33,6 +33,14 @@ class TraceStore:
     def trace_count(self) -> int:
         return len(self._rows)
 
+    @property
+    def trace_path(self) -> Path:
+        return self._trace_path
+
+    @property
+    def index_path(self) -> Path:
+        return self._index_path
+
     def view_trace(self, trace_id: str) -> "TraceView":
         from engine.traces.models.canonical_span import SpanRecord
         from engine.traces.models.trace_query_models import TraceView

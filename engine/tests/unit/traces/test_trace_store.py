@@ -108,3 +108,9 @@ async def test_render_trace_truncates_when_over_budget(built_store: TraceStore) 
     rendered = built_store.render_trace("t-aaaa", budget=200)
     assert rendered.endswith("... [truncated]")
     assert len(rendered) <= 200 + len("... [truncated]")
+
+
+@pytest.mark.asyncio
+async def test_paths_exposed_publicly(built_store: TraceStore) -> None:
+    assert built_store.trace_path.is_file()
+    assert built_store.index_path.is_file()
