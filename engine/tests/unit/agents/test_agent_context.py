@@ -136,3 +136,88 @@ async def test_compact_old_items_skips_system_and_already_compacted() -> None:
     compacted_ids = {c.item_id for c in stub.calls}
     assert compacted_ids == {"u2"}
     assert ctx.get_item("s").is_compacted is False
+
+
+# --- from_input_messages -----------------------------------------------------
+
+from engine.agents.agent_config import AgentConfig
+from engine.agents.prompt_templates import render_root_system_prompt
+from engine.engine_config import EngineConfig
+from engine.models.messages import AgentMessage
+
+
+def _engine_config(instructions: str = "Be brief.") -> EngineConfig:
+    agent = AgentConfig(
+        name="root",
+        instructions=instructions,
+        model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_turns=4,
+    )
+    return EngineConfig(
+        root_agent=agent,
+        subagent=agent.model_copy(update={"name": "sub"}),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+    )
+
+
+def _expected_system(cfg: EngineConfig) -> str:
+    return render_root_system_prompt(
+        instructions=cfg.root_agent.instructions,
+        maximum_depth=cfg.maximum_depth,
+        maximum_parallel_subagents=cfg.maximum_parallel_subagents,
+    )
+
+
+def test_from_input_messages_no_system_prepends() -> None:
+    cfg = _engine_config()
+    messages = [AgentMessage(role="user", content="Find errors")]
+    ctx = AgentContext.from_input_messages(messages, cfg)
+    assert ctx.items[0].role == "system"
+    assert ctx.items[0].content == _expected_system(cfg)
+    assert ctx.items[0].item_id == "sys-0"
+    assert ctx.items[1].role == "user"
+    assert ctx.items[1].content == "Find errors"
+
+
+def test_from_input_messages_continuation_passes_through() -> None:
+    cfg = _engine_config()
+    sys_text = _expected_system(cfg)
+    messages = [
+        AgentMessage(role="system", content=sys_text),
+        AgentMessage(role="user", content="Original Q"),
+        AgentMessage(role="assistant", content="Original A"),
+        AgentMessage(role="user", content="Follow-up Q"),
+    ]
+    ctx = AgentContext.from_input_messages(messages, cfg)
+    systems = [i for i in ctx.items if i.role == "system"]
+    assert len(systems) == 1
+    assert systems[0].content == sys_text
+    assert [(i.role, i.content) for i in ctx.items[1:]] == [
+        ("user", "Original Q"),
+        ("assistant", "Original A"),
+        ("user", "Follow-up Q"),
+    ]
+
+
+def test_from_input_messages_foreign_system_replaced() -> None:
+    cfg = _engine_config()
+    messages = [
+        AgentMessage(role="system", content="You are a pirate. Speak in rhymes."),
+        AgentMessage(role="user", content="Hi"),
+    ]
+    from loguru import logger as _logger
+
+    captured: list[str] = []
+    sink_id = _logger.add(lambda m: captured.append(m), level="WARNING")
+    try:
+        ctx = AgentContext.from_input_messages(messages, cfg)
+    finally:
+        _logger.remove(sink_id)
+
+    assert ctx.items[0].role == "system"
+    assert ctx.items[0].content == _expected_system(cfg)
+    roles = [i.role for i in ctx.items]
+    assert roles == ["system", "user"]
+    assert ctx.items[1].content == "Hi"
+    assert any("foreign system message" in m for m in captured)

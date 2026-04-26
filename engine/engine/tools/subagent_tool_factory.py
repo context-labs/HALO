@@ -96,7 +96,7 @@ def _build_subagent_as_tool(
     child_agent = Agent[EngineRunState](
         name=engine_config.subagent.name,
         instructions=render_subagent_system_prompt(
-            user_instructions=engine_config.subagent.instructions,
+            instructions=engine_config.subagent.instructions,
             depth=child_depth,
             maximum_depth=engine_config.maximum_depth,
             maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
