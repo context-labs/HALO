@@ -16,12 +16,14 @@ from engine.model_config import ModelConfig
 
 def _assistant_event(text: str) -> SimpleNamespace:
     return SimpleNamespace(
-        type="message_output_item",
-        message=SimpleNamespace(
-            id="m1",
-            role="assistant",
-            content=[SimpleNamespace(type="output_text", text=text)],
-            tool_calls=None,
+        type="run_item_stream_event",
+        item=SimpleNamespace(
+            type="message_output_item",
+            raw_item=SimpleNamespace(
+                id="m1",
+                role="assistant",
+                content=[SimpleNamespace(type="output_text", text=text)],
+            ),
         ),
     )
 

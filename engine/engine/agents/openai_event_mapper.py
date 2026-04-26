@@ -43,14 +43,6 @@ class OpenAiEventMapper:
                 return self._map_tool_output(item, execution=execution)
             return MappedEvent()
 
-        # Legacy direct-item test shape (kept for existing unit tests).
-        if kind == "message_output_item":
-            return self._map_assistant_message_legacy(raw_event, execution=execution, is_root=is_root)
-        if kind == "tool_call_item":
-            return self._map_tool_call_legacy(raw_event, execution=execution)
-        if kind == "tool_call_output_item":
-            return self._map_tool_output_legacy(raw_event, execution=execution)
-
         return MappedEvent()
 
     def _map_raw_delta(self, raw: Any, *, execution: AgentExecution) -> MappedEvent:
@@ -201,86 +193,3 @@ class OpenAiEventMapper:
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
 
-    # --- legacy shapes kept alive so the original unit tests still pass ---
-
-    def _map_assistant_message_legacy(
-        self,
-        raw: Any,
-        *,
-        execution: AgentExecution,
-        is_root: bool,
-    ) -> MappedEvent:
-        msg = raw.message
-        text_parts = [
-            getattr(p, "text", "")
-            for p in (getattr(msg, "content", None) or [])
-            if getattr(p, "type", None) == "output_text"
-        ]
-        text = "".join(text_parts)
-        item_id = str(getattr(msg, "id", ""))
-        return self._build_assistant(
-            execution=execution,
-            is_root=is_root,
-            item_id=item_id,
-            text=text,
-            tool_calls=None,
-        )
-
-    def _map_tool_call_legacy(self, raw: Any, *, execution: AgentExecution) -> MappedEvent:
-        call = raw.tool_call
-        tc = AgentToolCall(
-            id=str(call.id),
-            function=AgentToolFunction(
-                name=str(call.function.name),
-                arguments=str(call.function.arguments),
-            ),
-        )
-        item_id = str(getattr(raw, "message_id", call.id))
-        context_item = AgentContextItem(
-            item_id=item_id,
-            role="assistant",
-            content=None,
-            tool_calls=[tc],
-            agent_id=execution.agent_id,
-            parent_agent_id=execution.parent_agent_id,
-            parent_tool_call_id=execution.parent_tool_call_id,
-        )
-        output_item = AgentOutputItem(
-            sequence=0,
-            agent_id=execution.agent_id,
-            parent_agent_id=execution.parent_agent_id,
-            parent_tool_call_id=execution.parent_tool_call_id,
-            agent_name=execution.agent_name,
-            depth=execution.depth,
-            item=AgentMessage(role="assistant", content=None, tool_calls=[tc]),
-        )
-        return MappedEvent(context_item=context_item, output_item=output_item)
-
-    def _map_tool_output_legacy(self, raw: Any, *, execution: AgentExecution) -> MappedEvent:
-        item_id = str(getattr(raw, "message_id", raw.tool_call_id))
-        content = str(raw.output)
-        context_item = AgentContextItem(
-            item_id=item_id,
-            role="tool",
-            content=content,
-            tool_call_id=str(raw.tool_call_id),
-            name=str(getattr(raw, "name", "")) or None,
-            agent_id=execution.agent_id,
-            parent_agent_id=execution.parent_agent_id,
-            parent_tool_call_id=execution.parent_tool_call_id,
-        )
-        output_item = AgentOutputItem(
-            sequence=0,
-            agent_id=execution.agent_id,
-            parent_agent_id=execution.parent_agent_id,
-            parent_tool_call_id=execution.parent_tool_call_id,
-            agent_name=execution.agent_name,
-            depth=execution.depth,
-            item=AgentMessage(
-                role="tool",
-                content=content,
-                tool_call_id=str(raw.tool_call_id),
-                name=str(getattr(raw, "name", "")) or None,
-            ),
-        )
-        return MappedEvent(context_item=context_item, output_item=output_item)
