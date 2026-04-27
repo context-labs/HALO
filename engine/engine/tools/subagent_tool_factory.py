@@ -30,6 +30,8 @@ from engine.tools.trace_tools import (
     ViewTraceTool,
 )
 
+# TODO: Move this to an "openai agents sdk client" file or folder, keep all usage of the library isolated to that module.
+# Combine with OpenAiAgentRunner
 
 def build_root_sdk_agent(
     *,
@@ -74,6 +76,7 @@ def _child_tools_for_depth(
     """
     engine_config = run_state.config
 
+    # TODO: Simplify passing in callback funcs. Maybe we can pass in the run_state directly and let to_sdk_function_tool set everything up.
     def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
         return ToolContext.model_construct(
             run_state=run_state,
@@ -158,6 +161,10 @@ def _build_subagent_as_tool(
                 f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
             )
 
+        # TODO: Can we simplify this by instantiating child_execution above stub_child_agent, but not registering it until on_invoke_tool
+        # is called, allowing us to only create a single Agent[EngineRunState] instance?
+        # The current pattern is required so that the child_execution is available to pass into _child_tools_for_depth.
+        # If we do need to keep this pattern ,split out this inline function into a standalone for readability
         async with semaphore:
             child_execution = AgentExecution(
                 agent_id=f"sub-{uuid.uuid4().hex[:8]}",

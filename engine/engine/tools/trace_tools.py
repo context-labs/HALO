@@ -49,6 +49,7 @@ class QueryTracesTool:
         )
 
 
+# TODO: Tool definitions should inherent from a base class / be restricted
 class CountTracesTool:
     """Tool wrapper around ``TraceStore.count_traces``: cheap count without materializing summaries."""
 

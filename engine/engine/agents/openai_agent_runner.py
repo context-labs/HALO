@@ -71,6 +71,7 @@ class OpenAiAgentRunner:
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
             try:
+                # TODO: Pretty sure an iterator wont throw here
                 stream = await self._run_streamed(agent=sdk_agent, input=messages, context=run_context)
             except Exception as exc:
                 if not _is_retriable_llm_error(exc):
@@ -107,6 +108,7 @@ class OpenAiAgentRunner:
                 if mapped.delta is not None:
                     await output_bus.emit(mapped.delta)
 
+            # TODO: Remove passing in compactor_factory, the compactor agent/llm config should be instantiated once and re used
             await agent_context.compact_old_items(self._compactor_factory(agent_execution))
             return
 
