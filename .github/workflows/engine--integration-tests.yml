@@ -20,7 +20,7 @@ permissions:
 jobs:
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
@@ -91,7 +91,7 @@ jobs:
 
   linux-sandbox-tests:
     name: Linux Sandbox Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
@@ -136,7 +136,7 @@ jobs:
           "
 
       - name: Run Linux sandbox integration tests
-        run: task test:integration:linux
+        run: task test:integration-linux
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v5
@@ -159,7 +159,11 @@ jobs:
 
   macos-sandbox-tests:
     name: macOS Sandbox Tests
-    runs-on: macos-latest
+    # TODO: confirm the exact label set provisioned for the team's self-hosted
+    # macOS runners. The placeholder below uses the standard GitHub Actions
+    # self-hosted label tuple; replace once the runner pool publishes its
+    # canonical labels (e.g. ["self-hosted", "macOS", "ARM64", "halo"]).
+    runs-on: [self-hosted, macOS]
     timeout-minutes: 15
     defaults:
       run:
@@ -204,7 +208,7 @@ jobs:
           "
 
       - name: Run macOS sandbox integration tests
-        run: task test:integration:macos
+        run: task test:integration-macos
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v5

@@ -47,7 +47,6 @@ from engine.tools.tool_protocol import ToolContext
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
-
 _PROBE_DISABLED_SANDBOX_STATUS = SandboxStatus.unavailable(
     reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
     diagnostic="probes never exercise the real sandbox",

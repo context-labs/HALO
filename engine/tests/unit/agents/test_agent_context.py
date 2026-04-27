@@ -201,8 +201,10 @@ def test_from_input_messages_omits_run_code_clause_when_unavailable() -> None:
     cfg = _engine_config()
     messages = [AgentMessage(role="user", content="hi")]
     ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=False)
-    assert " run_code," not in ctx.items[0].content
-    assert "call_subagent" in ctx.items[0].content
+    rendered = ctx.items[0].content
+    assert isinstance(rendered, str)
+    assert " run_code," not in rendered
+    assert "call_subagent" in rendered
 
 
 def test_from_input_messages_continuation_passes_through() -> None:

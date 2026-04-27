@@ -46,7 +46,7 @@ jobs:
   bump-version:
     name: Bump Version
     needs: [checks]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -107,10 +107,10 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: depot-ubuntu-latest
             wheel_platform: manylinux_2_28_x86_64
           - arch: aarch64
-            runner: ubuntu-24.04-arm
+            runner: depot-ubuntu-latest-arm
             wheel_platform: manylinux_2_28_aarch64
     defaults:
       run:
@@ -190,7 +190,7 @@ jobs:
   build-sdist:
     name: Build sdist
     needs: [bump-version]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     defaults:
       run:
         working-directory: bubblewrap-bin
@@ -228,7 +228,7 @@ jobs:
     name: Publish to PyPI
     needs: [bump-version, build-linux-wheel, build-sdist]
     if: ${{ inputs.dry_run == false }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     environment:
       name: pypi-bubblewrap-bin
       url: https://pypi.org/project/bubblewrap-bin/${{ needs.bump-version.outputs.new_version }}/
@@ -264,7 +264,7 @@ jobs:
     name: Release Summary
     needs: [checks, bump-version, build-linux-wheel, build-sdist, publish]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     steps:
       - name: Generate summary
         env:

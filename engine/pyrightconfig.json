@@ -3,12 +3,13 @@
     "engine",
     "tests/unit",
     "tests/integration",
+    "tests/integration-linux",
+    "tests/integration-macos",
     "tests/e2e"
   ],
   "exclude": [
     "**/__pycache__",
-    ".venv",
-    ".sandbox-venv"
+    ".venv"
   ],
   "pythonVersion": "3.12",
   "venvPath": ".",
