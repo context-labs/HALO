@@ -38,6 +38,11 @@ def render_bootstrap_script(
     trace_mount_path: str,
     index_mount_path: str,
 ) -> str:
+    """Render the wrapper script the sandbox runs: preloads ``trace_store``, numpy, pandas, then exec's user code.
+
+    Mount paths differ by platform — Linux uses fixed in-sandbox mountpoints,
+    macOS passes through real host paths under the ``sandbox-exec`` profile.
+    """
     return _TEMPLATE.format(
         user_code=user_code,
         trace_mount_path=trace_mount_path,

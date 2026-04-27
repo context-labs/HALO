@@ -14,6 +14,8 @@ AvailableModelName: TypeAlias = Literal[
 
 
 class ModelConfig(BaseModel):
+    """LLM model binding plus generation knobs shared by agent, synthesis, and compaction calls."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: AvailableModelName

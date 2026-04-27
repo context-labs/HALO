@@ -4,6 +4,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TraceIndexRow(BaseModel):
+    """One trace's index entry: byte offsets/lengths into the JSONL plus rollup fields for query/overview.
+
+    Offsets and lengths let TraceStore seek directly to a trace's spans without
+    rescanning. Rollups (services, models, agents, tokens, has_errors) feed
+    ``query_traces``, ``count_traces``, and ``get_overview`` cheaply.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     trace_id: str
@@ -22,6 +29,8 @@ class TraceIndexRow(BaseModel):
 
 
 class TraceIndexMeta(BaseModel):
+    """Sidecar meta file: schema version (validated on load) and total trace count for sanity checks."""
+
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int = Field(ge=1)

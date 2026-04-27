@@ -12,6 +12,11 @@ async def run_process_capped(
     argv: list[str],
     config: SandboxConfig,
 ) -> CodeExecutionResult:
+    """Spawn argv in a new session, read stdout/stderr up to caps, enforce timeout, capture exit code.
+
+    On timeout the entire process group is killed (not just the immediate child) so
+    nothing the sandboxed code spawned survives the wall-clock cutoff.
+    """
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=asyncio.subprocess.PIPE,
@@ -62,6 +67,7 @@ async def run_process_capped(
 
 
 def _kill_process_group(pid: int) -> None:
+    """Signal SIGKILL to the whole process group of ``pid``; tolerate already-exited processes."""
     try:
         os.killpg(os.getpgid(pid), signal.SIGKILL)
     except ProcessLookupError:

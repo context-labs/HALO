@@ -52,6 +52,7 @@ def render_root_system_prompt(
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
+    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract."""
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         instructions=instructions,
         maximum_depth=maximum_depth,
@@ -66,6 +67,7 @@ def render_subagent_system_prompt(
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
+    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root."""
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
         instructions=instructions,
         depth=depth,

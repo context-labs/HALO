@@ -15,6 +15,15 @@ Compactor: TypeAlias = Callable[[AgentContextItem], Awaitable[str]]
 
 
 class AgentContext:
+    """One agent's conversation memory, with compaction-aware rendering to AgentMessage.
+
+    Each agent (root and every subagent) owns its own AgentContext. Stored items keep
+    their original fields plus compaction state; ``to_messages_array`` renders them
+    into provider-compatible messages, substituting summaries for items where
+    ``is_compacted=True``. Tool turns are compacted as a unit (assistant tool_calls
+    plus matching role=tool results) so message arrays stay valid for the LLM API.
+    """
+
     def __init__(
         self,
         items: list[AgentContextItem],
@@ -79,16 +88,25 @@ class AgentContext:
         )
 
     def append(self, item: AgentContextItem) -> None:
+        """Append a new context item and index it by ``item_id`` for ``get_item`` lookups."""
         self.items.append(item)
         self._index[item.item_id] = item
 
     def get_item(self, item_id: str) -> AgentContextItem:
+        """Return the full stored item (including original fields and any compaction summary)."""
         return self._index[item_id]
 
     def to_messages_array(self) -> list[AgentMessage]:
+        """Render stored items into provider-compatible messages, swapping in summaries for compacted items."""
         return [_render_item(item) for item in self.items]
 
     async def compact_old_items(self, compactor: "Compactor") -> None:
+        """Compact eligible older items in place using two independent keep-last thresholds.
+
+        Text messages and tool turns are tracked separately; tool turns (assistant
+        tool_calls + matching results) are always compacted together so the rendered
+        message array stays valid for the LLM API. System messages are never touched.
+        """
         text_positions: list[int] = []
         tool_groups = _build_tool_groups(self.items)
 
@@ -115,6 +133,7 @@ class AgentContext:
 
 
 def _is_tool_related(item: AgentContextItem) -> bool:
+    """True for assistant messages with tool_calls and for role=tool results."""
     if item.role == "tool":
         return True
     if item.role == "assistant" and item.tool_calls:
@@ -154,6 +173,12 @@ def _build_tool_groups(items: list[AgentContextItem]) -> list[list[int]]:
 
 
 def _render_item(item: AgentContextItem) -> AgentMessage:
+    """Convert one stored item to an AgentMessage, swapping in the compaction summary if compacted.
+
+    Compacted assistant tool-call items and compacted tool-result items both render
+    as plain assistant messages so the resulting message array never has an orphan
+    ``role="tool"`` without its matching ``tool_calls`` parent.
+    """
     if not item.is_compacted:
         return AgentMessage(
             role=item.role,

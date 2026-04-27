@@ -8,6 +8,13 @@ from engine.models.messages import AgentToolCall, MessageContent
 
 
 class AgentContextItem(BaseModel):
+    """Engine-internal stored representation of one conversation item.
+
+    Superset of an OpenAI/HF ``AgentMessage``: keeps the original role/content/tool fields,
+    plus lineage metadata (agent_id, parent_*) and compaction state. The original fields
+    are preserved even after compaction so context tools can still inspect them.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     item_id: str

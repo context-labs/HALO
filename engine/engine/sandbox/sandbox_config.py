@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SandboxConfig(BaseModel):
+    """Caller-tunable knobs for ``run_code``: wall-clock timeout and stdout/stderr caps."""
+
     model_config = ConfigDict(extra="forbid")
 
     timeout_seconds: float = Field(default=10.0, gt=0)
@@ -16,6 +18,13 @@ class SandboxConfig(BaseModel):
 
 
 class SandboxPolicy(BaseModel):
+    """Read-only/writable path list passed to the platform-specific sandbox command builder.
+
+    ``network_enabled`` is pinned to False at the type level — sandboxed code never
+    gets network access. Path order is positional and consumed by the command
+    builders (e.g. trace, index, venv).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     readonly_paths: list[Path]
@@ -25,6 +34,8 @@ class SandboxPolicy(BaseModel):
 
 
 class CodeExecutionResult(BaseModel):
+    """Outcome of running code in the sandbox: capped stdout/stderr, exit code, timeout flag."""
+
     model_config = ConfigDict(extra="forbid")
 
     exit_code: int
@@ -34,6 +45,8 @@ class CodeExecutionResult(BaseModel):
 
 
 class RunCodeArguments(BaseModel):
+    """Tool arguments for ``run_code``: a Python source string to execute in the sandbox."""
+
     model_config = ConfigDict(extra="forbid")
 
     code: str

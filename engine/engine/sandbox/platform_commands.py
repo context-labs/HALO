@@ -10,6 +10,7 @@ def build_linux_bubblewrap_command(
     policy: SandboxPolicy,
     script_path: Path,
 ) -> list[str]:
+    """Build the ``bwrap`` argv that runs user code with read-only trace/index/venv mounts and an isolated network."""
     work_dir = policy.writable_paths[0]
     venv = policy.readonly_paths[-1]
     trace_path = policy.readonly_paths[0]
@@ -42,6 +43,7 @@ def build_linux_bubblewrap_command(
 
 
 def render_macos_profile(*, policy: SandboxPolicy) -> str:
+    """Render a ``sandbox-exec`` Scheme profile that denies by default, allows reads/writes per policy, and blocks network."""
     allows_read = "\n".join(
         f'(allow file-read* (subpath "{p}"))' if p.is_dir() else f'(allow file-read* (literal "{p}"))'
         for p in policy.readonly_paths
@@ -64,6 +66,7 @@ def build_macos_sandbox_exec_command(
     script_path: Path,
     profile_path: Path,
 ) -> list[str]:
+    """Build the ``sandbox-exec`` argv pointing at a rendered profile, with ``env -i`` host-env scrub."""
     venv = policy.readonly_paths[-1]
     work_dir = policy.writable_paths[0]
 
