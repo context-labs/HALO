@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agents import Agent, FunctionTool, RunContextWrapper, Tool
@@ -17,7 +16,7 @@ from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.openai_compactor import build_openai_compactor_factory
 from engine.agents.prompt_templates import render_subagent_system_prompt
-from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
+from engine.errors import EngineAgentExhaustedError
 from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
@@ -41,6 +40,7 @@ def build_root_sdk_agent(
     engine_config,
     run_state: EngineRunState,
     agent_execution: AgentExecution,
+    agent_context: AgentContext,
 ) -> Agent[EngineRunState]:
     """Construct the root SDK Agent wired with all leaf tools plus a depth-aware ``call_subagent``.
 
@@ -54,6 +54,7 @@ def build_root_sdk_agent(
         run_state=run_state,
         semaphore=semaphore,
         parent_execution=agent_execution,
+        parent_context=agent_context,
     )
 
     return Agent[EngineRunState](
@@ -70,12 +71,17 @@ def _child_tools_for_depth(
     run_state: EngineRunState,
     semaphore: asyncio.Semaphore,
     parent_execution: AgentExecution,
+    parent_context: AgentContext,
 ) -> list[Tool]:
     """Return the tool list available to an agent at ``depth``.
 
     Always includes the leaf trace/synthesis/run_code/get_context tools. A
     ``call_subagent`` tool is appended only when ``depth < maximum_depth``, which
     is how depth enforcement is wired structurally rather than via runtime checks.
+
+    ``parent_context`` is the AgentContext of the agent that owns these tools;
+    it's plumbed into ``ToolContext.agent_context`` so tools like
+    ``get_context_item`` can look up that agent's stored items.
     """
     engine_config = run_state.config
 
@@ -85,6 +91,7 @@ def _child_tools_for_depth(
             run_state=run_state,
             trace_store=run_state.trace_store,
             output_bus=run_state.output_bus,
+            agent_context=parent_context,
         )
 
     leaf_tools: list[Tool] = [
@@ -161,11 +168,6 @@ def _build_subagent_as_tool(
     # wrapper and ``tool_call_id`` is lost.
     async def guarded_invoke(ctx: SdkToolContext[Any], raw_arguments: str) -> str:
         """SDK-side tool entrypoint for ``call_subagent``: gate, semaphore-acquire, run, return result."""
-        if child_depth > engine_config.maximum_depth:
-            raise EngineMaxDepthExceededError(
-                f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
-            )
-
         # TODO: Can we simplify this by instantiating child_execution above stub_child_agent, but not registering it until on_invoke_tool
         # is called, allowing us to only create a single Agent[EngineRunState] instance?
         # The current pattern is required so that the child_execution is available to pass into _child_tools_for_depth.
@@ -187,18 +189,6 @@ def _build_subagent_as_tool(
             )
             run_state.register(child_execution)
 
-            child_agent = Agent[EngineRunState](
-                name=engine_config.subagent.name,
-                instructions="",
-                model=engine_config.subagent.model.name,
-                tools=_child_tools_for_depth(
-                    depth=child_depth,
-                    run_state=run_state,
-                    semaphore=semaphore,
-                    parent_execution=child_execution,
-                ),
-            )
-
             child_context = AgentContext(
                 items=[
                     AgentContextItem(
@@ -209,6 +199,19 @@ def _build_subagent_as_tool(
                 compaction_model=engine_config.compaction_model,
                 text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
                 tool_call_compaction_keep_last_turns=engine_config.tool_call_compaction_keep_last_turns,
+            )
+
+            child_agent = Agent[EngineRunState](
+                name=engine_config.subagent.name,
+                instructions="",
+                model=engine_config.subagent.model.name,
+                tools=_child_tools_for_depth(
+                    depth=child_depth,
+                    run_state=run_state,
+                    semaphore=semaphore,
+                    parent_execution=child_execution,
+                    parent_context=child_context,
+                ),
             )
 
             async def _run_streamed(*, agent, input, context):
@@ -288,16 +291,3 @@ def _failure_result(execution: AgentExecution, message: str) -> str:
         turns_used=execution.turns_used,
         tool_calls_made=execution.tool_calls_made,
     ).model_dump_json()
-
-
-def _wrap_with_semaphore(
-    fn: Callable[..., Awaitable[Any]],
-    semaphore: asyncio.Semaphore,
-) -> Callable[..., Awaitable[Any]]:
-    """Decorator that gates an awaitable behind ``semaphore`` (utility, not used on the hot path)."""
-
-    async def wrapped(*args, **kwargs):
-        async with semaphore:
-            return await fn(*args, **kwargs)
-
-    return wrapped
