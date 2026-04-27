@@ -42,6 +42,7 @@ from engine.models.engine_output import (
     EngineStreamEvent,
 )
 from engine.models.messages import AgentMessage
+from engine.tools.tool_protocol import ToolContext
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
@@ -300,6 +301,122 @@ async def make_run_state(
     if runner is not None:
         state.runner = runner
     return state
+
+
+# --- ToolContext helper ------------------------------------------------------
+
+
+def make_tool_context(
+    state: EngineRunState,
+    *,
+    agent_context: Any | None = None,
+    agent_execution: Any | None = None,
+) -> ToolContext:
+    """Construct a ``ToolContext`` from an ``EngineRunState``.
+
+    Use this in unit-style tool probes — when you've built a state via
+    ``make_run_state`` and want to call ``Tool.run(tool_context, args)``
+    directly. ``agent_context`` and ``agent_execution`` are optional
+    because most trace tools don't need them, but probes for
+    ``GetContextItemTool`` (and other agent-scoped tools) must pass them.
+    """
+    return ToolContext.model_construct(
+        run_state=state,
+        trace_store=state.trace_store,
+        output_bus=state.output_bus,
+        agent_context=agent_context,
+        agent_execution=agent_execution,
+    )
+
+
+# --- Checker helper ----------------------------------------------------------
+
+
+class Checker:
+    """Bundles the ``_check`` / ``_FAILURES`` / ``main()`` pattern that every
+    probe duplicates. Usage::
+
+        from tests.probes.probe_kit import make_checker
+
+        check, failures = make_checker()
+
+        async def probe_x():
+            ...
+            check(condition, "x: description", observed=f"actual={actual}")
+
+        async def main() -> int:
+            await probe_x()
+            return failures.report_and_exit_code()
+
+    ``failures.report_and_exit_code()`` prints the failure summary block (or
+    "All checks passed.") and returns 0/1 suitable for ``sys.exit``.
+    """
+
+    def __init__(self) -> None:
+        self.descriptions: list[str] = []
+
+    def __call__(self, condition: bool, description: str, observed: str = "") -> None:
+        if condition:
+            print(f"PASS: {description}")
+        else:
+            suffix = f" — observed: {observed}" if observed else ""
+            print(f"FAIL: {description}{suffix}")
+            self.descriptions.append(description)
+
+    def report_and_exit_code(self) -> int:
+        if self.descriptions:
+            print(f"\n{len(self.descriptions)} check(s) failed:")
+            for desc in self.descriptions:
+                print(f"  - {desc}")
+            return 1
+        print("\nAll checks passed.")
+        return 0
+
+
+def make_checker() -> tuple[Checker, Checker]:
+    """Returns ``(check, failures)`` — both are the same ``Checker`` object,
+    aliased so probe scripts can read naturally::
+
+        check, failures = make_checker()
+        check(condition, "...", observed="...")
+        return failures.report_and_exit_code()
+    """
+    c = Checker()
+    return c, c
+
+
+# --- Expected-raise helper ---------------------------------------------------
+
+
+async def check_raises(
+    awaitable_or_callable: Any,
+    expected_type: type[BaseException],
+) -> BaseException | None:
+    """Invoke ``awaitable_or_callable`` and assert it raises an instance of
+    ``expected_type``. Returns the caught exception (for further inspection)
+    or ``None`` if no exception was raised.
+
+    Use this when a probe's *expected* outcome is a specific exception type.
+    Distinct from the README's "do not wrap engine calls in try/except" rule
+    — that rule forbids hiding *unexpected* failures, not asserting *expected*
+    raises. Example::
+
+        exc = await check_raises(lambda: store.view_trace("nope"), KeyError)
+        check(exc is not None, "view_trace: unknown id raises KeyError",
+              observed=f"got={type(exc).__name__ if exc else 'no raise'}")
+
+    Accepts either a coroutine, an async callable returning a coroutine, or
+    a sync callable. Anything else: pass a zero-arg lambda.
+    """
+    try:
+        result = awaitable_or_callable() if callable(awaitable_or_callable) else awaitable_or_callable
+        if asyncio.iscoroutine(result):
+            await result
+    except expected_type as exc:
+        return exc
+    except BaseException:
+        raise
+    return None
 
 
 # --- Run wrapper -------------------------------------------------------------
