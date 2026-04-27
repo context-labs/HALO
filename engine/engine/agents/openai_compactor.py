@@ -23,10 +23,14 @@ def build_openai_compactor_factory(
     future per-agent compaction policies) and returns a callable that the
     AgentContext can invoke per item it wants compacted.
     """
-    openai_client = client or AsyncOpenAI()
+    openai_client = client
 
     def factory(_execution: AgentExecution) -> Compactor:
         async def compact(item: AgentContextItem) -> str:
+            nonlocal openai_client
+            if openai_client is None:
+                openai_client = AsyncOpenAI()
+
             user_text = _item_as_prompt(item)
             response = await openai_client.chat.completions.create(
                 model=engine_config.compaction_model.name,
@@ -49,8 +53,7 @@ def _item_as_prompt(item: AgentContextItem) -> str:
     if item.role == "assistant":
         if item.tool_calls:
             calls = "\n".join(
-                f"- {tc.function.name}({tc.function.arguments})"
-                for tc in item.tool_calls
+                f"- {tc.function.name}({tc.function.arguments})" for tc in item.tool_calls
             )
             return f"ASSISTANT TOOL CALLS:\n{calls}"
         return f"ASSISTANT MESSAGE:\n{item.content}"

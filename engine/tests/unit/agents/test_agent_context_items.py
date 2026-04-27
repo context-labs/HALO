@@ -15,9 +15,7 @@ def test_assistant_tool_call_item_with_lineage() -> None:
         item_id="msg_2",
         role="assistant",
         content=None,
-        tool_calls=[
-            AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))
-        ],
+        tool_calls=[AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))],
         agent_id="root",
         parent_agent_id=None,
     )
@@ -26,8 +24,11 @@ def test_assistant_tool_call_item_with_lineage() -> None:
 
 def test_compacted_item() -> None:
     item = AgentContextItem(
-        item_id="msg_3", role="user", content="hi",
-        is_compacted=True, compaction_summary="User said hi.",
+        item_id="msg_3",
+        role="user",
+        content="hi",
+        is_compacted=True,
+        compaction_summary="User said hi.",
     )
     assert item.is_compacted is True
     assert item.compaction_summary == "User said hi."

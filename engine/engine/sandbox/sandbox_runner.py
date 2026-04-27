@@ -44,8 +44,12 @@ class SandboxRunner:
 
             script_body = render_bootstrap_script(
                 user_code=code,
-                trace_mount_path="/mnt/trace/traces.jsonl" if system == "Linux" else str(trace_path),
-                index_mount_path="/mnt/trace/traces.jsonl.engine-index.jsonl" if system == "Linux" else str(index_path),
+                trace_mount_path="/mnt/trace/traces.jsonl"
+                if system == "Linux"
+                else str(trace_path),
+                index_mount_path="/mnt/trace/traces.jsonl.engine-index.jsonl"
+                if system == "Linux"
+                else str(index_path),
             )
             script.write_text(script_body)
 

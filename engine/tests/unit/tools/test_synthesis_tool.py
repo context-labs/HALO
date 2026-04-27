@@ -28,14 +28,20 @@ async def ctx(tmp_path: Path, fixtures_dir: Path) -> ToolContext:
 @pytest.mark.asyncio
 async def test_synthesis_tool_calls_client_and_returns_summary(ctx: ToolContext) -> None:
     fake_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(
-            return_value=SimpleNamespace(choices=[SimpleNamespace(
-                message=SimpleNamespace(content="summary")
-            )])
-        )))
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(
+                    return_value=SimpleNamespace(
+                        choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+                    )
+                )
+            )
+        )
     )
     tool = SynthesisTool(model_name="claude-haiku-4-5", client=fake_client)
 
-    result = await tool.run(ctx, SynthesizeTracesArguments(trace_ids=["t-aaaa", "t-bbbb"], focus="errors"))
+    result = await tool.run(
+        ctx, SynthesizeTracesArguments(trace_ids=["t-aaaa", "t-bbbb"], focus="errors")
+    )
     assert result.summary == "summary"
     fake_client.chat.completions.create.assert_awaited_once()

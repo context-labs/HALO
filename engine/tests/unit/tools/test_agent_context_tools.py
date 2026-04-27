@@ -20,10 +20,15 @@ async def test_get_context_item_returns_full_stored_item() -> None:
         text_message_compaction_keep_last_messages=2,
         tool_call_compaction_keep_last_turns=2,
     )
-    agent_context.append(AgentContextItem(
-        item_id="m1", role="user", content="hi",
-        is_compacted=True, compaction_summary="user said hi",
-    ))
+    agent_context.append(
+        AgentContextItem(
+            item_id="m1",
+            role="user",
+            content="hi",
+            is_compacted=True,
+            compaction_summary="user said hi",
+        )
+    )
     ctx = ToolContext.model_construct(agent_context=agent_context)
 
     tool = GetContextItemTool()

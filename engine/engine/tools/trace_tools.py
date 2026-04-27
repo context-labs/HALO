@@ -19,11 +19,15 @@ class GetDatasetOverviewTool:
     """Tool wrapper around ``TraceStore.get_overview``: dataset-level rollup of counts and totals."""
 
     name = "get_dataset_overview"
-    description = "Return high-level stats about the trace dataset: counts, services, models, totals."
+    description = (
+        "Return high-level stats about the trace dataset: counts, services, models, totals."
+    )
     arguments_model = DatasetOverviewArguments
     result_model = DatasetOverviewResult
 
-    async def run(self, tool_context: ToolContext, arguments: DatasetOverviewArguments) -> DatasetOverviewResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: DatasetOverviewArguments
+    ) -> DatasetOverviewResult:
         """Compute the overview over the filtered subset of traces."""
         store = tool_context.require_trace_store()
         return DatasetOverviewResult(result=store.get_overview(arguments.filters))
@@ -37,7 +41,9 @@ class QueryTracesTool:
     arguments_model = QueryTracesArguments
     result_model = QueryTracesResult
 
-    async def run(self, tool_context: ToolContext, arguments: QueryTracesArguments) -> QueryTracesResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: QueryTracesArguments
+    ) -> QueryTracesResult:
         """Apply filters and slice with limit/offset; ``total`` is the unsliced match count."""
         store = tool_context.require_trace_store()
         return QueryTracesResult(
@@ -58,7 +64,9 @@ class CountTracesTool:
     arguments_model = CountTracesArguments
     result_model = CountTracesResult
 
-    async def run(self, tool_context: ToolContext, arguments: CountTracesArguments) -> CountTracesResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: CountTracesArguments
+    ) -> CountTracesResult:
         """Return the number of traces matching ``arguments.filters``."""
         store = tool_context.require_trace_store()
         return CountTracesResult(result=store.count_traces(arguments.filters))
@@ -72,7 +80,9 @@ class ViewTraceTool:
     arguments_model = ViewTraceArguments
     result_model = ViewTraceResult
 
-    async def run(self, tool_context: ToolContext, arguments: ViewTraceArguments) -> ViewTraceResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: ViewTraceArguments
+    ) -> ViewTraceResult:
         """Read all spans for ``trace_id`` from the JSONL via the index byte offsets."""
         store = tool_context.require_trace_store()
         return ViewTraceResult(result=store.view_trace(arguments.trace_id))
@@ -86,7 +96,9 @@ class SearchTraceTool:
     arguments_model = SearchTraceArguments
     result_model = SearchTraceResult
 
-    async def run(self, tool_context: ToolContext, arguments: SearchTraceArguments) -> SearchTraceResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: SearchTraceArguments
+    ) -> SearchTraceResult:
         """Return spans (as raw JSON) of ``trace_id`` containing ``pattern`` as a substring."""
         store = tool_context.require_trace_store()
         return SearchTraceResult(result=store.search_trace(arguments.trace_id, arguments.pattern))

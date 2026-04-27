@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-
-_TEMPLATE = '''\
+_TEMPLATE = """\
 from __future__ import annotations
 
 import sys
@@ -29,7 +28,7 @@ _globals = {{
 }}
 
 exec(_USER_CODE, _globals, _globals)
-'''
+"""
 
 
 def render_bootstrap_script(

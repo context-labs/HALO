@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict
-
 from agents import FunctionTool, RunContextWrapper
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from engine.agents.agent_context import AgentContext
@@ -55,10 +54,17 @@ class EngineTool(Protocol):
     stays strongly typed and schemas are derivable for free via Pydantic.
     """
 
-    name: str
-    description: str
-    arguments_model: type[BaseModel]
-    result_model: type[BaseModel]
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def description(self) -> str: ...
+
+    @property
+    def arguments_model(self) -> type[BaseModel]: ...
+
+    @property
+    def result_model(self) -> type[BaseModel]: ...
 
     async def run(self, tool_context: ToolContext, arguments: Any) -> BaseModel: ...
 
