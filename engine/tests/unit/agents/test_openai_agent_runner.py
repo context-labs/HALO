@@ -301,14 +301,30 @@ async def test_runner_propagates_non_retriable_stream_iteration_error() -> None:
     assert call_count == 1
 
 
-@pytest.mark.asyncio
-async def test_runner_rebuilds_messages_per_retry() -> None:
-    """A retry should re-render ``agent_context``; appended items must reach the next attempt."""
-    from engine.agents.agent_context_items import AgentContextItem
+class _StreamYieldsThenRaises:
+    """Yields ``events`` successfully, then raises ``exc`` on the next iteration step.
 
+    Models a network drop after the LLM has streamed some tokens — the case where
+    state has already been mutated and a retry would corrupt it.
+    """
+
+    def __init__(self, events: list, exc: BaseException) -> None:
+        self._events = events
+        self._exc = exc
+
+    async def stream_events(self):
+        for e in self._events:
+            yield e
+        raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_runner_propagates_retriable_iteration_error_after_event_seen() -> None:
+    """Once any event has been applied to context/counters/bus, a retriable mid-stream error
+    must propagate rather than retry — replay would duplicate context items, double-count
+    turns, and re-emit bus events. Turn-boundary recovery is the caller's job."""
     bus = EngineOutputBus()
     ctx = _context()
-    ctx.append(AgentContextItem(item_id="u-0", role="user", content="initial"))
     execution = AgentExecution(
         agent_id="root",
         agent_name="root",
@@ -317,37 +333,34 @@ async def test_runner_rebuilds_messages_per_retry() -> None:
         parent_tool_call_id=None,
     )
 
-    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
-    seen_inputs: list[list[dict]] = []
     call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
 
-    async def fake_run_streamed(*, agent, input, context):
+    async def stream_that_partially_succeeds(*, agent, input, context):
         nonlocal call_count
         call_count += 1
-        seen_inputs.append(list(input))
-        if call_count == 1:
-            ctx.append(AgentContextItem(item_id="u-1", role="user", content="appended"))
-            raise APIConnectionError(request=fake_request)
-        return _FakeStream([_assistant_event("done\n<final/>")])
+        return _StreamYieldsThenRaises(
+            [_assistant_event("partial answer")],
+            APIConnectionError(request=fake_request),
+        )
 
     async def noop_compactor(_):
         return ""
 
     runner = OpenAiAgentRunner(
-        run_streamed=fake_run_streamed,
+        run_streamed=stream_that_partially_succeeds,
         compactor_factory=lambda _: noop_compactor,
     )
 
-    await runner.run(
-        sdk_agent=object(),
-        agent_context=ctx,
-        agent_execution=execution,
-        output_bus=bus,
-        is_root=True,
-    )
-    await bus.close()
-
-    assert call_count == 2
-    assert len(seen_inputs[0]) == 1
-    assert len(seen_inputs[1]) == 2
-    assert seen_inputs[1][1]["content"] == "appended"
+    with pytest.raises(APIConnectionError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1
+    # The single partial assistant message stays in context exactly once.
+    assistant_items = [i for i in ctx.items if i.role == "assistant"]
+    assert len(assistant_items) == 1
