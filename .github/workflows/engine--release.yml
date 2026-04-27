@@ -26,7 +26,8 @@ env:
   PYTHON_VERSION: "3.12"
 
 permissions:
-  contents: read
+  contents: write # bump-version pushes the version commit + tag
+  checks: write   # called workflows publish JUnit reports via checks API
 
 jobs:
   checks:
