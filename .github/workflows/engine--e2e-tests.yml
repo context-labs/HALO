@@ -20,7 +20,7 @@ permissions:
 jobs:
   e2e-tests:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 45
     defaults:
       run:

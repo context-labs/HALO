@@ -77,7 +77,7 @@ def _tool_context() -> SdkToolContext:
         context=None,
         tool_name="call_subagent",
         tool_call_id="parent-call-1",
-        tool_arguments='{"question":"How many traces have errors?"}',
+        tool_arguments='{"input":"How many traces have errors?"}',
     )
 
 
@@ -133,7 +133,7 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
 
     result_json = await tool.on_invoke_tool(
         _tool_context(),
-        '{"question":"How many traces have errors?"}',
+        '{"input":"How many traces have errors?"}',
     )
     await output_bus.close()
     emitted = [event async for event in output_bus.stream()]

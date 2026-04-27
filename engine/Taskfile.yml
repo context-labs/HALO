@@ -6,7 +6,6 @@ vars:
   RUFF_CACHE_DIR: '{{.RUFF_CACHE_DIR | default ".cache/ruff"}}'
   UV_BIN: '{{.UV_BIN | default "uv"}}'
   UV_VERSION: "0.11.7"
-  UV_CACHE_DIR: "{{.TASKFILE_DIR}}/.cache/uv"
   VENV: "{{.TASKFILE_DIR}}/.venv"
 
 tasks:
@@ -18,7 +17,7 @@ tasks:
           CLI_ARGS: "{{.CLI_ARGS}}"
       - |
         echo "[setup] Syncing engine venv from lockfile..."
-        UV_CACHE_DIR="{{.UV_CACHE_DIR}}" UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
+        UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
         echo "[setup] Engine venv ready at {{.VENV}}"
       - task: setup-git-hooks
 
@@ -30,7 +29,7 @@ tasks:
           CLI_ARGS: "-y"
       - |
         echo "[ci-setup] Syncing engine venv from lockfile..."
-        UV_CACHE_DIR="{{.UV_CACHE_DIR}}" UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
+        UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
         echo "[ci-setup] Engine venv ready at {{.VENV}}"
 
   setup-git-hooks:
