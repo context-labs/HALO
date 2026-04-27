@@ -15,6 +15,7 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
+from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.subagent_tool_factory import (
     _build_subagent_as_tool,
@@ -68,12 +69,21 @@ def _fake_tool_ctx(tool_call_id: str = "parent-call-x") -> SdkToolContext:
     )
 
 
+_DISABLED_SANDBOX_STATUS = SandboxStatus.unavailable(
+    reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
+    diagnostic="tests skip the real sandbox",
+    remediation="this is intentional in unit tests",
+)
+
+
 def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
     cfg = _engine_config(max_depth=2)
     run_state = MagicMock(spec=EngineRunState)
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
+    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
+    run_state.runtime_mounts = None
     sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=2,
@@ -92,6 +102,8 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
+    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
+    run_state.runtime_mounts = None
     sem = {d: asyncio.Semaphore(4) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=1,
@@ -113,7 +125,13 @@ async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
 
     cfg = _engine_config(max_depth=2)
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
     run_state.runner = MagicMock()
 
     sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
@@ -172,7 +190,13 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
         maximum_depth=1,
     )
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
 
     class _ExplodingRunner:
         @staticmethod
@@ -208,7 +232,13 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
         maximum_depth=1,
     )
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
 
     events = [
         SimpleNamespace(
@@ -278,7 +308,13 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
         maximum_depth=1,
     )
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
 
     captured_inputs: list[list[dict]] = []
 
@@ -328,7 +364,13 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         maximum_depth=1,
     )
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
 
     message_item = SimpleNamespace(
         type="message_output_item",
@@ -391,7 +433,13 @@ async def test_depth_2_tool_runs_when_depth_1_slot_held() -> None:
     cfg = _engine_config(max_depth=2)
     cfg = cfg.model_copy(update={"maximum_parallel_subagents": 1})
     fake_store = MagicMock(spec=TraceStore)
-    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox_status=_DISABLED_SANDBOX_STATUS,
+        runtime_mounts=None,
+    )
 
     one_event = SimpleNamespace(
         type="run_item_stream_event",

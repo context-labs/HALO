@@ -152,14 +152,14 @@ tasks:
           --junitxml=test-results/unit.xml {{.CLI_ARGS}}
 
   test:integration:
-    desc: "Run engine integration tests (secrets via Infisical; pass pytest target after --)"
+    desc: "Run engine integration tests (excludes platform-specific sandbox suites)"
     deps: [_require-python]
     cmds:
       - mkdir -p test-results .cache/pytest-integration
       - |
         CLI_ARGS="{{.CLI_ARGS}}"
         if [ -z "$CLI_ARGS" ]; then
-          TARGETS="tests/integration"
+          TARGETS="tests/integration --ignore=tests/integration/linux --ignore=tests/integration/macos"
         else
           TARGETS="$CLI_ARGS"
         fi
@@ -167,6 +167,28 @@ tasks:
           {{.PYTHON_BIN}} -m pytest $TARGETS \
             -o "cache_dir=.cache/pytest-integration" \
             --junitxml=test-results/integration.xml
+
+  test:integration:linux:
+    desc: "Run Linux sandbox integration tests (real bubblewrap; runs only on Linux)"
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results .cache/pytest-integration-linux
+      - |
+        {{.PYTHON_BIN}} -m pytest tests/integration/linux \
+          -o "cache_dir=.cache/pytest-integration-linux" \
+          --junitxml=test-results/integration-linux.xml \
+          -vv -s -rA {{.CLI_ARGS}}
+
+  test:integration:macos:
+    desc: "Run macOS sandbox integration tests (real sandbox-exec; runs only on macOS)"
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results .cache/pytest-integration-macos
+      - |
+        {{.PYTHON_BIN}} -m pytest tests/integration/macos \
+          -o "cache_dir=.cache/pytest-integration-macos" \
+          --junitxml=test-results/integration-macos.xml \
+          -vv -s -rA {{.CLI_ARGS}}
 
   test:e2e:
     desc: "Run engine E2E tests (secrets via Infisical; pass pytest target after --)"

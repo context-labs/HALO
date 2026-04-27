@@ -42,6 +42,8 @@ class AgentContext:
         cls,
         messages: list[AgentMessage],
         engine_config: "EngineConfig",
+        *,
+        run_code_available: bool,
     ) -> "AgentContext":
         """Build a root AgentContext from caller-supplied messages.
 
@@ -50,6 +52,11 @@ class AgentContext:
           2. Front message is already a system message: pass through unchanged.
              The caller is responsible for whatever it contains. This supports
              continuations and lets users supply their own system prompts.
+
+        ``run_code_available`` controls whether the rendered system prompt
+        mentions the ``run_code`` tool — it is omitted when sandboxing is
+        unavailable so the model does not try to call a tool that is not
+        registered.
         """
         has_system = bool(messages) and messages[0].role == "system"
 
@@ -65,6 +72,7 @@ class AgentContext:
                 instructions=engine_config.root_agent.instructions,
                 maximum_depth=engine_config.maximum_depth,
                 maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+                run_code_available=run_code_available,
             )
             sys_item = AgentContextItem(item_id="sys-0", role="system", content=rendered)
             body = messages

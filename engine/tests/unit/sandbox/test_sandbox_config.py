@@ -20,11 +20,15 @@ def test_sandbox_config_defaults() -> None:
 
 def test_sandbox_policy(tmp_path: Path) -> None:
     pol = SandboxPolicy(
+        python_executable=tmp_path / "bin" / "python",
         readonly_paths=[tmp_path / "ro"],
+        library_paths=[tmp_path / "libc.so.6"],
         writable_paths=[tmp_path / "w"],
         timeout_seconds=5.0,
     )
     assert pol.network_enabled is False
+    assert pol.python_executable == tmp_path / "bin" / "python"
+    assert pol.library_paths == [tmp_path / "libc.so.6"]
 
 
 def test_result_shape() -> None:

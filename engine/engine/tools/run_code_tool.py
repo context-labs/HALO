@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
+from engine.sandbox.runtime_mounts import PythonRuntimeMounts
+from engine.sandbox.sandbox_availability import SandboxStatus
 from engine.sandbox.sandbox_config import (
     CodeExecutionResult,
     RunCodeArguments,
@@ -30,18 +30,28 @@ class RunCodeTool:
 
     def __init__(
         self,
+        *,
         sandbox_config: SandboxConfig,
-        sandbox_venv: Path | None = None,
+        sandbox_status: SandboxStatus,
+        runtime_mounts: PythonRuntimeMounts,
     ) -> None:
-        """Default ``sandbox_venv`` resolves to ``.sandbox-venv`` next to the engine package."""
+        if not sandbox_status.available:
+            raise RuntimeError(
+                "RunCodeTool constructed with unavailable SandboxStatus; "
+                "the tool factory must gate on status.available."
+            )
         self._sandbox_config = sandbox_config
-        self._default_venv = sandbox_venv or Path(__file__).resolve().parents[2] / ".sandbox-venv"
+        self._sandbox_status = sandbox_status
+        self._runtime_mounts = runtime_mounts
 
     async def run(
         self, tool_context: ToolContext, arguments: RunCodeArguments
     ) -> CodeExecutionResult:
         """Run user code through ``SandboxRunner`` with the active TraceStore's trace/index paths."""
-        runner = tool_context.sandbox_runner or SandboxRunner(sandbox_venv=self._default_venv)
+        runner = tool_context.sandbox_runner or SandboxRunner(
+            sandbox_status=self._sandbox_status,
+            runtime_mounts=self._runtime_mounts,
+        )
         store = tool_context.require_trace_store()
         return await runner.run_python(
             code=arguments.code,

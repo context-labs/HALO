@@ -10,6 +10,7 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
+from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
@@ -39,7 +40,17 @@ async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) ->
     )
     store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
-    state = EngineRunState(trace_store=store, output_bus=EngineOutputBus(), config=_cfg())
+    state = EngineRunState(
+        trace_store=store,
+        output_bus=EngineOutputBus(),
+        config=_cfg(),
+        sandbox_status=SandboxStatus.unavailable(
+            reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
+            diagnostic="test",
+            remediation="test",
+        ),
+        runtime_mounts=None,
+    )
 
     exec_ = AgentExecution(
         agent_id="root",

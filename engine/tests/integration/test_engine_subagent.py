@@ -15,6 +15,7 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
+from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.subagent_tool_factory import _build_subagent_as_tool
 from engine.traces.models.trace_index_config import TraceIndexConfig
@@ -113,6 +114,12 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
         trace_store=trace_store,
         output_bus=output_bus,
         config=cfg,
+        sandbox_status=SandboxStatus.unavailable(
+            reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
+            diagnostic="not exercised in subagent integration test",
+            remediation="not applicable",
+        ),
+        runtime_mounts=None,
         runner=runner,
     )
     parent_execution = AgentExecution(
