@@ -16,7 +16,7 @@ from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.openai_compactor import build_openai_compactor_factory
 from engine.agents.prompt_templates import render_subagent_system_prompt
-from engine.errors import EngineAgentExhaustedError
+from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
 from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
@@ -168,6 +168,13 @@ def _build_subagent_as_tool(
     # wrapper and ``tool_call_id`` is lost.
     async def guarded_invoke(ctx: SdkToolContext[Any], raw_arguments: str) -> str:
         """SDK-side tool entrypoint for ``call_subagent``: gate, semaphore-acquire, run, return result."""
+        # Defense-in-depth: ``_child_tools_for_depth`` already gates this structurally;
+        # keep the runtime check so a future refactor can't silently re-enable recursion.
+        if child_depth > engine_config.maximum_depth:
+            raise EngineMaxDepthExceededError(
+                f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
+            )
+
         # TODO: Can we simplify this by instantiating child_execution above stub_child_agent, but not registering it until on_invoke_tool
         # is called, allowing us to only create a single Agent[EngineRunState] instance?
         # The current pattern is required so that the child_execution is available to pass into _child_tools_for_depth.
