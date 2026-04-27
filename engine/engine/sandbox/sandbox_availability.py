@@ -82,19 +82,22 @@ class SandboxStatus(BaseModel):
 
 HALO_BWRAP_ENV_VAR = "HALO_BWRAP_PATH"
 
-# Probe argv mirrors the hardening flags used by the production Linux command
-# in ``platform_commands.build_linux_bubblewrap_command``. If the production
-# command changes, update this too — the probe must reject hosts where the
-# real command would fail.
-_LINUX_PROBE_FLAGS: tuple[str, ...] = (
-    "--unshare-all",
-    "--unshare-net",
-    "--die-with-parent",
-    "--new-session",
-    "--clearenv",
-    "--dev",
-    "/dev",
-)
+# Path the probe asks bwrap to exec inside the sandbox. We deliberately
+# choose a path that does not exist on any host so the kernel's ``exec(2)``
+# inside the sandbox fails with ENOENT — that is fine because by the time
+# the kernel reaches ``exec(2)`` the bwrap parent has already finished
+# namespace setup and emitted a status object on ``--info-fd``. Choosing a
+# nonexistent target lets the probe avoid binding any host filesystem.
+_PROBE_EXEC_PATH = "/halo-sandbox-probe-no-such-exec-target"
+
+# Marker we look for in the ``--info-fd`` JSON to confirm bwrap got past
+# namespace setup. Stable across all supported bwrap versions.
+_PROBE_INFO_FD_MARKER = b'"child-pid"'
+
+# Wall-clock timeout for the probe subprocess. The probe does no I/O and
+# exits as soon as the sandboxed exec fails with ENOENT, so a few seconds
+# is far more than enough.
+_PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def resolve_sandbox_status() -> SandboxStatus:
@@ -135,6 +138,13 @@ def _resolve_linux() -> SandboxStatus:
     1. ``HALO_BWRAP_PATH`` environment override.
     2. System ``bwrap`` on ``PATH``.
     3. Packaged ``bwrap`` from the optional ``bubblewrap-bin`` dependency.
+
+    Failure attribution:
+    - If no candidates are found, or every candidate path is missing on disk,
+      report ``MISSING_BACKEND`` with install instructions.
+    - If at least one candidate exists but its namespace probe failed, report
+      ``NAMESPACE_DENIED`` with the kernel/runtime remediation. Reaching the
+      probe means the binary is real; the failure is a host policy issue.
     """
     candidates: list[tuple[Path, SandboxBackend, str]] = []
 
@@ -159,20 +169,31 @@ def _resolve_linux() -> SandboxStatus:
             remediation=_LINUX_MISSING_REMEDIATION,
         )
 
-    last_diagnostic = ""
+    missing_diagnostics: list[str] = []
+    probe_diagnostics: list[str] = []
     for executable, backend, source in candidates:
         if not executable.exists():
-            last_diagnostic = f"bwrap candidate from {source} does not exist: {executable}"
+            missing_diagnostics.append(
+                f"bwrap candidate from {source} does not exist: {executable}"
+            )
             continue
         ok, diagnostic = _probe_bwrap(executable)
         if ok:
             return SandboxStatus.ok(backend=backend, executable=executable)
-        last_diagnostic = f"bwrap from {source} ({executable}) failed namespace probe: {diagnostic}"
+        probe_diagnostics.append(
+            f"bwrap from {source} ({executable}) failed namespace probe: {diagnostic}"
+        )
 
+    if probe_diagnostics:
+        return SandboxStatus.unavailable(
+            reason=SandboxUnavailableReason.NAMESPACE_DENIED,
+            diagnostic="\n".join(probe_diagnostics),
+            remediation=_LINUX_NAMESPACE_REMEDIATION,
+        )
     return SandboxStatus.unavailable(
-        reason=SandboxUnavailableReason.NAMESPACE_DENIED,
-        diagnostic=last_diagnostic,
-        remediation=_LINUX_NAMESPACE_REMEDIATION,
+        reason=SandboxUnavailableReason.MISSING_BACKEND,
+        diagnostic="\n".join(missing_diagnostics),
+        remediation=_LINUX_MISSING_REMEDIATION,
     )
 
 
@@ -190,20 +211,79 @@ def _packaged_bwrap() -> Path | None:
 
 
 def _probe_bwrap(executable: Path) -> tuple[bool, str]:
-    """Run ``/bin/true`` under ``bwrap`` with production flags; return (ok, diagnostic)."""
-    argv = [str(executable), *_LINUX_PROBE_FLAGS, "--", "/bin/true"]
+    """Run ``bwrap`` with hardening flags and detect namespace setup via ``--info-fd``.
+
+    bwrap writes a JSON status object containing ``"child-pid"`` to the FD
+    passed via ``--info-fd`` *after* the sandbox is fully set up and *just
+    before* it execs the user command. We read that pipe to confirm
+    namespace setup; the in-sandbox exec target is a deliberately
+    nonexistent path so the kernel's ``exec(2)`` inside the sandbox fails
+    immediately with ENOENT — but by then bwrap has already emitted the
+    status object, so we know setup worked.
+
+    Net effect: the probe runs with an entirely empty mount namespace
+    (no ``/usr``, no ``/bin``, no host filesystem at all) and still
+    distinguishes real namespace failures (``"child-pid"`` never appears)
+    from sandbox-set-up-fine-but-exec-failed-as-expected.
+    """
+    read_fd, write_fd = os.pipe()
+    write_fd_open = True
+    proc: subprocess.Popen[bytes] | None = None
+
+    argv = [
+        str(executable),
+        "--unshare-all",
+        "--unshare-net",
+        "--die-with-parent",
+        "--new-session",
+        "--clearenv",
+        "--info-fd",
+        str(write_fd),
+        "--",
+        _PROBE_EXEC_PATH,
+    ]
+
     try:
-        result = subprocess.run(
-            argv,
-            capture_output=True,
-            timeout=5,
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                pass_fds=(write_fd,),
+            )
+        except OSError as exc:
+            return False, f"failed to spawn bwrap: {type(exc).__name__}: {exc}"
+
+        # Parent never writes to ``--info-fd``; closing here ensures the
+        # read end gets EOF as soon as bwrap exits without writing.
+        os.close(write_fd)
+        write_fd_open = False
+
+        try:
+            proc.wait(timeout=_PROBE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return False, f"bwrap probe timed out after {_PROBE_TIMEOUT_SECONDS}s"
+
+        try:
+            info = os.read(read_fd, 65_536)
+        except OSError:
+            info = b""
+
+        if _PROBE_INFO_FD_MARKER in info:
+            return True, ""
+
+        stderr_bytes = proc.stderr.read() if proc.stderr is not None else b""
+        diagnostic = stderr_bytes.decode("utf-8", errors="replace").strip()
+        return (
+            False,
+            diagnostic or f"bwrap exited {proc.returncode} without writing --info-fd output",
         )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-    if result.returncode == 0:
-        return True, ""
-    stderr = result.stderr.decode("utf-8", errors="replace").strip()
-    return False, stderr or f"exit code {result.returncode}"
+    finally:
+        os.close(read_fd)
+        if write_fd_open:
+            os.close(write_fd)
 
 
 _LINUX_MISSING_REMEDIATION = (

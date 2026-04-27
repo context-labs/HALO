@@ -18,7 +18,11 @@ def build_linux_bubblewrap_command(
     - ``--clearenv`` then a small explicit env set; no host env leaks.
     - ``--die-with-parent`` and ``--new-session`` to bound process lifetime.
     - No ``/proc`` mount; sandboxed analysis code does not need it.
-    - ``/dev`` is a fresh ``--dev`` (null/zero/random etc.) rather than the host ``/dev``.
+    - ``--dev /dev`` mounts a fresh tmpfs containing ``null``/``zero``/
+      ``urandom``/``random``/``tty``/``ptmx`` only. It does NOT bind the
+      host ``/dev``. We need it because Python reads ``/dev/urandom`` at
+      startup for hash randomization and numpy/pandas read it for default
+      RNG seeding; without it ``np.random.*`` and ``secrets`` fail.
 
     Mount surface is intentionally narrow:
     - The trace and index files are read-only at their host paths.
