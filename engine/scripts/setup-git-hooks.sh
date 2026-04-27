@@ -3,7 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 ENGINE_ROOT="$REPO_ROOT/engine"
-HOOKS_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
+HOOKS_DIR="$GIT_DIR/hooks"
 
 mkdir -p "$HOOKS_DIR"
 
