@@ -22,6 +22,6 @@ def test_engine_config_defaults() -> None:
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
     )
     assert cfg.text_message_compaction_keep_last_messages == 12
-    assert cfg.tool_call_compaction_keep_last_messages == 6
+    assert cfg.tool_call_compaction_keep_last_turns == 3
     assert cfg.maximum_depth == 2
     assert cfg.maximum_parallel_subagents == 4

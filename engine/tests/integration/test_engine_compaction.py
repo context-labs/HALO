@@ -38,7 +38,7 @@ async def test_engine_compaction_fires_without_crash(tmp_path: Path, fixtures_di
         compaction_model=ModelConfig(name=E2E_MODEL),
         # Force compaction to trigger even on small conversations
         text_message_compaction_keep_last_messages=1,
-        tool_call_compaction_keep_last_messages=1,
+        tool_call_compaction_keep_last_turns=1,
         maximum_depth=0,
         maximum_parallel_subagents=1,
     )
