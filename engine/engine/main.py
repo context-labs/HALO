@@ -72,6 +72,7 @@ async def stream_engine_async(
         engine_config=engine_config,
         run_state=run_state,
         agent_execution=root_execution,
+        agent_context=root_context,
     )
 
     async def _run_streamed(*, agent, input, context):
