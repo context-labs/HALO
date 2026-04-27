@@ -72,7 +72,9 @@ class OpenAiAgentRunner:
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
             try:
                 # TODO: Pretty sure an iterator wont throw here
-                stream = await self._run_streamed(agent=sdk_agent, input=messages, context=run_context)
+                stream = await self._run_streamed(
+                    agent=sdk_agent, input=messages, context=run_context
+                )
             except Exception as exc:
                 if not _is_retriable_llm_error(exc):
                     raise
@@ -113,6 +115,5 @@ class OpenAiAgentRunner:
             return
 
         raise EngineAgentExhaustedError(
-            f"agent {agent_execution.agent_id} exhausted "
-            f"after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
+            f"agent {agent_execution.agent_id} exhausted after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
         ) from last_exc

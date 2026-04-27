@@ -111,9 +111,16 @@ class TraceStore:
         rows = [r for r in self._rows if _matches_filters(r, filters)]
         if not rows:
             return DatasetOverview(
-                total_traces=0, total_spans=0, earliest_start_time="",
-                latest_end_time="", service_names=[], model_names=[], agent_names=[],
-                error_trace_count=0, total_input_tokens=0, total_output_tokens=0,
+                total_traces=0,
+                total_spans=0,
+                earliest_start_time="",
+                latest_end_time="",
+                service_names=[],
+                model_names=[],
+                agent_names=[],
+                error_trace_count=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
             )
 
         services: set[str] = set()
@@ -164,7 +171,9 @@ class TraceStore:
                 f"name={s.name} kind={s.kind} status={s.status.code}"
             )
             lines.append(f"  start={s.start_time} end={s.end_time}")
-            model = s.attributes.get("inference.llm.model_name") or s.attributes.get("llm.model_name")
+            model = s.attributes.get("inference.llm.model_name") or s.attributes.get(
+                "llm.model_name"
+            )
             if model:
                 lines.append(f"  model={model}")
             in_tok = s.attributes.get("inference.llm.input_tokens")
@@ -182,11 +191,17 @@ def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
     """ANDed predicate: row passes only if every set filter matches."""
     if filters.has_errors is not None and row.has_errors != filters.has_errors:
         return False
-    if filters.model_names is not None and not any(m in row.model_names for m in filters.model_names):
+    if filters.model_names is not None and not any(
+        m in row.model_names for m in filters.model_names
+    ):
         return False
-    if filters.service_names is not None and not any(s in row.service_names for s in filters.service_names):
+    if filters.service_names is not None and not any(
+        s in row.service_names for s in filters.service_names
+    ):
         return False
-    if filters.agent_names is not None and not any(a in row.agent_names for a in filters.agent_names):
+    if filters.agent_names is not None and not any(
+        a in row.agent_names for a in filters.agent_names
+    ):
         return False
     if filters.project_id is not None and row.project_id != filters.project_id:
         return False

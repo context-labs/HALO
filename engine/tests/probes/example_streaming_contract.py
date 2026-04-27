@@ -54,25 +54,36 @@ async def probe_delta_then_message_ordering() -> None:
     )
     result = await run_with_fake(runner)
 
-    _check(result.error is None, "streaming: run completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(result.deltas) == 3,
-           "streaming: 3 AgentTextDelta events emitted",
-           observed=f"deltas={len(result.deltas)}")
-    _check(len(result.output_items) == 1,
-           "streaming: 1 AgentOutputItem emitted",
-           observed=f"items={len(result.output_items)}")
+    _check(
+        result.error is None,
+        "streaming: run completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(result.deltas) == 3,
+        "streaming: 3 AgentTextDelta events emitted",
+        observed=f"deltas={len(result.deltas)}",
+    )
+    _check(
+        len(result.output_items) == 1,
+        "streaming: 1 AgentOutputItem emitted",
+        observed=f"items={len(result.output_items)}",
+    )
 
     sequences = [ev.sequence for ev in result.all_events]
-    _check(sequences == sorted(sequences) and len(set(sequences)) == len(sequences),
-           "streaming: all events have strictly increasing sequence",
-           observed=f"sequences={sequences}")
+    _check(
+        sequences == sorted(sequences) and len(set(sequences)) == len(sequences),
+        "streaming: all events have strictly increasing sequence",
+        observed=f"sequences={sequences}",
+    )
 
     # First three should be deltas, last should be item:
     types = [type(ev).__name__ for ev in result.all_events]
-    _check(types == ["AgentTextDelta", "AgentTextDelta", "AgentTextDelta", "AgentOutputItem"],
-           "streaming: delta-delta-delta-item order preserved",
-           observed=f"types={types}")
+    _check(
+        types == ["AgentTextDelta", "AgentTextDelta", "AgentTextDelta", "AgentOutputItem"],
+        "streaming: delta-delta-delta-item order preserved",
+        observed=f"types={types}",
+    )
 
 
 async def probe_run_engine_async_filters_deltas() -> None:
@@ -90,11 +101,15 @@ async def probe_run_engine_async_filters_deltas() -> None:
     tp = isolated_trace_copy()
 
     items = await run_engine_async(msgs, cfg, tp, runner=runner)
-    _check(all(isinstance(it, AgentOutputItem) for it in items),
-           "filter: only AgentOutputItem returned by run_engine_async",
-           observed=f"types={[type(it).__name__ for it in items]}")
-    _check(not any(isinstance(it, AgentTextDelta) for it in items),
-           "filter: no AgentTextDelta in run_engine_async output")
+    _check(
+        all(isinstance(it, AgentOutputItem) for it in items),
+        "filter: only AgentOutputItem returned by run_engine_async",
+        observed=f"types={[type(it).__name__ for it in items]}",
+    )
+    _check(
+        not any(isinstance(it, AgentTextDelta) for it in items),
+        "filter: no AgentTextDelta in run_engine_async output",
+    )
 
 
 async def probe_non_retriable_error_does_not_deadlock() -> None:
@@ -113,12 +128,16 @@ async def probe_non_retriable_error_does_not_deadlock() -> None:
     )
     result = await run_with_fake(runner, timeout_seconds=3.0)
 
-    _check(not isinstance(result.error, asyncio.TimeoutError),
-           "no-deadlock: engine does not deadlock on non-retriable error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(isinstance(result.error, BadRequestError),
-           "no-deadlock: BadRequestError propagates through stream",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        not isinstance(result.error, asyncio.TimeoutError),
+        "no-deadlock: engine does not deadlock on non-retriable error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        isinstance(result.error, BadRequestError),
+        "no-deadlock: BadRequestError propagates through stream",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
 
 
 async def main() -> int:

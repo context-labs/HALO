@@ -39,13 +39,15 @@ async def test_engine_runs_on_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -
         maximum_parallel_subagents=2,
     )
 
-    messages = [AgentMessage(
-        role="user",
-        content=(
-            "Use get_dataset_overview to tell me how many traces are in the dataset. "
-            "Then end your reply with a line containing only <final/>."
-        ),
-    )]
+    messages = [
+        AgentMessage(
+            role="user",
+            content=(
+                "Use get_dataset_overview to tell me how many traces are in the dataset. "
+                "Then end your reply with a line containing only <final/>."
+            ),
+        )
+    ]
 
     async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
         results = await run_engine_async(messages, cfg, trace_path)

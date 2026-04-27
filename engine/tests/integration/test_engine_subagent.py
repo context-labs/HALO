@@ -1,143 +1,149 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from agents.tool_context import ToolContext as SdkToolContext
 
+import engine.tools.subagent_tool_factory as subagent_factory
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_execution import AgentExecution
+from engine.agents.engine_output_bus import EngineOutputBus
+from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
-from engine.main import run_engine_async
 from engine.model_config import ModelConfig
-from engine.models.messages import AgentMessage
+from engine.tools.subagent_result import SubagentToolResult
+from engine.tools.subagent_tool_factory import _build_subagent_as_tool
+from engine.traces.models.trace_index_config import TraceIndexConfig
+from engine.traces.trace_index_builder import TraceIndexBuilder
+from engine.traces.trace_store import TraceStore
 
 
-E2E_MODEL = os.environ.get("HALO_E2E_MODEL", "gpt-5.4-mini")
-E2E_TIMEOUT_SECONDS = float(os.environ.get("HALO_E2E_TIMEOUT", "120"))
+class _FakeStream:
+    def __init__(self, events: list[Any]) -> None:
+        self._events = events
+
+    async def stream_events(self):
+        for event in self._events:
+            yield event
+
+
+class _FakeRunner:
+    def __init__(self, events: list[Any]) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._events = events
+
+    def run_streamed(self, **kwargs: Any) -> _FakeStream:
+        self.calls.append(kwargs)
+        return _FakeStream(self._events)
+
+
+def _assistant_text(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="run_item_stream_event",
+        item=SimpleNamespace(
+            type="message_output_item",
+            raw_item=SimpleNamespace(
+                id="child-msg-1",
+                role="assistant",
+                content=[SimpleNamespace(type="output_text", text=text)],
+            ),
+        ),
+    )
+
+
+def _config() -> EngineConfig:
+    root = AgentConfig(
+        name="root",
+        instructions="Answer briefly.",
+        model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_turns=4,
+    )
+    return EngineConfig(
+        root_agent=root,
+        subagent=root.model_copy(update={"name": "sub", "maximum_turns": 3}),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+        maximum_parallel_subagents=1,
+    )
+
+
+def _tool_context() -> SdkToolContext:
+    return SdkToolContext(
+        context=None,
+        tool_name="call_subagent",
+        tool_call_id="parent-call-1",
+        tool_arguments='{"question":"How many traces have errors?"}',
+    )
 
 
 @pytest.mark.asyncio
-async def test_root_delegates_to_subagent(tmp_path: Path, fixtures_dir: Path) -> None:
-    if not os.environ.get("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
-
+async def test_subagent_tool_streams_child_events_with_parent_linkage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fixtures_dir: Path,
+) -> None:
     trace_path = tmp_path / "traces.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-
-    agent = AgentConfig(
-        name="root",
-        instructions="Answer briefly.",
-        model=ModelConfig(name=E2E_MODEL),
-        maximum_turns=6,
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
     )
-    cfg = EngineConfig(
-        root_agent=agent,
-        subagent=agent.model_copy(update={"name": "sub"}),
-        synthesis_model=ModelConfig(name=E2E_MODEL),
-        compaction_model=ModelConfig(name=E2E_MODEL),
-        maximum_depth=1,
-        maximum_parallel_subagents=2,
+    trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
+
+    def fake_compactor_factory(_config: EngineConfig):
+        def factory(_execution):
+            async def compact(_item):
+                return "summary"
+
+            return compact
+
+        return factory
+
+    monkeypatch.setattr(subagent_factory, "build_openai_compactor_factory", fake_compactor_factory)
+
+    cfg = _config()
+    output_bus = EngineOutputBus()
+    runner = _FakeRunner([_assistant_text("The dataset has one error trace.")])
+    run_state = EngineRunState(
+        trace_store=trace_store,
+        output_bus=output_bus,
+        config=cfg,
+        runner=runner,
     )
-
-    messages = [AgentMessage(
-        role="user",
-        content=(
-            "Delegate this question to a subagent via call_subagent: "
-            "'How many traces have errors? Use count_traces with has_errors=true.' "
-            "Then report the subagent's answer to me and end with <final/>."
-        ),
-    )]
-
-    async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
-        results = await run_engine_async(messages, cfg, trace_path)
-
-    subagent_calls = [
-        item for item in results
-        if item.depth == 0 and item.item.tool_calls and any(
-            tc.function.name == "call_subagent" for tc in item.item.tool_calls
-        )
-    ]
-    assert subagent_calls, "root did not call call_subagent"
-
-    child_items = [item for item in results if item.depth == 1]
-    assert child_items, "no depth=1 items streamed — child stream not forwarded to bus"
-
-    assert any(item.final for item in results)
-
-
-@pytest.mark.asyncio
-async def test_subagent_parent_linkage(tmp_path: Path, fixtures_dir: Path) -> None:
-    """End-to-end verification that emitted subagent events carry the parent's
-    agent_id and the parent's tool_call_id. This is the only test that
-    actually exercises the SDK's tool-dispatch annotation path
-    (``_get_function_tool_invoke_context``) — FakeRunner short-circuits
-    that path, so unit/probe-level tests can only verify the closure-side
-    bookkeeping after the SDK has supplied a ``ToolContext``."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
-
-    trace_path = tmp_path / "traces.jsonl"
-    trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-
-    agent = AgentConfig(
-        name="root",
-        instructions="Answer briefly.",
-        model=ModelConfig(name=E2E_MODEL),
-        maximum_turns=6,
+    parent_execution = AgentExecution(
+        agent_id="root-1",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
-    cfg = EngineConfig(
-        root_agent=agent,
-        subagent=agent.model_copy(update={"name": "sub"}),
-        synthesis_model=ModelConfig(name=E2E_MODEL),
-        compaction_model=ModelConfig(name=E2E_MODEL),
-        maximum_depth=1,
-        maximum_parallel_subagents=2,
+    run_state.register(parent_execution)
+
+    tool = _build_subagent_as_tool(
+        run_state=run_state,
+        child_depth=1,
+        semaphore=asyncio.Semaphore(1),
+        parent_execution=parent_execution,
     )
 
-    messages = [AgentMessage(
-        role="user",
-        content=(
-            "Delegate this question to a subagent via call_subagent: "
-            "'How many traces have errors? Use count_traces with has_errors=true.' "
-            "Then report the subagent's answer to me and end with <final/>."
-        ),
-    )]
-
-    async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
-        results = await run_engine_async(messages, cfg, trace_path)
-
-    root_items = [item for item in results if item.depth == 0]
-    assert root_items, "no root items streamed"
-    root_agent_id = root_items[0].agent_id
-    assert all(it.agent_id == root_agent_id for it in root_items), (
-        f"depth=0 items came from multiple agent_ids: {sorted({it.agent_id for it in root_items})}"
+    result_json = await tool.on_invoke_tool(
+        _tool_context(),
+        '{"question":"How many traces have errors?"}',
     )
+    await output_bus.close()
+    emitted = [event async for event in output_bus.stream()]
+    result = SubagentToolResult.model_validate_json(result_json)
 
-    call_subagent_tool_calls = [
-        tc
-        for item in root_items
-        if item.item.tool_calls
-        for tc in item.item.tool_calls
-        if tc.function.name == "call_subagent"
-    ]
-    assert call_subagent_tool_calls, "root never emitted a call_subagent tool_call"
-    expected_parent_call_ids = {tc.id for tc in call_subagent_tool_calls}
-
-    child_items = [item for item in results if item.depth == 1]
-    assert child_items, "no depth=1 items emitted"
-
-    bad_parent_agent_id = [it for it in child_items if it.parent_agent_id != root_agent_id]
-    assert not bad_parent_agent_id, (
-        f"{len(bad_parent_agent_id)}/{len(child_items)} child items have wrong parent_agent_id; "
-        f"expected={root_agent_id} got={[it.parent_agent_id for it in bad_parent_agent_id[:3]]}"
-    )
-
-    bad_parent_tool_call_id = [
-        it for it in child_items if it.parent_tool_call_id not in expected_parent_call_ids
-    ]
-    assert not bad_parent_tool_call_id, (
-        f"{len(bad_parent_tool_call_id)}/{len(child_items)} child items have parent_tool_call_id "
-        f"not matching any call_subagent tool_call; expected one of {expected_parent_call_ids} "
-        f"got={[it.parent_tool_call_id for it in bad_parent_tool_call_id[:3]]}"
-    )
+    assert result.answer == "The dataset has one error trace."
+    assert result.turns_used == 1
+    assert runner.calls[0]["max_turns"] == 3
+    assert len(emitted) == 1
+    child_item = emitted[0]
+    assert child_item.depth == 1
+    assert child_item.parent_agent_id == "root-1"
+    assert child_item.parent_tool_call_id == "parent-call-1"

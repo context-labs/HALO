@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REMOTE="${1:-}"
+URL="${2:-}"
+ZERO_OID="0000000000000000000000000000000000000000"
+BASE_REF="origin/main"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ENGINE_ROOT="$REPO_ROOT/engine"
+REFS_FILE="$(mktemp)"
+
+cleanup() {
+  rm -f "$REFS_FILE"
+}
+
+trap cleanup EXIT
+cat > "$REFS_FILE"
+
+has_engine_changes() {
+  while read -r local_ref local_oid remote_ref remote_oid; do
+    if [[ -z "${local_ref:-}" || "$local_oid" == "$ZERO_OID" ]]; then
+      continue
+    fi
+
+    local range
+    if [[ "$remote_oid" == "$ZERO_OID" ]]; then
+      range="$(git merge-base HEAD "$BASE_REF")..${local_oid}"
+    else
+      range="${remote_oid}..${local_oid}"
+    fi
+
+    if git diff --name-only "$range" | grep -q '^engine/'; then
+      return 0
+    fi
+  done < "$REFS_FILE"
+
+  return 1
+}
+
+if ! has_engine_changes; then
+  exit 0
+fi
+
+echo "pre-push: engine/ changes detected, running Engine checks..."
+
+cd "$ENGINE_ROOT"
+task check:pre-push || {
+  echo "pre-push: engine checks failed. Push aborted."
+  exit 1
+}
+
+echo "pre-push: Engine checks passed."

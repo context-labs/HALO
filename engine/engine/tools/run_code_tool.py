@@ -37,7 +37,9 @@ class RunCodeTool:
         self._sandbox_config = sandbox_config
         self._default_venv = sandbox_venv or Path(__file__).resolve().parents[2] / ".sandbox-venv"
 
-    async def run(self, tool_context: ToolContext, arguments: RunCodeArguments) -> CodeExecutionResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: RunCodeArguments
+    ) -> CodeExecutionResult:
         """Run user code through ``SandboxRunner`` with the active TraceStore's trace/index paths."""
         runner = tool_context.sandbox_runner or SandboxRunner(sandbox_venv=self._default_venv)
         store = tool_context.require_trace_store()

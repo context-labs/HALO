@@ -26,6 +26,7 @@ async def test_sandboxed_hello_world(tmp_path: Path, fixtures_dir: Path) -> None
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
     from engine.traces.models.trace_index_config import TraceIndexConfig
     from engine.traces.trace_index_builder import TraceIndexBuilder
+
     index_path = tmp_path / "traces.jsonl.engine-index.jsonl"
     await TraceIndexBuilder.ensure_index_exists(
         trace_path=trace_path, config=TraceIndexConfig(index_path=index_path)

@@ -26,7 +26,9 @@ class _Echo:
 def test_adapter_produces_sdk_function_tool() -> None:
     from agents import FunctionTool
 
-    sdk_tool = to_sdk_function_tool(_Echo(), context_factory=lambda ctx: ToolContext.model_construct())
+    sdk_tool = to_sdk_function_tool(
+        _Echo(), context_factory=lambda ctx: ToolContext.model_construct()
+    )
     assert isinstance(sdk_tool, FunctionTool)
     assert sdk_tool.name == "echo"
     assert "Echo" in (sdk_tool.description or "")

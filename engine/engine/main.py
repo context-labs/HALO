@@ -142,11 +142,13 @@ def stream_engine(
     """Synchronous wrapper around ``stream_engine_async``. Collects every
     streamed event into a list and returns it. Use the async variant if you
     want incremental results."""
+
     async def _collect() -> list[EngineStreamEvent]:
         out: list[EngineStreamEvent] = []
         async for ev in stream_engine_async(messages, engine_config, trace_path, runner=runner):
             out.append(ev)
         return out
+
     return asyncio.run(_collect())
 
 
@@ -158,6 +160,4 @@ def run_engine(
     runner: RunnerProtocol | None = None,
 ) -> list[AgentOutputItem]:
     """Synchronous wrapper around ``run_engine_async``."""
-    return asyncio.run(
-        run_engine_async(messages, engine_config, trace_path, runner=runner)
-    )
+    return asyncio.run(run_engine_async(messages, engine_config, trace_path, runner=runner))

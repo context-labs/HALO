@@ -207,4 +207,3 @@ class OpenAiEventMapper:
             ),
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
-
