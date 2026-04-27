@@ -8,6 +8,8 @@ import pytest
 from agents.tool_context import ToolContext as SdkToolContext
 
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_context import AgentContext
+from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
@@ -47,6 +49,15 @@ def _fake_parent() -> AgentExecution:
     )
 
 
+def _fake_parent_context() -> AgentContext:
+    return AgentContext(
+        items=[],
+        compaction_model=ModelConfig(name="claude-haiku-4-5"),
+        text_message_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
+    )
+
+
 def _fake_tool_ctx(tool_call_id: str = "parent-call-x") -> SdkToolContext:
     return SdkToolContext(
         context=None,
@@ -68,6 +79,7 @@ def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
         run_state=run_state,
         semaphore=sem,
         parent_execution=_fake_parent(),
+        parent_context=_fake_parent_context(),
     )
     names = {t.name for t in tools}
     assert "call_subagent" not in names
@@ -85,31 +97,64 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
         run_state=run_state,
         semaphore=sem,
         parent_execution=_fake_parent(),
+        parent_context=_fake_parent_context(),
     )
     names = {t.name for t in tools}
     assert "call_subagent" in names
 
 
 @pytest.mark.asyncio
-async def test_semaphore_wrapper_limits_parallelism() -> None:
-    from engine.tools.subagent_tool_factory import _wrap_with_semaphore
+async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
+    """Defense-in-depth: structural guard in ``_child_tools_for_depth`` keeps this
+    unreachable in normal flow, but the runtime check must still fire if a future
+    refactor bypasses the structural enforcement. Constructed directly to exercise it."""
+    from engine.errors import EngineMaxDepthExceededError
 
-    in_flight = 0
-    peak = 0
+    cfg = _engine_config(max_depth=2)
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state.runner = MagicMock()
 
-    async def fake_tool(ctx, args):
-        nonlocal in_flight, peak
-        in_flight += 1
-        peak = max(peak, in_flight)
-        await asyncio.sleep(0.01)
-        in_flight -= 1
-        return "ok"
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(
+        run_state=run_state,
+        child_depth=cfg.maximum_depth + 1,
+        semaphore=sem,
+        parent_execution=_fake_parent(),
+    )
 
-    sem = asyncio.Semaphore(2)
-    wrapped = _wrap_with_semaphore(fake_tool, sem)
+    with pytest.raises(EngineMaxDepthExceededError):
+        await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
 
-    await asyncio.gather(*[wrapped(None, "{}") for _ in range(6)])
-    assert peak <= 2
+
+@pytest.mark.asyncio
+async def test_get_context_item_resolves_through_wired_agent_context() -> None:
+    """``make_ctx`` must populate ``ToolContext.agent_context`` so ``get_context_item``
+    can resolve item ids against the calling agent's stored items."""
+    cfg = _engine_config(max_depth=2)
+    run_state = MagicMock(spec=EngineRunState)
+    run_state.config = cfg
+    run_state.output_bus = EngineOutputBus()
+    run_state.trace_store = MagicMock()
+
+    parent_context = _fake_parent_context()
+    parent_context.append(AgentContextItem(item_id="ctx-42", role="user", content="stored content"))
+
+    sem = asyncio.Semaphore(1)
+    tools = _child_tools_for_depth(
+        depth=0,
+        run_state=run_state,
+        semaphore=sem,
+        parent_execution=_fake_parent(),
+        parent_context=parent_context,
+    )
+
+    get_context_tool = next(t for t in tools if t.name == "get_context_item")
+    result_json = await get_context_tool.on_invoke_tool(
+        MagicMock(spec=SdkToolContext), '{"item_id": "ctx-42"}'
+    )
+    assert "stored content" in result_json
+    assert "ctx-42" in result_json
 
 
 @pytest.mark.asyncio
