@@ -202,3 +202,165 @@ async def test_runner_retries_on_connection_error_then_fails() -> None:
             is_root=True,
         )
     assert call_count == 10
+
+
+class _RaisingStream:
+    """Yields nothing and raises ``exc`` on the first iteration step."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def stream_events(self):
+        raise self._exc
+        yield  # pragma: no cover - makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_when_stream_iteration_raises_retriable() -> None:
+    """Lazy LLM errors surface from ``stream_events()`` and must engage the breaker."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_that_raises(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        return _RaisingStream(APIConnectionError(request=fake_request))
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_raises,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 10
+
+
+@pytest.mark.asyncio
+async def test_runner_propagates_non_retriable_stream_iteration_error() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
+
+    async def stream_that_raises(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        return _RaisingStream(
+            BadRequestError(
+                message="bad field",
+                response=fake_response,
+                body={"error": {"message": "bad field"}},
+            )
+        )
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_raises,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(BadRequestError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1
+
+
+class _StreamYieldsThenRaises:
+    """Yields ``events`` successfully, then raises ``exc`` on the next iteration step.
+
+    Models a network drop after the LLM has streamed some tokens — the case where
+    state has already been mutated and a retry would corrupt it.
+    """
+
+    def __init__(self, events: list, exc: BaseException) -> None:
+        self._events = events
+        self._exc = exc
+
+    async def stream_events(self):
+        for e in self._events:
+            yield e
+        raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_runner_propagates_retriable_iteration_error_after_event_seen() -> None:
+    """Once any event has been applied to context/counters/bus, a retriable mid-stream error
+    must propagate rather than retry — replay would duplicate context items, double-count
+    turns, and re-emit bus events. Turn-boundary recovery is the caller's job."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_that_partially_succeeds(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        return _StreamYieldsThenRaises(
+            [_assistant_event("partial answer")],
+            APIConnectionError(request=fake_request),
+        )
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_partially_succeeds,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(APIConnectionError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1
+    # The single partial assistant message stays in context exactly once.
+    assistant_items = [i for i in ctx.items if i.role == "assistant"]
+    assert len(assistant_items) == 1
