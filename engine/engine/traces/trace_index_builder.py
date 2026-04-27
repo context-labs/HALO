@@ -84,11 +84,12 @@ class _RowAccumulator:
 
 
 class TraceIndexBuilder:
-    """Build-once index creator for the flat OTel JSONL trace input.
+    """Sidecar index creator for the flat OTel JSONL trace input.
 
     Index is sidecar-style next to the trace file. ``ensure_index_exists`` reuses
-    an existing index as-is (no freshness check by design) and only fails fast on
-    an unsupported schema version. ``build_index`` is the actual scan + write path.
+    an existing index when its stored stat fingerprint (size + mtime_ns) still
+    matches the trace file, and rebuilds it otherwise. Schema-version mismatches
+    still fail fast. ``build_index`` is the actual scan + write path.
     """
 
     @classmethod
@@ -97,31 +98,42 @@ class TraceIndexBuilder:
         trace_path: Path,
         config: TraceIndexConfig,
     ) -> Path:
-        """Return a usable index path, building one only if missing.
+        """Return a usable index path, rebuilding when missing or stale.
 
-        If both the index and meta sidecars exist, the meta's schema_version is
-        validated against ``config.schema_version`` — mismatches fail fast rather
-        than silently rebuilding.
+        The sidecar is a derived cache: any mismatch — missing files, schema
+        version drift, or a different ``source_size``/``source_mtime_ns`` — is
+        treated as staleness and triggers a rebuild. ``build_index`` itself
+        fails fast on requested versions it does not know how to write.
         """
         index_path = config.index_path or Path(str(trace_path) + ".engine-index.jsonl")
         meta_path = cls._meta_path_for(index_path)
 
+        current_size, current_mtime_ns = cls._fingerprint_trace_file(trace_path)
+
         if index_path.exists() and meta_path.exists():
             existing = TraceIndexMeta.model_validate_json(meta_path.read_text())
-            if existing.schema_version != config.schema_version:
-                raise ValueError(
-                    f"existing index schema_version={existing.schema_version} "
-                    f"does not match requested {config.schema_version}"
-                )
-            return index_path
+            if (
+                existing.schema_version == config.schema_version
+                and existing.source_size == current_size
+                and existing.source_mtime_ns == current_mtime_ns
+            ):
+                return index_path
 
         await cls.build_index(
             trace_path=trace_path,
             index_path=index_path,
             meta_path=meta_path,
             schema_version=config.schema_version,
+            source_size=current_size,
+            source_mtime_ns=current_mtime_ns,
         )
         return index_path
+
+    @staticmethod
+    def _fingerprint_trace_file(trace_path: Path) -> tuple[int, int]:
+        """Return ``(size_bytes, mtime_ns)`` for the trace file via a single stat."""
+        st = trace_path.stat()
+        return st.st_size, st.st_mtime_ns
 
     @staticmethod
     def _meta_path_for(index_path: Path) -> Path:
@@ -138,15 +150,22 @@ class TraceIndexBuilder:
         index_path: Path,
         meta_path: Path,
         schema_version: int,
+        source_size: int | None = None,
+        source_mtime_ns: int | None = None,
     ) -> None:
         """Single-pass binary scan over the JSONL, grouping by trace_id and writing the sidecars atomically.
 
         Reads in binary mode so byte_offset/byte_length are exact, accumulates per-trace
         rollups, then writes ``<file>.tmp`` then renames into place so a partially-written
-        index is never observable.
+        index is never observable. ``source_size`` and ``source_mtime_ns`` are the
+        freshness fingerprint stored in meta; callers may pass precomputed values to
+        avoid a redundant stat.
         """
         if schema_version != 1:
             raise ValueError(f"unsupported trace index schema_version={schema_version}")
+
+        if source_size is None or source_mtime_ns is None:
+            source_size, source_mtime_ns = cls._fingerprint_trace_file(trace_path)
 
         rows_by_trace: dict[str, _RowAccumulator] = {}
 
@@ -173,7 +192,12 @@ class TraceIndexBuilder:
             "\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else "")
         )
         tmp_meta.write_text(
-            TraceIndexMeta(schema_version=schema_version, trace_count=len(rows)).model_dump_json()
+            TraceIndexMeta(
+                schema_version=schema_version,
+                trace_count=len(rows),
+                source_size=source_size,
+                source_mtime_ns=source_mtime_ns,
+            ).model_dump_json()
         )
 
         tmp_index.replace(index_path)
