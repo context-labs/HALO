@@ -6,12 +6,14 @@ import httpx
 import pytest
 from openai import APIConnectionError, BadRequestError
 
+from engine.agents import openai_agent_runner as runner_mod
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
-from engine.agents.openai_agent_runner import OpenAiAgentRunner
+from engine.agents.openai_agent_runner import OpenAiAgentRunner, configure_default_sdk_client
 from engine.errors import EngineAgentExhaustedError
 from engine.model_config import ModelConfig
+from engine.model_provider_config import ModelProviderConfig
 
 
 def _assistant_event(text: str) -> SimpleNamespace:
@@ -364,3 +366,32 @@ async def test_runner_propagates_retriable_iteration_error_after_event_seen() ->
     # The single partial assistant message stays in context exactly once.
     assistant_items = [i for i in ctx.items if i.role == "assistant"]
     assert len(assistant_items) == 1
+
+
+def test_configure_default_sdk_client_noop_when_provider_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, dict]] = []
+    monkeypatch.setattr(
+        runner_mod, "set_default_openai_client", lambda c, **kw: calls.append((c, kw))
+    )
+    configure_default_sdk_client(ModelProviderConfig())
+    assert calls == []
+
+
+def test_configure_default_sdk_client_sets_when_base_url_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, dict]] = []
+    monkeypatch.setattr(
+        runner_mod, "set_default_openai_client", lambda c, **kw: calls.append((c, kw))
+    )
+    configure_default_sdk_client(
+        ModelProviderConfig(base_url="https://example.com/v1/", api_key="sk-x")
+    )
+    assert len(calls) == 1
+    client, kwargs = calls[0]
+    assert str(client.base_url).startswith("https://example.com/v1")
+    # Tracing must NOT be redirected to the model endpoint — see
+    # configure_default_sdk_client docstring.
+    assert kwargs == {"use_for_tracing": False}

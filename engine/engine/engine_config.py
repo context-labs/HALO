@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engine.agents.agent_config import AgentConfig
 from engine.model_config import ModelConfig
+from engine.model_provider_config import ModelProviderConfig
 from engine.sandbox.sandbox_config import SandboxConfig
 from engine.traces.models.trace_index_config import TraceIndexConfig
 
@@ -21,6 +22,7 @@ class EngineConfig(BaseModel):
     subagent: AgentConfig
     synthesis_model: ModelConfig
     compaction_model: ModelConfig
+    model_provider: ModelProviderConfig = Field(default_factory=ModelProviderConfig)
     trace_index: TraceIndexConfig = Field(default_factory=TraceIndexConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     text_message_compaction_keep_last_messages: int = Field(default=12, ge=0)
