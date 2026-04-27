@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
+from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict
 
 from engine.agents.prompt_templates import SYNTHESIS_SYSTEM_PROMPT
@@ -27,14 +26,9 @@ class SynthesisTool:
     arguments_model = SynthesizeTracesArguments
     result_model = SynthesizeTracesResult
 
-    def __init__(self, model_name: str, client: Any | None = None) -> None:
+    def __init__(self, model_name: str, client: AsyncOpenAI | None = None) -> None:
         self._model_name = model_name
-        if client is None:
-            from openai import AsyncOpenAI
-
-            self._client = AsyncOpenAI()
-        else:
-            self._client = client
+        self._client = client or AsyncOpenAI()
 
     async def run(self, tool_context: ToolContext, arguments: SynthesizeTracesArguments) -> SynthesizeTracesResult:
         user_text_parts = [f"trace_ids: {', '.join(arguments.trace_ids)}"]
