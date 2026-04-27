@@ -11,6 +11,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.12"
+  INFISICAL_CLI_VERSION: "0.41.2"
 
 permissions:
   checks: write
@@ -47,8 +48,9 @@ jobs:
 
       - name: Install Infisical CLI
         run: |
-          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
-          sudo apt-get update && sudo apt-get install -y infisical
+          curl -fsSL "https://github.com/Infisical/infisical/releases/download/infisical-cli%2Fv${INFISICAL_CLI_VERSION}/infisical_${INFISICAL_CLI_VERSION}_linux_amd64.deb" -o /tmp/infisical.deb
+          sudo dpkg -i /tmp/infisical.deb
+          rm /tmp/infisical.deb
 
       - name: Install engine dependencies
         run: task ci:setup
