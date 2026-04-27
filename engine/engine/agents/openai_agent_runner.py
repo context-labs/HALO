@@ -71,18 +71,28 @@ class OpenAiAgentRunner:
         lazily inside ``stream.stream_events()``, so the retry try/except wraps the
         full iteration — connection errors, timeouts, rate limits, and 5xx surface
         there, not on the ``run_streamed`` call.
+
+        Retry only fires when zero events were processed in the failed attempt.
+        Once any event has been applied to ``agent_context``/``agent_execution``/
+        ``output_bus``, a replay would corrupt state (duplicate context items,
+        double-counted turns, duplicate bus emissions). Mid-stream failures are
+        surfaced to the caller; turn-boundary recovery happens one layer up
+        (parent agents see a ``SubagentToolResult`` failure; root agents see
+        ``output_bus.fail()``).
         """
         last_exc: BaseException | None = None
+        # Built once: retry only fires when events_seen == 0, so the context can't
+        # have been mutated between attempts.
+        messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
-            # Rebuild per attempt so a retry sees any context items appended before
-            # the failure point (and any compaction that has run since).
-            messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
+            events_seen = 0
             try:
                 stream = await self._run_streamed(
                     agent=sdk_agent, input=messages, context=run_context
                 )
                 async for raw_event in stream.stream_events():
+                    events_seen += 1
                     mapped = self._mapper.to_mapped_event(
                         raw_event, execution=agent_execution, is_root=is_root
                     )
@@ -102,7 +112,7 @@ class OpenAiAgentRunner:
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
             except Exception as exc:
-                if not _is_retriable_llm_error(exc):
+                if events_seen > 0 or not _is_retriable_llm_error(exc):
                     raise
                 last_exc = exc
                 agent_execution.record_llm_failure()
