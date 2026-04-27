@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export GIT_WORK_TREE="$REPO_ROOT"
+
+ENGINE_HOOK="$REPO_ROOT/engine/scripts/git-hooks/pre-commit"
+
+if [[ -x "$ENGINE_HOOK" ]]; then
+  "$ENGINE_HOOK"
+fi

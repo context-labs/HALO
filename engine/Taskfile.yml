@@ -176,7 +176,7 @@ tasks:
       - task: lint
       - task: format
       - task: typecheck
-      - task: test
+      - task: test:unit
 
   check-fix:
     desc: Run checks with auto-fix enabled
@@ -185,7 +185,7 @@ tasks:
       - task: lint:fix
       - task: format:fix
       - task: typecheck
-      - task: test
+      - task: test:unit
 
   check:pre-push:
     desc: Run engine pre-push checks
