@@ -41,11 +41,11 @@ async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) ->
         parent_agent_id=None, parent_tool_call_id=None,
     )
     state.register(exec_)
-    assert state.get_by_agent_id("root") is exec_
+    assert state.executions_by_agent_id["root"] is exec_
 
     child = AgentExecution(
         agent_id="sub1", agent_name="sub", depth=1,
         parent_agent_id="root", parent_tool_call_id="call_xyz",
     )
     state.register(child)
-    assert state.get_by_tool_call_id("call_xyz") is child
+    assert state.executions_by_tool_call_id["call_xyz"] is child

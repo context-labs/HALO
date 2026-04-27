@@ -85,7 +85,6 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
     from engine.tools.subagent_result import SubagentToolResult
     from engine.tools.subagent_tool_factory import _build_subagent_as_tool
     from engine.traces.trace_store import TraceStore
-    from engine.tools import subagent_tool_factory as mod
 
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -97,19 +96,17 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
     fake_store = MagicMock(spec=TraceStore)
     run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
 
+    class _ExplodingRunner:
+        @staticmethod
+        def run_streamed(*args, **kwargs):
+            raise RuntimeError("SDK exploded")
+
+    run_state.runner = _ExplodingRunner
+
     sem = asyncio.Semaphore(1)
     tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
 
-    def _raise(*args, **kwargs):
-        raise RuntimeError("SDK exploded")
-
-    orig = mod.Runner.run_streamed
-    mod.Runner.run_streamed = _raise
-    try:
-        result_json = await tool.on_invoke_tool(None, "{}")
-    finally:
-        mod.Runner.run_streamed = orig
-
+    result_json = await tool.on_invoke_tool(None, "{}")
     result = SubagentToolResult.model_validate_json(result_json)
     assert "SDK exploded" in result.answer
 
@@ -128,7 +125,6 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
     from engine.tools.subagent_result import SubagentToolResult
     from engine.tools.subagent_tool_factory import _build_subagent_as_tool
     from engine.traces.trace_store import TraceStore
-    from engine.tools import subagent_tool_factory as mod
 
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -163,10 +159,12 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
         async def wait_for_final_output(self_inner):
             return self_inner
 
-    def fake_run_streamed(*args, **kwargs):
-        return _Stream()
+    class _FakeRunner:
+        @staticmethod
+        def run_streamed(*args, **kwargs):
+            return _Stream()
 
-    monkeypatch.setattr(mod.Runner, "run_streamed", fake_run_streamed)
+    run_state.runner = _FakeRunner
 
     sem = asyncio.Semaphore(1)
     tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
@@ -190,7 +188,6 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
     from engine.tools.subagent_result import SubagentToolResult
     from engine.tools.subagent_tool_factory import _build_subagent_as_tool
     from engine.traces.trace_store import TraceStore
-    from engine.tools import subagent_tool_factory as mod
 
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -222,7 +219,12 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         async def wait_for_final_output(self_inner):
             return self_inner
 
-    monkeypatch.setattr(mod.Runner, "run_streamed", lambda *a, **kw: _Stream())
+    class _FakeRunner:
+        @staticmethod
+        def run_streamed(*args, **kwargs):
+            return _Stream()
+
+    run_state.runner = _FakeRunner
 
     sem = asyncio.Semaphore(1)
     tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
