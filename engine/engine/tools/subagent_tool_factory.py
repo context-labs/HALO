@@ -12,9 +12,9 @@ from agents.tool_context import ToolContext as SdkToolContext
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
+from engine.agents.compactor import build_compactor_factory
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
-from engine.agents.openai_compactor import build_openai_compactor_factory
 from engine.agents.prompt_templates import render_subagent_system_prompt
 from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
 from engine.tools.agent_context_tools import GetContextItemTool
@@ -102,7 +102,10 @@ def _child_tools_for_depth(
         to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
         to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
         to_sdk_function_tool(
-            SynthesisTool(model_name=engine_config.synthesis_model.name),
+            SynthesisTool(
+                model_name=engine_config.synthesis_model.name,
+                model_provider=engine_config.model_provider,
+            ),
             context_factory=make_ctx,
         ),
         to_sdk_function_tool(
@@ -231,7 +234,7 @@ def _build_subagent_as_tool(
 
             runner = OpenAiAgentRunner(
                 run_streamed=_run_streamed,
-                compactor_factory=build_openai_compactor_factory(engine_config),
+                compactor_factory=build_compactor_factory(engine_config),
             )
 
             try:
