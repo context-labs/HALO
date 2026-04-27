@@ -1,0 +1,294 @@
+name: "[bubblewrap-bin] Release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      semver_action:
+        description: "Semantic version bump"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      bwrap_version:
+        description: "Upstream bubblewrap version to bundle (e.g. 0.11.0)"
+        required: true
+        default: "0.11.0"
+        type: string
+      bwrap_sha256:
+        description: "SHA-256 of the upstream bubblewrap-{bwrap_version}.tar.xz tarball"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (build only; skip commit, push, and PyPI publish)"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: bubblewrap-bin-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/bubblewrap-bin--checks.yml
+    secrets: inherit
+
+  bump-version:
+    name: Bump Version
+    needs: [checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    defaults:
+      run:
+        working-directory: bubblewrap-bin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Bump version
+        id: bump
+        run: |
+          NEW_VERSION=$(uv version --bump "${{ inputs.semver_action }}" --short --no-sync)
+          echo "Bumped bubblewrap-bin version to ${NEW_VERSION}"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and push version bump
+        if: ${{ inputs.dry_run == false }}
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add pyproject.toml
+          git commit -m "Release bubblewrap-bin v${NEW_VERSION}"
+          git tag "bubblewrap-bin-v${NEW_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "bubblewrap-bin-v${NEW_VERSION}"
+
+      - name: Upload bumped manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: bubblewrap-bin-release-manifests
+          path: |
+            bubblewrap-bin/pyproject.toml
+          retention-days: 1
+
+  build-linux-wheel:
+    name: Build Linux Wheel (${{ matrix.arch }})
+    needs: [bump-version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            wheel_platform: manylinux_2_28_x86_64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            wheel_platform: manylinux_2_28_aarch64
+    defaults:
+      run:
+        working-directory: bubblewrap-bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bumped manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: bubblewrap-bin-release-manifests
+          path: bubblewrap-bin/
+
+      - name: Install build dependencies (host)
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            curl \
+            libcap-dev \
+            meson \
+            ninja-build \
+            pkg-config \
+            xz-utils
+
+      - name: Build vendored bwrap
+        env:
+          BWRAP_VERSION: ${{ inputs.bwrap_version }}
+          BWRAP_SHA256: ${{ inputs.bwrap_sha256 }}
+          ARCH: ${{ matrix.arch }}
+        run: ./scripts/build_bwrap.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build wheel
+        run: |
+          uv build --wheel --out-dir dist
+          # The wheel is built with a generic linux tag because hatchling
+          # cannot infer manylinux compliance on its own. Re-tag the wheel so
+          # PyPI accepts it as a manylinux platform wheel.
+          uv pip install --system "auditwheel>=6"
+          for whl in dist/*.whl; do
+              auditwheel repair "$whl" --wheel-dir dist/repaired --plat ${{ matrix.wheel_platform }}
+          done
+          rm dist/*.whl
+          mv dist/repaired/*.whl dist/
+          rmdir dist/repaired
+
+      - name: Smoke test wheel
+        run: |
+          uv venv .venv-smoke
+          .venv-smoke/bin/pip install dist/*.whl
+          .venv-smoke/bin/python -c "
+          from bubblewrap_bin import bwrap_path
+          import subprocess
+          path = bwrap_path()
+          print(f'packaged bwrap at: {path}')
+          subprocess.run([str(path), '--version'], check=True)
+          "
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: bubblewrap-bin-wheel-${{ matrix.arch }}
+          path: bubblewrap-bin/dist/*.whl
+          retention-days: 14
+
+  build-sdist:
+    name: Build sdist
+    needs: [bump-version]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bubblewrap-bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bumped manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: bubblewrap-bin-release-manifests
+          path: bubblewrap-bin/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build sdist
+        run: uv build --sdist --out-dir dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: bubblewrap-bin-sdist
+          path: bubblewrap-bin/dist/*.tar.gz
+          retention-days: 14
+
+  publish:
+    name: Publish to PyPI
+    needs: [bump-version, build-linux-wheel, build-sdist]
+    if: ${{ inputs.dry_run == false }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-bubblewrap-bin
+      url: https://pypi.org/project/bubblewrap-bin/${{ needs.bump-version.outputs.new_version }}/
+    defaults:
+      run:
+        working-directory: bubblewrap-bin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Download all distributions
+        uses: actions/download-artifact@v4
+        with:
+          path: bubblewrap-bin/dist
+          pattern: bubblewrap-bin-*
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_BUBBLEWRAP_BIN }}
+        run: uv publish
+
+  summary:
+    name: Release Summary
+    needs: [checks, bump-version, build-linux-wheel, build-sdist, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summary
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          SEMVER_ACTION: ${{ inputs.semver_action }}
+          BWRAP_VERSION: ${{ inputs.bwrap_version }}
+          NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          BUMP_RESULT: ${{ needs.bump-version.result }}
+          BUILD_LINUX_RESULT: ${{ needs.build-linux-wheel.result }}
+          BUILD_SDIST_RESULT: ${{ needs.build-sdist.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          {
+            echo "## bubblewrap-bin Release Summary"
+            echo ""
+            echo "**Semver action:**     ${SEMVER_ACTION}"
+            echo "**Bundled bwrap:**     ${BWRAP_VERSION}"
+            echo "**New version:**       ${NEW_VERSION:-unknown}"
+            echo "**Dry run:**           ${DRY_RUN}"
+            echo ""
+            echo "**Checks:**            ${CHECKS_RESULT}"
+            echo "**Version Bump:**      ${BUMP_RESULT}"
+            echo "**Linux Wheel Build:** ${BUILD_LINUX_RESULT}"
+            echo "**Sdist Build:**       ${BUILD_SDIST_RESULT}"
+            echo "**Publish:**           ${PUBLISH_RESULT}"
+          } >> "$GITHUB_STEP_SUMMARY"

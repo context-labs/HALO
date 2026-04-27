@@ -127,10 +127,19 @@ def _child_tools_for_depth(
             ),
             context_factory=make_ctx,
         ),
-        to_sdk_function_tool(
-            RunCodeTool(sandbox_config=engine_config.sandbox), context_factory=make_ctx
-        ),
     ]
+
+    if run_state.sandbox_status.available and run_state.runtime_mounts is not None:
+        leaf_tools.append(
+            to_sdk_function_tool(
+                RunCodeTool(
+                    sandbox_config=engine_config.sandbox,
+                    sandbox_status=run_state.sandbox_status,
+                    runtime_mounts=run_state.runtime_mounts,
+                ),
+                context_factory=make_ctx,
+            )
+        )
 
     if depth >= engine_config.maximum_depth:
         return leaf_tools
@@ -164,6 +173,7 @@ def _build_subagent_as_tool(
         depth=child_depth,
         maximum_depth=engine_config.maximum_depth,
         maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+        run_code_available=run_state.sandbox_status.available,
     )
     # ``as_tool()``'s schema is fixed (``AgentAsToolInput`` shape) and does not
     # depend on the wrapped agent's tool list, so this stub Agent is enough to
