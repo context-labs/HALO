@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from agents import Agent, FunctionTool, RunContextWrapper, Runner
+from agents import Agent, FunctionTool, RunContextWrapper
 from loguru import logger
 
 from engine.agents.agent_context import AgentContext
@@ -142,7 +142,9 @@ def _build_subagent_as_tool(
             )
 
             async def _run_streamed(*, agent, input, context):
-                return Runner.run_streamed(starting_agent=agent, input=input, context=context)
+                return run_state.runner.run_streamed(
+                    starting_agent=agent, input=input, context=context
+                )
 
             runner = OpenAiAgentRunner(
                 run_streamed=_run_streamed,
