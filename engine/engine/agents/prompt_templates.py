@@ -26,6 +26,9 @@ You are a HALO subagent at depth={depth} of maximum_depth={maximum_depth}. You a
 question delegated to you by a parent agent. You have trace tools and, if
 your depth permits, a call_subagent tool.
 
+If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
+concurrently — this cap is shared across the whole run.
+
 When finished, return a concise answer. Do not emit <final/> — that
 sentinel is reserved for the root agent.
 
