@@ -4,6 +4,7 @@ set -euo pipefail
 REMOTE="${1:-}"
 URL="${2:-}"
 ZERO_OID="0000000000000000000000000000000000000000"
+BASE_REF="origin/main"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 ENGINE_ROOT="$REPO_ROOT/engine"
@@ -16,24 +17,7 @@ cleanup() {
 trap cleanup EXIT
 cat > "$REFS_FILE"
 
-default_base_ref() {
-  if git rev-parse --verify origin/main >/dev/null 2>&1; then
-    echo "origin/main"
-    return
-  fi
-
-  if git rev-parse --verify origin/master >/dev/null 2>&1; then
-    echo "origin/master"
-    return
-  fi
-
-  git rev-list --max-parents=0 HEAD | tail -n 1
-}
-
 has_engine_changes() {
-  local base_ref
-  base_ref="$(default_base_ref)"
-
   while read -r local_ref local_oid remote_ref remote_oid; do
     if [[ -z "${local_ref:-}" || "$local_oid" == "$ZERO_OID" ]]; then
       continue
@@ -41,7 +25,7 @@ has_engine_changes() {
 
     local range
     if [[ "$remote_oid" == "$ZERO_OID" ]]; then
-      range="$(git merge-base HEAD "$base_ref")..${local_oid}"
+      range="$(git merge-base HEAD "$BASE_REF")..${local_oid}"
     else
       range="${remote_oid}..${local_oid}"
     fi
