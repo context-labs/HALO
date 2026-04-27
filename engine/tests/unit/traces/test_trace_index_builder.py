@@ -93,26 +93,30 @@ async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path)
 
 
 @pytest.mark.asyncio
-async def test_ensure_index_rejects_unsupported_existing_schema(tmp_path: Path) -> None:
-    trace_path = tmp_path / "t.jsonl"
-    trace_path.write_text("")
+async def test_ensure_index_rebuilds_on_schema_mismatch(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
     index_path = Path(str(trace_path) + ".engine-index.jsonl")
     meta_path = TraceIndexBuilder._meta_path_for(index_path)
     index_path.write_text("")
     size, mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
-    bogus = TraceIndexMeta(
+    stale = TraceIndexMeta(
         schema_version=999,
         trace_count=0,
         source_size=size,
         source_mtime_ns=mtime_ns,
     )
-    meta_path.write_text(bogus.model_dump_json())
+    meta_path.write_text(stale.model_dump_json())
 
-    with pytest.raises(ValueError, match="schema_version"):
-        await TraceIndexBuilder.ensure_index_exists(
-            trace_path=trace_path,
-            config=TraceIndexConfig(schema_version=1),
-        )
+    result_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(schema_version=1),
+    )
+    assert result_path == index_path
+    rebuilt_meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert rebuilt_meta.schema_version == 1
+    assert rebuilt_meta.trace_count == 3
 
 
 @pytest.mark.asyncio

@@ -100,12 +100,10 @@ class TraceIndexBuilder:
     ) -> Path:
         """Return a usable index path, rebuilding when missing or stale.
 
-        If both the index and meta sidecars exist, the meta's ``schema_version``
-        is validated against ``config.schema_version`` — mismatches fail fast
-        rather than silently rebuilding. The meta's stored
-        ``source_size``/``source_mtime_ns`` are compared against a fresh ``stat``
-        of ``trace_path``; mismatches trigger a rebuild rather than returning a
-        stale index.
+        The sidecar is a derived cache: any mismatch — missing files, schema
+        version drift, or a different ``source_size``/``source_mtime_ns`` — is
+        treated as staleness and triggers a rebuild. ``build_index`` itself
+        fails fast on requested versions it does not know how to write.
         """
         index_path = config.index_path or Path(str(trace_path) + ".engine-index.jsonl")
         meta_path = cls._meta_path_for(index_path)
@@ -114,13 +112,9 @@ class TraceIndexBuilder:
 
         if index_path.exists() and meta_path.exists():
             existing = TraceIndexMeta.model_validate_json(meta_path.read_text())
-            if existing.schema_version != config.schema_version:
-                raise ValueError(
-                    f"existing index schema_version={existing.schema_version} "
-                    f"does not match requested {config.schema_version}"
-                )
             if (
-                existing.source_size == current_size
+                existing.schema_version == config.schema_version
+                and existing.source_size == current_size
                 and existing.source_mtime_ns == current_mtime_ns
             ):
                 return index_path
