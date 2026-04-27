@@ -42,16 +42,20 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
+# Enabled rule families:
+# E/W: pycodestyle errors and warnings
+# F: Pyflakes correctness checks
+# I: import sorting
 select = ["E", "F", "W", "I"]
 ignore = [
-    "E402",
-    "E501",
-    "E741",
+    "E402",  # module-import-not-at-top: allowed where setup code must run before imports
+    "E501",  # line-too-long: handled by the formatter where it can safely wrap
+    "E741",  # ambiguous-variable-name: allow short names like l/O/I in local contexts
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["F401"]
-"**/__init__.py" = ["F401"]
+"tests/**" = ["F401"]      # imported-but-unused: tests sometimes import fixtures/types for clarity
+"**/__init__.py" = ["F401"] # imported-but-unused: package init files can re-export names
 
 [tool.ruff.format]
 quote-style = "double"
