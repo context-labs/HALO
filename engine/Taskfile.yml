@@ -188,10 +188,11 @@ tasks:
       - task: test:unit
 
   check:pre-push:
-    desc: Run engine pre-push checks
+    desc: Run engine pre-push checks in parallel
     deps:
       - task: pinned-versions
       - task: lint
+      - task: typecheck
       - task: test:unit
 
   relock:
