@@ -136,10 +136,16 @@ def _render_item(item: AgentContextItem) -> AgentMessage:
     if item.role == "user":
         return AgentMessage(role="user", content=f"Compacted message (id: {item.item_id}): {summary}")
     if item.role == "assistant":
-        return AgentMessage(
-            role="assistant",
-            content=f"Compacted tool calls (id: {item.item_id}): {summary}",
-        )
+        # Three valid assistant shapes: text only, tool_calls only, or both.
+        # Label accurately so the model gets the right hint about what was
+        # compacted; the summary itself carries the substantive content.
+        if item.tool_calls and item.content:
+            label = f"Compacted message with tool calls (id: {item.item_id})"
+        elif item.tool_calls:
+            label = f"Compacted tool calls (id: {item.item_id})"
+        else:
+            label = f"Compacted message (id: {item.item_id})"
+        return AgentMessage(role="assistant", content=f"{label}: {summary}")
     if item.role == "tool":
         tool_name = item.name or "tool"
         return AgentMessage(
