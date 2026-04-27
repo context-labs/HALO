@@ -34,6 +34,9 @@ def test_subagent_prompt_reports_depth() -> None:
     )
     assert "depth=1" in text
     assert "maximum_depth=2" in text
+    # Regression: the parallel cap was passed to .format() but had no
+    # placeholder, so it was silently dropped.
+    assert "4" in text and "concurrently" in text
 
 
 def test_compaction_and_synthesis_prompts_are_strings() -> None:

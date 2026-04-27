@@ -84,12 +84,12 @@ async def stream_engine_async(
         )
 
     async def _drive() -> None:
-        runner = OpenAiAgentRunner(
+        agent_runner = OpenAiAgentRunner(
             run_streamed=_run_streamed,
             compactor_factory=build_openai_compactor_factory(engine_config),
         )
         try:
-            await runner.run(
+            await agent_runner.run(
                 sdk_agent=sdk_agent,
                 agent_context=root_context,
                 agent_execution=root_execution,
@@ -98,8 +98,16 @@ async def stream_engine_async(
                 run_context=run_state,
             )
             await output_bus.close()
-        except BaseException as exc:
+        except Exception as exc:
             await output_bus.fail(exc)
+        except BaseException as exc:
+            # CancelledError / KeyboardInterrupt / SystemExit: drain the bus
+            # so the consumer doesn't hang on _queue.get(), then re-raise so
+            # the task transitions to the proper cancelled/failed state.
+            # Without re-raising, structured cancellation breaks: an outer
+            # task.cancel() converts into a normal task completion.
+            await output_bus.fail(exc)
+            raise
 
     task = asyncio.create_task(_drive())
 
