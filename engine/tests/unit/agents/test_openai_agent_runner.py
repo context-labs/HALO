@@ -371,8 +371,10 @@ async def test_runner_propagates_retriable_iteration_error_after_event_seen() ->
 def test_configure_default_sdk_client_noop_when_provider_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[object] = []
-    monkeypatch.setattr(runner_mod, "set_default_openai_client", lambda c: calls.append(c))
+    calls: list[tuple[object, dict]] = []
+    monkeypatch.setattr(
+        runner_mod, "set_default_openai_client", lambda c, **kw: calls.append((c, kw))
+    )
     configure_default_sdk_client(ModelProviderConfig())
     assert calls == []
 
@@ -380,11 +382,16 @@ def test_configure_default_sdk_client_noop_when_provider_unset(
 def test_configure_default_sdk_client_sets_when_base_url_provided(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[object] = []
-    monkeypatch.setattr(runner_mod, "set_default_openai_client", lambda c: calls.append(c))
+    calls: list[tuple[object, dict]] = []
+    monkeypatch.setattr(
+        runner_mod, "set_default_openai_client", lambda c, **kw: calls.append((c, kw))
+    )
     configure_default_sdk_client(
         ModelProviderConfig(base_url="https://example.com/v1/", api_key="sk-x")
     )
     assert len(calls) == 1
-    client = calls[0]
+    client, kwargs = calls[0]
     assert str(client.base_url).startswith("https://example.com/v1")
+    # Tracing must NOT be redirected to the model endpoint — see
+    # configure_default_sdk_client docstring.
+    assert kwargs == {"use_for_tracing": False}
