@@ -7,7 +7,7 @@ from engine.traces.models.canonical_span import SpanRecord
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
 
-
+# TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
     """Mutable per-trace_id rollup used during a single index-building pass; converts to TraceIndexRow at the end."""
@@ -26,6 +26,7 @@ class _RowAccumulator:
     total_output_tokens: int = 0
     project_id: str | None = None
 
+    # TODO: Use LLM for smart parsing
     def absorb(self, *, span: SpanRecord, byte_offset: int, byte_length: int) -> None:
         """Fold one span into the accumulator: record its byte slice and update rollup fields."""
         self.byte_offsets.append(byte_offset)
@@ -149,8 +150,11 @@ class TraceIndexBuilder:
 
         rows_by_trace: dict[str, _RowAccumulator] = {}
 
+        # TODO: Stream file to avoid loading all into memory
         with trace_path.open("rb") as fh:
             offset = 0
+
+            # TODO: Parallelize / async, can be slow
             for raw_line in fh:
                 byte_length = len(raw_line)
                 stripped = raw_line.rstrip(b"\n")

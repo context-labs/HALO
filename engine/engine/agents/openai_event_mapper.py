@@ -33,6 +33,7 @@ class OpenAiEventMapper:
 
     def to_mapped_event(
         self,
+        # TODO: Type raw event, get type from openai agent sdk. Few places in this file that need to be updated.
         raw_event: Any,
         *,
         execution: AgentExecution,
