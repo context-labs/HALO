@@ -55,7 +55,7 @@ jobs:
   bump-version:
     name: Bump Version
     needs: [e2e-tests]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -112,7 +112,7 @@ jobs:
   build:
     name: Build
     needs: [bump-version]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     defaults:
       run:
         working-directory: engine
@@ -150,7 +150,7 @@ jobs:
     name: Publish to PyPI
     needs: [bump-version, build]
     if: ${{ inputs.dry_run == false }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/project/halo-engine/${{ needs.bump-version.outputs.new_version }}/
@@ -186,7 +186,7 @@ jobs:
     name: Release Summary
     needs: [lint-format-typecheck, unit-tests, integration-tests, e2e-tests, bump-version, build, publish]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     steps:
       - name: Generate summary
         env:

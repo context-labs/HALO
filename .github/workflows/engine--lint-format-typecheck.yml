@@ -26,7 +26,7 @@ permissions:
 jobs:
   lint-format-typecheck:
     name: Lint, Format & Typecheck
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     defaults:
       run:
         working-directory: engine
