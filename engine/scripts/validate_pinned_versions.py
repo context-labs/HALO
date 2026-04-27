@@ -37,7 +37,9 @@ def main() -> int:
     with PYPROJECT.open("rb") as file:
         data = tomllib.load(file)
 
-    source_pinned = {normalize(name) for name in data.get("tool", {}).get("uv", {}).get("sources", {}).keys()}
+    source_pinned = {
+        normalize(name) for name in data.get("tool", {}).get("uv", {}).get("sources", {}).keys()
+    }
     dependencies: list[tuple[str, str, str | None]] = []
 
     for raw in dependency_strings(data.get("project", {}).get("dependencies", [])):

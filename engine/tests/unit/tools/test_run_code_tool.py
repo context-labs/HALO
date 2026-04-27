@@ -14,10 +14,14 @@ from engine.traces.trace_store import TraceStore
 
 
 @pytest.mark.asyncio
-async def test_run_code_tool_delegates_to_sandbox_runner(tmp_path: Path, fixtures_dir: Path) -> None:
+async def test_run_code_tool_delegates_to_sandbox_runner(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
     trace_path = tmp_path / "t.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-    index_path = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig()
+    )
     store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
     fake_runner = AsyncMock()

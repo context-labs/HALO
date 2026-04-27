@@ -72,7 +72,9 @@ class OpenAiAgentRunner:
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
             try:
                 # TODO: Pretty sure an iterator wont throw here
-                stream = await self._run_streamed(agent=sdk_agent, input=messages, context=run_context)
+                stream = await self._run_streamed(
+                    agent=sdk_agent, input=messages, context=run_context
+                )
             except Exception as exc:
                 if not _is_retriable_llm_error(exc):
                     raise
@@ -89,7 +91,9 @@ class OpenAiAgentRunner:
             agent_execution.record_llm_success()
 
             async for raw_event in stream.stream_events():
-                mapped = self._mapper.to_mapped_event(raw_event, execution=agent_execution, is_root=is_root)
+                mapped = self._mapper.to_mapped_event(
+                    raw_event, execution=agent_execution, is_root=is_root
+                )
                 if mapped.context_item is not None:
                     agent_context.append(mapped.context_item)
                 if mapped.output_item is not None:

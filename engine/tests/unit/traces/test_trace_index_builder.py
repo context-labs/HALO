@@ -10,7 +10,9 @@ from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRo
 from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
-def _write_meta(meta_path: Path, *, trace_path: Path, schema_version: int = 1, trace_count: int = 0) -> None:
+def _write_meta(
+    meta_path: Path, *, trace_path: Path, schema_version: int = 1, trace_count: int = 0
+) -> None:
     """Pre-seed a meta sidecar with the current stat fingerprint so the reuse path is taken."""
     size, mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
     meta = TraceIndexMeta(
@@ -75,7 +77,9 @@ async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path)
     assert meta.source_size == expected_size
     assert meta.source_mtime_ns == expected_mtime_ns
 
-    rows = [TraceIndexRow.model_validate_json(line) for line in result_path.read_text().splitlines()]
+    rows = [
+        TraceIndexRow.model_validate_json(line) for line in result_path.read_text().splitlines()
+    ]
     rows_by_id = {r.trace_id: r for r in rows}
     assert set(rows_by_id) == {"t-aaaa", "t-bbbb", "t-cccc"}
 

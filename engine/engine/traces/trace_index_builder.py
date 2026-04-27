@@ -46,7 +46,9 @@ class _RowAccumulator:
         if isinstance(svc, str):
             self.service_names.add(svc)
 
-        model = span.attributes.get("inference.llm.model_name") or span.attributes.get("llm.model_name")
+        model = span.attributes.get("inference.llm.model_name") or span.attributes.get(
+            "llm.model_name"
+        )
         if isinstance(model, str) and model:
             self.model_names.add(model)
 
@@ -180,7 +182,9 @@ class TraceIndexBuilder:
                 stripped = raw_line.rstrip(b"\n")
                 if stripped:
                     span = SpanRecord.model_validate_json(stripped)
-                    acc = rows_by_trace.setdefault(span.trace_id, _RowAccumulator(trace_id=span.trace_id))
+                    acc = rows_by_trace.setdefault(
+                        span.trace_id, _RowAccumulator(trace_id=span.trace_id)
+                    )
                     acc.absorb(span=span, byte_offset=offset, byte_length=len(stripped))
                 offset += byte_length
 
@@ -189,7 +193,9 @@ class TraceIndexBuilder:
         tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
         tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
 
-        tmp_index.write_text("\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else ""))
+        tmp_index.write_text(
+            "\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else "")
+        )
         tmp_meta.write_text(
             TraceIndexMeta(
                 schema_version=schema_version,

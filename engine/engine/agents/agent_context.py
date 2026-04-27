@@ -130,7 +130,9 @@ class AgentContext:
         for idx in sorted(set(eligible)):
             item = self.items[idx]
             summary = await compactor(item)
-            self.items[idx] = item.model_copy(update={"is_compacted": True, "compaction_summary": summary})
+            self.items[idx] = item.model_copy(
+                update={"is_compacted": True, "compaction_summary": summary}
+            )
             self._index[item.item_id] = self.items[idx]
 
 
@@ -192,7 +194,9 @@ def _render_item(item: AgentContextItem) -> AgentMessage:
 
     summary = item.compaction_summary or ""
     if item.role == "user":
-        return AgentMessage(role="user", content=f"Compacted message (id: {item.item_id}): {summary}")
+        return AgentMessage(
+            role="user", content=f"Compacted message (id: {item.item_id}): {summary}"
+        )
     if item.role == "assistant":
         # Three valid assistant shapes: text only, tool_calls only, or both.
         # Label accurately so the model gets the right hint about what was

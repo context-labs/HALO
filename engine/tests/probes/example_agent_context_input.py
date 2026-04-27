@@ -57,7 +57,11 @@ async def probe_no_system_message_prepends_default() -> None:
         observed=f"error={type(result.error).__name__ if result.error else None}",
     )
     msgs = _first_input_messages(runner)
-    _check(len(msgs) >= 2, "no-sys: at least 2 messages in input (system + user)", observed=f"len={len(msgs)}")
+    _check(
+        len(msgs) >= 2,
+        "no-sys: at least 2 messages in input (system + user)",
+        observed=f"len={len(msgs)}",
+    )
     if msgs:
         _check(
             msgs[0].get("role") == "system",
@@ -134,7 +138,11 @@ async def probe_multi_message_continuation_preserves_ids() -> None:
         observed=f"error={type(result.error).__name__ if result.error else None}",
     )
     msgs = _first_input_messages(runner)
-    _check(len(msgs) == 4, "continuation: input has 4 messages (sys + user + asst + user)", observed=f"len={len(msgs)}")
+    _check(
+        len(msgs) == 4,
+        "continuation: input has 4 messages (sys + user + asst + user)",
+        observed=f"len={len(msgs)}",
+    )
     if len(msgs) == 4:
         roles = [m.get("role") for m in msgs]
         _check(
@@ -169,7 +177,11 @@ async def probe_only_system_message_no_user() -> None:
         "sys-only: engine doesn't crash with system-only input",
         observed=f"error={type(result.error).__name__ if result.error else None}",
     )
-    _check(len(msgs) == 1, "sys-only: input is single system message", observed=f"len={len(msgs)} msgs={msgs}")
+    _check(
+        len(msgs) == 1,
+        "sys-only: input is single system message",
+        observed=f"len={len(msgs)} msgs={msgs}",
+    )
 
 
 async def main() -> int:

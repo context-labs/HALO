@@ -60,7 +60,9 @@ async def probe_delta_then_message_ordering() -> None:
         observed=f"error={type(result.error).__name__ if result.error else None}",
     )
     _check(
-        len(result.deltas) == 3, "streaming: 3 AgentTextDelta events emitted", observed=f"deltas={len(result.deltas)}"
+        len(result.deltas) == 3,
+        "streaming: 3 AgentTextDelta events emitted",
+        observed=f"deltas={len(result.deltas)}",
     )
     _check(
         len(result.output_items) == 1,
@@ -105,7 +107,8 @@ async def probe_run_engine_async_filters_deltas() -> None:
         observed=f"types={[type(it).__name__ for it in items]}",
     )
     _check(
-        not any(isinstance(it, AgentTextDelta) for it in items), "filter: no AgentTextDelta in run_engine_async output"
+        not any(isinstance(it, AgentTextDelta) for it in items),
+        "filter: no AgentTextDelta in run_engine_async output",
     )
 
 

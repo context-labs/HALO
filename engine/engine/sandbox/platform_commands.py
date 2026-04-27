@@ -68,7 +68,9 @@ def build_linux_bubblewrap_command(
 def render_macos_profile(*, policy: SandboxPolicy) -> str:
     """Render a ``sandbox-exec`` Scheme profile that denies by default, allows reads/writes per policy, and blocks network."""
     allows_read = "\n".join(
-        f'(allow file-read* (subpath "{p}"))' if p.is_dir() else f'(allow file-read* (literal "{p}"))'
+        f'(allow file-read* (subpath "{p}"))'
+        if p.is_dir()
+        else f'(allow file-read* (literal "{p}"))'
         for p in policy.readonly_paths
     )
     allows_write = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in policy.writable_paths)

@@ -34,7 +34,9 @@ def _cfg() -> EngineConfig:
 async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) -> None:
     trace_path = tmp_path / "t.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-    index_path = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig()
+    )
     store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
     state = EngineRunState(trace_store=store, output_bus=EngineOutputBus(), config=_cfg())

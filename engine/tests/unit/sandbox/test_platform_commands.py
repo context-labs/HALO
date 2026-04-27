@@ -55,7 +55,9 @@ def test_macos_command_shape(tmp_path: Path) -> None:
     script = tmp_path / "work" / "bootstrap.py"
     script.write_text("")
     profile_path = tmp_path / "profile.sb"
-    argv = build_macos_sandbox_exec_command(policy=policy, script_path=script, profile_path=profile_path)
+    argv = build_macos_sandbox_exec_command(
+        policy=policy, script_path=script, profile_path=profile_path
+    )
     assert argv[0] == "sandbox-exec"
     assert "-f" in argv
     assert str(profile_path) in argv

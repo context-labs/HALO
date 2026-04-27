@@ -31,7 +31,9 @@ def _sandbox_ready(tmp_path: Path, fixtures_dir: Path) -> tuple[SandboxRunner, P
 @pytest.mark.asyncio
 async def test_cannot_write_outside_workspace(tmp_path: Path, fixtures_dir: Path) -> None:
     runner, trace_path, _ = _sandbox_ready(tmp_path, fixtures_dir)
-    idx = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
+    idx = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig()
+    )
     result = await runner.run_python(
         code="open('/etc/attack', 'w').write('no')",
         trace_path=trace_path,
@@ -39,13 +41,19 @@ async def test_cannot_write_outside_workspace(tmp_path: Path, fixtures_dir: Path
         config=SandboxConfig(timeout_seconds=10.0),
     )
     assert result.exit_code != 0
-    assert "PermissionError" in result.stderr or "Read-only" in result.stderr or "not permitted" in result.stderr
+    assert (
+        "PermissionError" in result.stderr
+        or "Read-only" in result.stderr
+        or "not permitted" in result.stderr
+    )
 
 
 @pytest.mark.asyncio
 async def test_cannot_read_outside_allowed(tmp_path: Path, fixtures_dir: Path) -> None:
     runner, trace_path, _ = _sandbox_ready(tmp_path, fixtures_dir)
-    idx = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
+    idx = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig()
+    )
     result = await runner.run_python(
         code="print(open('/etc/passwd').read()[:10])",
         trace_path=trace_path,
@@ -58,7 +66,9 @@ async def test_cannot_read_outside_allowed(tmp_path: Path, fixtures_dir: Path) -
 @pytest.mark.asyncio
 async def test_no_network(tmp_path: Path, fixtures_dir: Path) -> None:
     runner, trace_path, _ = _sandbox_ready(tmp_path, fixtures_dir)
-    idx = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
+    idx = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig()
+    )
     result = await runner.run_python(
         code=("import socket; s = socket.socket(); s.connect(('1.1.1.1', 80))"),
         trace_path=trace_path,

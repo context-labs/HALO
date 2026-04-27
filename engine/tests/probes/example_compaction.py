@@ -52,7 +52,9 @@ class _RecordingCompactor:
         return f"SUMMARY[{item.item_id}]"
 
 
-def _make_ctx(items: list[AgentContextItem], *, keep_text: int = 2, keep_tool: int = 2) -> AgentContext:
+def _make_ctx(
+    items: list[AgentContextItem], *, keep_text: int = 2, keep_tool: int = 2
+) -> AgentContext:
     return AgentContext(
         items=items,
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
@@ -71,7 +73,11 @@ async def probe_no_op_when_under_thresholds() -> None:
     rec = _RecordingCompactor()
     await ctx.compact_old_items(rec)
 
-    _check(len(rec.calls) == 0, "noop: no compactor calls when under threshold", observed=f"calls={len(rec.calls)}")
+    _check(
+        len(rec.calls) == 0,
+        "noop: no compactor calls when under threshold",
+        observed=f"calls={len(rec.calls)}",
+    )
     _check(all(not it.is_compacted for it in ctx.items), "noop: no items marked is_compacted")
 
 
@@ -142,7 +148,10 @@ async def probe_assistant_text_compacted_label_mismatch() -> None:
     items = [
         AgentContextItem(item_id="sys-0", role="system", content="sys"),
         # 4 plain assistant text messages (no tool_calls), keep_text=1.
-        *[AgentContextItem(item_id=f"a-{i}", role="assistant", content=f"hi {i}") for i in range(4)],
+        *[
+            AgentContextItem(item_id=f"a-{i}", role="assistant", content=f"hi {i}")
+            for i in range(4)
+        ],
     ]
     ctx = _make_ctx(items, keep_text=1, keep_tool=2)
     rec = _RecordingCompactor()
@@ -159,7 +168,9 @@ async def probe_assistant_text_compacted_label_mismatch() -> None:
     rendered = ctx.to_messages_array()
     # The compacted assistant items should render with content describing
     # an assistant TEXT message — not 'Compacted tool calls'.
-    rendered_a0 = next((m for m in rendered if isinstance(m.content, str) and "a-0" in m.content), None)
+    rendered_a0 = next(
+        (m for m in rendered if isinstance(m.content, str) and "a-0" in m.content), None
+    )
     _check(rendered_a0 is not None, "asst-text: compacted a-0 appears in rendered output")
     if rendered_a0 is not None:
         _check(

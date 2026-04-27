@@ -28,7 +28,9 @@ async def test_sandboxed_hello_world(tmp_path: Path, fixtures_dir: Path) -> None
     from engine.traces.trace_index_builder import TraceIndexBuilder
 
     index_path = tmp_path / "traces.jsonl.engine-index.jsonl"
-    await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig(index_path=index_path))
+    await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path, config=TraceIndexConfig(index_path=index_path)
+    )
 
     sandbox_venv = Path(__file__).resolve().parents[3] / ".sandbox-venv"
     if not (sandbox_venv / "bin" / "python").exists():
