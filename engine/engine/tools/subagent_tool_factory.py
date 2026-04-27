@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agents import Agent, FunctionTool, RunContextWrapper, Tool
 from agents.tool_context import ToolContext as SdkToolContext
-from loguru import logger
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_context_items import AgentContextItem
@@ -32,6 +32,7 @@ from engine.tools.trace_tools import (
 
 # TODO: Move this to an "openai agents sdk client" file or folder, keep all usage of the library isolated to that module.
 # Combine with OpenAiAgentRunner
+logger = logging.getLogger(__name__)
 
 
 def build_root_sdk_agent(
@@ -226,7 +227,7 @@ def _build_subagent_as_tool(
                 )
             except EngineAgentExhaustedError as exc:
                 logger.warning(
-                    "subagent {} exhausted retries at depth={}: {}",
+                    "subagent %s exhausted retries at depth=%s: %s",
                     child_execution.agent_id,
                     child_depth,
                     exc,
@@ -234,7 +235,7 @@ def _build_subagent_as_tool(
                 return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
             except Exception as exc:
                 logger.warning(
-                    "subagent {} failed at depth={}: {}: {}",
+                    "subagent %s failed at depth=%s: %s: %s",
                     child_execution.agent_id,
                     child_depth,
                     type(exc).__name__,
