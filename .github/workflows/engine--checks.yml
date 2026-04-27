@@ -1,0 +1,67 @@
+name: "[Engine] Checks"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine--checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine--checks.yml"
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, Format & Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Install go-task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Install engine dependencies
+        run: task ci:setup
+
+      - name: Validate pinned versions
+        run: task pinned-versions
+
+      - name: Lint (ruff)
+        run: task lint
+
+      - name: Format check (ruff)
+        run: task format
+
+      - name: Type check (basedpyright)
+        run: task typecheck
