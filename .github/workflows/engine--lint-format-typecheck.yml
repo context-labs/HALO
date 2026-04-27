@@ -1,16 +1,16 @@
-name: "[Engine] Checks"
+name: "[Engine] Lint, Format & Typecheck"
 
 on:
   pull_request:
     branches: [main]
     paths:
       - "engine/**"
-      - ".github/workflows/engine--checks.yml"
+      - ".github/workflows/engine--lint-format-typecheck.yml"
   push:
     branches: [main]
     paths:
       - "engine/**"
-      - ".github/workflows/engine--checks.yml"
+      - ".github/workflows/engine--lint-format-typecheck.yml"
   workflow_call:
 
 concurrency:
@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  lint-format-typecheck:
     name: Lint, Format & Typecheck
     runs-on: ubuntu-latest
     defaults:
