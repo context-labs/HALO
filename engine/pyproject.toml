@@ -5,24 +5,25 @@ description = "HALO engine: LLM agent runtime over OTel trace data."
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
-    "pydantic>=2.8",
-    "loguru>=0.7.3",
-    "rich>=14.3",
-    "typer>=0.15",
-    "openai>=1.60",
-    "openai-agents>=0.1",
-    "orjson>=3.10",
+    "pydantic==2.13.3",
+    "loguru==0.7.3",
+    "rich==15.0.0",
+    "typer==0.24.2",
+    "openai==2.32.0",
+    "openai-agents==0.14.5",
+    "orjson==3.11.8",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.6",
+    "basedpyright==1.38.3",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.3.0",
+    "ruff==0.15.12",
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -32,7 +33,25 @@ packages = ["engine"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 testpaths = ["tests/unit"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short"
 
 [tool.ruff]
-line-length = 100
 target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E402",
+    "E501",
+    "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]
+"**/__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"

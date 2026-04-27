@@ -30,9 +30,7 @@ from engine.traces.trace_store import TraceStore
 async def ctx(tmp_path: Path, fixtures_dir: Path) -> ToolContext:
     trace_path = tmp_path / "traces.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-    index_path = await TraceIndexBuilder.ensure_index_exists(
-        trace_path=trace_path, config=TraceIndexConfig()
-    )
+    index_path = await TraceIndexBuilder.ensure_index_exists(trace_path=trace_path, config=TraceIndexConfig())
     store = TraceStore.load(trace_path=trace_path, index_path=index_path)
     return ToolContext.model_construct(trace_store=store)
 

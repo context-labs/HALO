@@ -39,13 +39,15 @@ async def test_engine_runs_on_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -
         maximum_parallel_subagents=2,
     )
 
-    messages = [AgentMessage(
-        role="user",
-        content=(
-            "Use get_dataset_overview to tell me how many traces are in the dataset. "
-            "Then end your reply with a line containing only <final/>."
-        ),
-    )]
+    messages = [
+        AgentMessage(
+            role="user",
+            content=(
+                "Use get_dataset_overview to tell me how many traces are in the dataset. "
+                "Then end your reply with a line containing only <final/>."
+            ),
+        )
+    ]
 
     async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
         results = await run_engine_async(messages, cfg, trace_path)
@@ -54,7 +56,5 @@ async def test_engine_runs_on_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -
     assert any(item.final for item in results), "no AgentOutputItem with final=True emitted"
     tool_calls = [item for item in results if item.item.tool_calls]
     assert any(
-        tc.function.name == "get_dataset_overview"
-        for item in tool_calls
-        for tc in (item.item.tool_calls or [])
+        tc.function.name == "get_dataset_overview" for item in tool_calls for tc in (item.item.tool_calls or [])
     ), "expected root agent to call get_dataset_overview"

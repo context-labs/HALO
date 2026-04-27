@@ -128,15 +128,21 @@ async def probe_invocation_returns_subagent_result_json() -> None:
     result_json = await subagent_tool.on_invoke_tool(ctx, "what is the answer?")
     parsed = json.loads(result_json)
 
-    check(parsed.get("child_agent_id", "").startswith("sub-"),
-          "result: child_agent_id starts with 'sub-' prefix",
-          observed=f"child_agent_id={parsed.get('child_agent_id')!r}")
-    check(parsed.get("answer") == "the subagent's reasoned answer",
-          "result: answer is the child's final assistant text (rstripped)",
-          observed=f"answer={parsed.get('answer')!r}")
-    check(len(runner.calls) == 1,
-          "result: FakeRunner.run_streamed called exactly once for the child",
-          observed=f"calls={len(runner.calls)}")
+    check(
+        parsed.get("child_agent_id", "").startswith("sub-"),
+        "result: child_agent_id starts with 'sub-' prefix",
+        observed=f"child_agent_id={parsed.get('child_agent_id')!r}",
+    )
+    check(
+        parsed.get("answer") == "the subagent's reasoned answer",
+        "result: answer is the child's final assistant text (rstripped)",
+        observed=f"answer={parsed.get('answer')!r}",
+    )
+    check(
+        len(runner.calls) == 1,
+        "result: FakeRunner.run_streamed called exactly once for the child",
+        observed=f"calls={len(runner.calls)}",
+    )
 
 
 async def probe_child_execution_registered_with_correct_metadata() -> None:
@@ -160,31 +166,32 @@ async def probe_child_execution_registered_with_correct_metadata() -> None:
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-bbbb")
     await subagent_tool.on_invoke_tool(ctx, "delegate this")
 
-    children = [
-        ex for aid, ex in state.executions_by_agent_id.items()
-        if aid.startswith("sub-")
-    ]
-    check(len(children) == 1,
-          "register: exactly one subagent execution registered",
-          observed=f"count={len(children)}")
+    children = [ex for aid, ex in state.executions_by_agent_id.items() if aid.startswith("sub-")]
+    check(len(children) == 1, "register: exactly one subagent execution registered", observed=f"count={len(children)}")
     if not children:
         return
     child = children[0]
-    check(child.depth == 1,
-          "register: child depth = 1",
-          observed=f"depth={child.depth}")
-    check(child.agent_name == cfg.subagent.name,
-          "register: child agent_name matches config.subagent.name",
-          observed=f"agent_name={child.agent_name!r} expected={cfg.subagent.name!r}")
-    check(child.parent_agent_id == "root-bbbb",
-          "register: child.parent_agent_id is the closure-captured root agent_id",
-          observed=f"parent_agent_id={child.parent_agent_id!r}")
-    check(child.parent_tool_call_id == "parent-call-bbbb",
-          "register: child.parent_tool_call_id is ctx.tool_call_id",
-          observed=f"parent_tool_call_id={child.parent_tool_call_id!r}")
-    check(state.executions_by_tool_call_id.get("parent-call-bbbb") is child,
-          "register: state.executions_by_tool_call_id indexes the child by parent's call id",
-          observed=f"keys={list(state.executions_by_tool_call_id.keys())}")
+    check(child.depth == 1, "register: child depth = 1", observed=f"depth={child.depth}")
+    check(
+        child.agent_name == cfg.subagent.name,
+        "register: child agent_name matches config.subagent.name",
+        observed=f"agent_name={child.agent_name!r} expected={cfg.subagent.name!r}",
+    )
+    check(
+        child.parent_agent_id == "root-bbbb",
+        "register: child.parent_agent_id is the closure-captured root agent_id",
+        observed=f"parent_agent_id={child.parent_agent_id!r}",
+    )
+    check(
+        child.parent_tool_call_id == "parent-call-bbbb",
+        "register: child.parent_tool_call_id is ctx.tool_call_id",
+        observed=f"parent_tool_call_id={child.parent_tool_call_id!r}",
+    )
+    check(
+        state.executions_by_tool_call_id.get("parent-call-bbbb") is child,
+        "register: state.executions_by_tool_call_id indexes the child by parent's call id",
+        observed=f"keys={list(state.executions_by_tool_call_id.keys())}",
+    )
 
 
 async def probe_child_emits_items_at_depth_1() -> None:
@@ -208,25 +215,30 @@ async def probe_child_emits_items_at_depth_1() -> None:
     await subagent_tool.on_invoke_tool(ctx, "ask the child")
     events = await _drain_bus(state)
 
-    depth_one_items = [
-        ev for ev in events
-        if isinstance(ev, AgentOutputItem) and ev.depth == 1
-    ]
-    check(len(depth_one_items) == 1,
-          "emit: exactly one depth=1 AgentOutputItem on the bus",
-          observed=f"count={len(depth_one_items)} all={[(type(e).__name__, getattr(e, 'depth', None)) for e in events]}")
+    depth_one_items = [ev for ev in events if isinstance(ev, AgentOutputItem) and ev.depth == 1]
+    check(
+        len(depth_one_items) == 1,
+        "emit: exactly one depth=1 AgentOutputItem on the bus",
+        observed=f"count={len(depth_one_items)} all={[(type(e).__name__, getattr(e, 'depth', None)) for e in events]}",
+    )
     if not depth_one_items:
         return
     item = depth_one_items[0]
-    check(item.item.role == "assistant" and "subagent reply" in (item.item.content or ""),
-          "emit: depth=1 item is the assistant's reply",
-          observed=f"role={item.item.role} content={item.item.content!r}")
-    check(item.parent_agent_id == "root-cccc",
-          "emit: depth=1 item carries parent_agent_id == root agent id",
-          observed=f"parent_agent_id={item.parent_agent_id!r}")
-    check(item.parent_tool_call_id == "parent-call-cccc",
-          "emit: depth=1 item carries parent_tool_call_id == ctx.tool_call_id",
-          observed=f"parent_tool_call_id={item.parent_tool_call_id!r}")
+    check(
+        item.item.role == "assistant" and "subagent reply" in (item.item.content or ""),
+        "emit: depth=1 item is the assistant's reply",
+        observed=f"role={item.item.role} content={item.item.content!r}",
+    )
+    check(
+        item.parent_agent_id == "root-cccc",
+        "emit: depth=1 item carries parent_agent_id == root agent id",
+        observed=f"parent_agent_id={item.parent_agent_id!r}",
+    )
+    check(
+        item.parent_tool_call_id == "parent-call-cccc",
+        "emit: depth=1 item carries parent_tool_call_id == ctx.tool_call_id",
+        observed=f"parent_tool_call_id={item.parent_tool_call_id!r}",
+    )
 
 
 async def probe_depth_guard_raises_before_any_sdk_call() -> None:
@@ -253,12 +265,12 @@ async def probe_depth_guard_raises_before_any_sdk_call() -> None:
         lambda: over_depth_tool.on_invoke_tool(None, "should not run"),
         EngineMaxDepthExceededError,
     )
-    check(exc is not None,
-          "depth-guard: invoking child_depth > maximum_depth raises EngineMaxDepthExceededError",
-          observed=f"got={type(exc).__name__ if exc else 'no raise'}")
-    check(len(runner.calls) == 0,
-          "depth-guard: no FakeRunner call was consumed",
-          observed=f"calls={len(runner.calls)}")
+    check(
+        exc is not None,
+        "depth-guard: invoking child_depth > maximum_depth raises EngineMaxDepthExceededError",
+        observed=f"got={type(exc).__name__ if exc else 'no raise'}",
+    )
+    check(len(runner.calls) == 0, "depth-guard: no FakeRunner call was consumed", observed=f"calls={len(runner.calls)}")
 
 
 async def main() -> int:

@@ -22,4 +22,4 @@ def test_user_code_runs_in_isolated_namespace() -> None:
         trace_mount_path="/a",
         index_mount_path="/b",
     )
-    assert 'exec(_USER_CODE' in script
+    assert "exec(_USER_CODE" in script

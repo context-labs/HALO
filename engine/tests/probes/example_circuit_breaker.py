@@ -61,13 +61,17 @@ async def probe_baseline_success() -> None:
     )
     result = await run_with_fake(runner)
 
-    _check(result.error is None, "baseline: run completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(any(item.final for item in result.output_items),
-           "baseline: at least one item has final=True")
-    _check(len(runner.calls) == 1,
-           "baseline: FakeRunner.run_streamed called exactly once",
-           observed=f"calls={len(runner.calls)}")
+    _check(
+        result.error is None,
+        "baseline: run completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(any(item.final for item in result.output_items), "baseline: at least one item has final=True")
+    _check(
+        len(runner.calls) == 1,
+        "baseline: FakeRunner.run_streamed called exactly once",
+        observed=f"calls={len(runner.calls)}",
+    )
 
 
 async def probe_retry_then_success() -> None:
@@ -80,14 +84,17 @@ async def probe_retry_then_success() -> None:
     )
     result = await run_with_fake(runner)
 
-    _check(result.error is None,
-           "retry-then-success: run completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(runner.calls) == 2,
-           "retry-then-success: FakeRunner called twice (1 retry + 1 success)",
-           observed=f"calls={len(runner.calls)}")
-    _check(any(item.final for item in result.output_items),
-           "retry-then-success: at least one item has final=True")
+    _check(
+        result.error is None,
+        "retry-then-success: run completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(runner.calls) == 2,
+        "retry-then-success: FakeRunner called twice (1 retry + 1 success)",
+        observed=f"calls={len(runner.calls)}",
+    )
+    _check(any(item.final for item in result.output_items), "retry-then-success: at least one item has final=True")
 
 
 async def probe_circuit_breaker_exhaustion() -> None:
@@ -97,12 +104,16 @@ async def probe_circuit_breaker_exhaustion() -> None:
     runner = FakeRunner(*[APIConnectionError(request=fake_request) for _ in range(10)])
     result = await run_with_fake(runner)
 
-    _check(isinstance(result.error, EngineAgentExhaustedError),
-           "exhaustion: error type is EngineAgentExhaustedError",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(runner.calls) == 10,
-           "exhaustion: FakeRunner called exactly MAX_CONSECUTIVE_LLM_FAILURES times",
-           observed=f"calls={len(runner.calls)}")
+    _check(
+        isinstance(result.error, EngineAgentExhaustedError),
+        "exhaustion: error type is EngineAgentExhaustedError",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(runner.calls) == 10,
+        "exhaustion: FakeRunner called exactly MAX_CONSECUTIVE_LLM_FAILURES times",
+        observed=f"calls={len(runner.calls)}",
+    )
 
 
 async def probe_non_retriable_propagates() -> None:
@@ -115,12 +126,16 @@ async def probe_non_retriable_propagates() -> None:
     )
     result = await run_with_fake(runner)
 
-    _check(isinstance(result.error, BadRequestError),
-           "non-retriable: BadRequestError propagates",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(runner.calls) == 1,
-           "non-retriable: FakeRunner called once (no retry)",
-           observed=f"calls={len(runner.calls)}")
+    _check(
+        isinstance(result.error, BadRequestError),
+        "non-retriable: BadRequestError propagates",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(runner.calls) == 1,
+        "non-retriable: FakeRunner called once (no retry)",
+        observed=f"calls={len(runner.calls)}",
+    )
 
 
 # ---------------------------------------------------------------------------

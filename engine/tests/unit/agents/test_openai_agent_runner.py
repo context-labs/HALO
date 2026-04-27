@@ -51,8 +51,11 @@ async def test_runner_emits_final_output_and_updates_context() -> None:
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
-        agent_id="root", agent_name="root", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
 
     async def fake_run_streamed(*, agent, input, context):
@@ -88,8 +91,11 @@ async def test_runner_circuit_breaker() -> None:
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
-        agent_id="root", agent_name="root", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
 
     fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
@@ -120,8 +126,11 @@ async def test_runner_does_not_retry_on_bad_request() -> None:
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
-        agent_id="root", agent_name="root", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
 
     call_count = 0
@@ -161,8 +170,11 @@ async def test_runner_retries_on_connection_error_then_fails() -> None:
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
-        agent_id="root", agent_name="root", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
 
     call_count = 0

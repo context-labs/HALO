@@ -99,13 +99,9 @@ class FakeRunner:
         # Record every kwarg the engine forwards. Probes inspect
         # `runner.calls[i]` to verify the engine passed what it should
         # have (e.g. max_turns from AgentConfig).
-        self.calls.append(
-            {"starting_agent": starting_agent, "input": input, "context": context, **kwargs}
-        )
+        self.calls.append({"starting_agent": starting_agent, "input": input, "context": context, **kwargs})
         if not self._programs:
-            raise RuntimeError(
-                "FakeRunner exhausted; called more times than programs supplied"
-            )
+            raise RuntimeError("FakeRunner exhausted; called more times than programs supplied")
         program = self._programs.pop(0)
         if isinstance(program, BaseException):
             raise program
@@ -296,11 +292,14 @@ async def make_run_state(
     cfg = config or make_default_config()
     tp = trace_path or isolated_trace_copy()
     index_path = await TraceIndexBuilder.ensure_index_exists(
-        trace_path=tp, config=cfg.trace_index,
+        trace_path=tp,
+        config=cfg.trace_index,
     )
     store = TraceStore.load(trace_path=tp, index_path=index_path)
     state = EngineRunState(
-        trace_store=store, output_bus=EngineOutputBus(), config=cfg,
+        trace_store=store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
     )
     if runner is not None:
         state.runner = runner

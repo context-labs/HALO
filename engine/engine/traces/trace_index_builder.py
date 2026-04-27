@@ -7,6 +7,7 @@ from engine.traces.models.canonical_span import SpanRecord
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
 
+
 # TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
@@ -188,9 +189,7 @@ class TraceIndexBuilder:
         tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
         tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
 
-        tmp_index.write_text(
-            "\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else "")
-        )
+        tmp_index.write_text("\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else ""))
         tmp_meta.write_text(
             TraceIndexMeta(
                 schema_version=schema_version,

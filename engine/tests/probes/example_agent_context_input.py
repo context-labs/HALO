@@ -51,24 +51,30 @@ async def probe_no_system_message_prepends_default() -> None:
         runner,
         messages=[AgentMessage(role="user", content="hi there")],
     )
-    _check(result.error is None,
-           "no-sys: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "no-sys: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     msgs = _first_input_messages(runner)
-    _check(len(msgs) >= 2,
-           "no-sys: at least 2 messages in input (system + user)",
-           observed=f"len={len(msgs)}")
+    _check(len(msgs) >= 2, "no-sys: at least 2 messages in input (system + user)", observed=f"len={len(msgs)}")
     if msgs:
-        _check(msgs[0].get("role") == "system",
-               "no-sys: first input message is system",
-               observed=f"role={msgs[0].get('role')}")
+        _check(
+            msgs[0].get("role") == "system",
+            "no-sys: first input message is system",
+            observed=f"role={msgs[0].get('role')}",
+        )
         # The rendered system prompt should not be empty
-        _check(bool(msgs[0].get("content")),
-               "no-sys: rendered system content is non-empty",
-               observed=f"content_len={len(msgs[0].get('content') or '')}")
-        _check(msgs[1].get("role") == "user" and msgs[1].get("content") == "hi there",
-               "no-sys: user content preserved as second message",
-               observed=f"msg2={msgs[1]}")
+        _check(
+            bool(msgs[0].get("content")),
+            "no-sys: rendered system content is non-empty",
+            observed=f"content_len={len(msgs[0].get('content') or '')}",
+        )
+        _check(
+            msgs[1].get("role") == "user" and msgs[1].get("content") == "hi there",
+            "no-sys: user content preserved as second message",
+            observed=f"msg2={msgs[1]}",
+        )
 
 
 async def probe_system_message_passed_through_unchanged() -> None:
@@ -85,17 +91,23 @@ async def probe_system_message_passed_through_unchanged() -> None:
             AgentMessage(role="user", content="hi"),
         ],
     )
-    _check(result.error is None,
-           "custom-sys: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "custom-sys: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     msgs = _first_input_messages(runner)
     if msgs:
-        _check(msgs[0].get("role") == "system",
-               "custom-sys: first input message is system",
-               observed=f"role={msgs[0].get('role')}")
-        _check(msgs[0].get("content") == custom_sys,
-               "custom-sys: caller's system content preserved verbatim",
-               observed=f"content={msgs[0].get('content')!r}")
+        _check(
+            msgs[0].get("role") == "system",
+            "custom-sys: first input message is system",
+            observed=f"role={msgs[0].get('role')}",
+        )
+        _check(
+            msgs[0].get("content") == custom_sys,
+            "custom-sys: caller's system content preserved verbatim",
+            observed=f"content={msgs[0].get('content')!r}",
+        )
 
 
 async def probe_multi_message_continuation_preserves_ids() -> None:
@@ -116,22 +128,26 @@ async def probe_multi_message_continuation_preserves_ids() -> None:
             AgentMessage(role="user", content="follow-up"),
         ],
     )
-    _check(result.error is None,
-           "continuation: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "continuation: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     msgs = _first_input_messages(runner)
-    _check(len(msgs) == 4,
-           "continuation: input has 4 messages (sys + user + asst + user)",
-           observed=f"len={len(msgs)}")
+    _check(len(msgs) == 4, "continuation: input has 4 messages (sys + user + asst + user)", observed=f"len={len(msgs)}")
     if len(msgs) == 4:
         roles = [m.get("role") for m in msgs]
-        _check(roles == ["system", "user", "assistant", "user"],
-               "continuation: role order preserved",
-               observed=f"roles={roles}")
+        _check(
+            roles == ["system", "user", "assistant", "user"],
+            "continuation: role order preserved",
+            observed=f"roles={roles}",
+        )
         contents = [m.get("content") for m in msgs]
-        _check(contents == [custom_sys, "first turn", "prior reply", "follow-up"],
-               "continuation: contents preserved in order",
-               observed=f"contents={contents}")
+        _check(
+            contents == [custom_sys, "first turn", "prior reply", "follow-up"],
+            "continuation: contents preserved in order",
+            observed=f"contents={contents}",
+        )
 
 
 async def probe_only_system_message_no_user() -> None:
@@ -148,12 +164,12 @@ async def probe_only_system_message_no_user() -> None:
     # Engine should not error before calling the runner — it builds context
     # and hands off. Whether the SDK is happy with system-only input is
     # the SDK's problem, but the engine itself shouldn't crash.
-    _check(result.error is None,
-           "sys-only: engine doesn't crash with system-only input",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(msgs) == 1,
-           "sys-only: input is single system message",
-           observed=f"len={len(msgs)} msgs={msgs}")
+    _check(
+        result.error is None,
+        "sys-only: engine doesn't crash with system-only input",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(len(msgs) == 1, "sys-only: input is single system message", observed=f"len={len(msgs)} msgs={msgs}")
 
 
 async def main() -> int:

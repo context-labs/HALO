@@ -87,9 +87,16 @@ def test_result_wrappers_tool_boundary() -> None:
     assert CountTracesResult(result=TraceCountResult(total=0)).result.total == 0
     assert SearchTraceResult(result=TraceSearchResult(trace_id="t", match_count=0, matches=[])).result.match_count == 0
     ov = DatasetOverview(
-        total_traces=0, total_spans=0, earliest_start_time="", latest_end_time="",
-        service_names=[], model_names=[], agent_names=[], error_trace_count=0,
-        total_input_tokens=0, total_output_tokens=0,
+        total_traces=0,
+        total_spans=0,
+        earliest_start_time="",
+        latest_end_time="",
+        service_names=[],
+        model_names=[],
+        agent_names=[],
+        error_trace_count=0,
+        total_input_tokens=0,
+        total_output_tokens=0,
     )
     assert DatasetOverviewResult(result=ov).result.total_traces == 0
     assert DatasetOverviewArguments(filters=TraceFilters()).filters.has_errors is None

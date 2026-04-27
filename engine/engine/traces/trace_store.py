@@ -111,9 +111,16 @@ class TraceStore:
         rows = [r for r in self._rows if _matches_filters(r, filters)]
         if not rows:
             return DatasetOverview(
-                total_traces=0, total_spans=0, earliest_start_time="",
-                latest_end_time="", service_names=[], model_names=[], agent_names=[],
-                error_trace_count=0, total_input_tokens=0, total_output_tokens=0,
+                total_traces=0,
+                total_spans=0,
+                earliest_start_time="",
+                latest_end_time="",
+                service_names=[],
+                model_names=[],
+                agent_names=[],
+                error_trace_count=0,
+                total_input_tokens=0,
+                total_output_tokens=0,
             )
 
         services: set[str] = set()

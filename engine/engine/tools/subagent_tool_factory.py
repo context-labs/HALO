@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from agents import Agent, FunctionTool, RunContextWrapper
+from agents import Agent, FunctionTool, RunContextWrapper, Tool
 from agents.tool_context import ToolContext as SdkToolContext
 from loguru import logger
 
@@ -32,6 +32,7 @@ from engine.tools.trace_tools import (
 
 # TODO: Move this to an "openai agents sdk client" file or folder, keep all usage of the library isolated to that module.
 # Combine with OpenAiAgentRunner
+
 
 def build_root_sdk_agent(
     *,
@@ -67,7 +68,7 @@ def _child_tools_for_depth(
     run_state: EngineRunState,
     semaphore: asyncio.Semaphore,
     parent_execution: AgentExecution,
-) -> list[FunctionTool]:
+) -> list[Tool]:
     """Return the tool list available to an agent at ``depth``.
 
     Always includes the leaf trace/synthesis/run_code/get_context tools. A
@@ -84,7 +85,7 @@ def _child_tools_for_depth(
             output_bus=run_state.output_bus,
         )
 
-    leaf_tools: list[FunctionTool] = [
+    leaf_tools: list[Tool] = [
         to_sdk_function_tool(GetDatasetOverviewTool(), context_factory=make_ctx),
         to_sdk_function_tool(QueryTracesTool(), context_factory=make_ctx),
         to_sdk_function_tool(CountTracesTool(), context_factory=make_ctx),
@@ -222,14 +223,18 @@ def _build_subagent_as_tool(
             except EngineAgentExhaustedError as exc:
                 logger.warning(
                     "subagent {} exhausted retries at depth={}: {}",
-                    child_execution.agent_id, child_depth, exc,
+                    child_execution.agent_id,
+                    child_depth,
+                    exc,
                 )
                 return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
             except Exception as exc:
                 logger.warning(
                     "subagent {} failed at depth={}: {}: {}",
-                    child_execution.agent_id, child_depth,
-                    type(exc).__name__, exc,
+                    child_execution.agent_id,
+                    child_depth,
+                    type(exc).__name__,
+                    exc,
                 )
                 return _failure_result(child_execution, f"Subagent failed: {type(exc).__name__}: {exc}")
 
@@ -275,7 +280,9 @@ def _wrap_with_semaphore(
     semaphore: asyncio.Semaphore,
 ) -> Callable[..., Awaitable[Any]]:
     """Decorator that gates an awaitable behind ``semaphore`` (utility, not used on the hot path)."""
+
     async def wrapped(*args, **kwargs):
         async with semaphore:
             return await fn(*args, **kwargs)
+
     return wrapped
