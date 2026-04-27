@@ -25,8 +25,8 @@ import sys
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_context_items import AgentContextItem
-from engine.models.messages import AgentToolCall, AgentToolFunction
 from engine.model_config import ModelConfig
+from engine.models.messages import AgentToolCall, AgentToolFunction
 
 _FAILURES: list[str] = []
 
@@ -71,11 +71,8 @@ async def probe_no_op_when_under_thresholds() -> None:
     rec = _RecordingCompactor()
     await ctx.compact_old_items(rec)
 
-    _check(len(rec.calls) == 0,
-           "noop: no compactor calls when under threshold",
-           observed=f"calls={len(rec.calls)}")
-    _check(all(not it.is_compacted for it in ctx.items),
-           "noop: no items marked is_compacted")
+    _check(len(rec.calls) == 0, "noop: no compactor calls when under threshold", observed=f"calls={len(rec.calls)}")
+    _check(all(not it.is_compacted for it in ctx.items), "noop: no items marked is_compacted")
 
 
 async def probe_system_never_compacted() -> None:
@@ -84,22 +81,23 @@ async def probe_system_never_compacted() -> None:
     items = [
         AgentContextItem(item_id="sys-0", role="system", content="sys"),
         # 5 user messages; with keep_text=1 → 4 oldest user msgs eligible
-        *[
-            AgentContextItem(item_id=f"u-{i}", role="user", content=f"msg{i}")
-            for i in range(5)
-        ],
+        *[AgentContextItem(item_id=f"u-{i}", role="user", content=f"msg{i}") for i in range(5)],
     ]
     ctx = _make_ctx(items, keep_text=1, keep_tool=2)
     rec = _RecordingCompactor()
     await ctx.compact_old_items(rec)
 
     sys_item = ctx.items[0]
-    _check(sys_item.role == "system" and not sys_item.is_compacted,
-           "sys-immune: system message NOT compacted",
-           observed=f"is_compacted={sys_item.is_compacted}")
-    _check(all(it.role != "system" for it in rec.calls),
-           "sys-immune: compactor never received a system item",
-           observed=f"roles_called={[c.role for c in rec.calls]}")
+    _check(
+        sys_item.role == "system" and not sys_item.is_compacted,
+        "sys-immune: system message NOT compacted",
+        observed=f"is_compacted={sys_item.is_compacted}",
+    )
+    _check(
+        all(it.role != "system" for it in rec.calls),
+        "sys-immune: compactor never received a system item",
+        observed=f"roles_called={[c.role for c in rec.calls]}",
+    )
 
 
 async def probe_text_vs_tool_split() -> None:
@@ -126,9 +124,11 @@ async def probe_text_vs_tool_split() -> None:
     await ctx.compact_old_items(rec)
 
     compacted_ids = {c.item_id for c in rec.calls}
-    _check(compacted_ids == {"u-0", "u-1", "a-0", "tr-0"},
-           "split: 2 oldest texts + the 1 oldest tool turn (asst + result) compacted",
-           observed=f"compacted_ids={sorted(compacted_ids)}")
+    _check(
+        compacted_ids == {"u-0", "u-1", "a-0", "tr-0"},
+        "split: 2 oldest texts + the 1 oldest tool turn (asst + result) compacted",
+        observed=f"compacted_ids={sorted(compacted_ids)}",
+    )
 
 
 async def probe_assistant_text_compacted_label_mismatch() -> None:
@@ -142,10 +142,7 @@ async def probe_assistant_text_compacted_label_mismatch() -> None:
     items = [
         AgentContextItem(item_id="sys-0", role="system", content="sys"),
         # 4 plain assistant text messages (no tool_calls), keep_text=1.
-        *[
-            AgentContextItem(item_id=f"a-{i}", role="assistant", content=f"hi {i}")
-            for i in range(4)
-        ],
+        *[AgentContextItem(item_id=f"a-{i}", role="assistant", content=f"hi {i}") for i in range(4)],
     ]
     ctx = _make_ctx(items, keep_text=1, keep_tool=2)
     rec = _RecordingCompactor()
@@ -153,20 +150,23 @@ async def probe_assistant_text_compacted_label_mismatch() -> None:
 
     # First 3 assistants should be eligible (4 - 1 keep = 3 cutoff).
     compacted_ids = sorted([c.item_id for c in rec.calls])
-    _check(compacted_ids == ["a-0", "a-1", "a-2"],
-           "asst-text: 3 oldest plain-text assistants compacted",
-           observed=f"compacted={compacted_ids}")
+    _check(
+        compacted_ids == ["a-0", "a-1", "a-2"],
+        "asst-text: 3 oldest plain-text assistants compacted",
+        observed=f"compacted={compacted_ids}",
+    )
 
     rendered = ctx.to_messages_array()
     # The compacted assistant items should render with content describing
     # an assistant TEXT message — not 'Compacted tool calls'.
     rendered_a0 = next((m for m in rendered if isinstance(m.content, str) and "a-0" in m.content), None)
-    _check(rendered_a0 is not None,
-           "asst-text: compacted a-0 appears in rendered output")
+    _check(rendered_a0 is not None, "asst-text: compacted a-0 appears in rendered output")
     if rendered_a0 is not None:
-        _check("Compacted tool calls" not in (rendered_a0.content or ""),
-               "asst-text: render label does NOT say 'Compacted tool calls' for plain-text assistant",
-               observed=f"content={rendered_a0.content!r}")
+        _check(
+            "Compacted tool calls" not in (rendered_a0.content or ""),
+            "asst-text: render label does NOT say 'Compacted tool calls' for plain-text assistant",
+            observed=f"content={rendered_a0.content!r}",
+        )
 
 
 async def probe_assistant_with_tool_calls_renders_tool_calls_label() -> None:
@@ -189,9 +189,11 @@ async def probe_assistant_with_tool_calls_renders_tool_calls_label() -> None:
 
     rendered = ctx.to_messages_array()
     a0 = rendered[1]  # corresponds to a-0
-    _check(a0.role == "assistant" and "Compacted tool calls" in (a0.content or ""),
-           "asst-toolcall: tool-call assistant compacts as 'Compacted tool calls'",
-           observed=f"a0_content={a0.content!r}")
+    _check(
+        a0.role == "assistant" and "Compacted tool calls" in (a0.content or ""),
+        "asst-toolcall: tool-call assistant compacts as 'Compacted tool calls'",
+        observed=f"a0_content={a0.content!r}",
+    )
 
 
 async def probe_parallel_tool_calls_compact_as_a_unit() -> None:
@@ -216,9 +218,11 @@ async def probe_parallel_tool_calls_compact_as_a_unit() -> None:
     await ctx.compact_old_items(rec)
 
     compacted_ids = {c.item_id for c in rec.calls}
-    _check(compacted_ids == {"a-0", "t-0"},
-           "parallel: oldest tool turn (a-0 + its result t-0) compacted as a unit",
-           observed=f"compacted_ids={sorted(compacted_ids)}")
+    _check(
+        compacted_ids == {"a-0", "t-0"},
+        "parallel: oldest tool turn (a-0 + its result t-0) compacted as a unit",
+        observed=f"compacted_ids={sorted(compacted_ids)}",
+    )
 
 
 async def main() -> int:

@@ -17,11 +17,14 @@ from engine.traces.trace_store import TraceStore
 
 def _cfg() -> EngineConfig:
     ac = AgentConfig(
-        name="root", instructions="",
-        model=ModelConfig(name="claude-sonnet-4-5"), maximum_turns=10,
+        name="root",
+        instructions="",
+        model=ModelConfig(name="claude-sonnet-4-5"),
+        maximum_turns=10,
     )
     return EngineConfig(
-        root_agent=ac, subagent=ac,
+        root_agent=ac,
+        subagent=ac,
         synthesis_model=ModelConfig(name="claude-haiku-4-5"),
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
     )
@@ -37,15 +40,21 @@ async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) ->
     state = EngineRunState(trace_store=store, output_bus=EngineOutputBus(), config=_cfg())
 
     exec_ = AgentExecution(
-        agent_id="root", agent_name="root", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
     state.register(exec_)
     assert state.executions_by_agent_id["root"] is exec_
 
     child = AgentExecution(
-        agent_id="sub1", agent_name="sub", depth=1,
-        parent_agent_id="root", parent_tool_call_id="call_xyz",
+        agent_id="sub1",
+        agent_name="sub",
+        depth=1,
+        parent_agent_id="root",
+        parent_tool_call_id="call_xyz",
     )
     state.register(child)
     assert state.executions_by_tool_call_id["call_xyz"] is child

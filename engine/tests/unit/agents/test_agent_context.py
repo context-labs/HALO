@@ -40,24 +40,26 @@ def test_to_messages_array_uncompacted_user() -> None:
 
 def test_to_messages_array_assistant_tool_call_item() -> None:
     ctx = _ctx()
-    ctx.append(AgentContextItem(
-        item_id="2",
-        role="assistant",
-        content=None,
-        tool_calls=[AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))],
-    ))
-    ctx.append(AgentContextItem(
-        item_id="3",
-        role="tool",
-        content="ok",
-        tool_call_id="c1",
-        name="x",
-    ))
+    ctx.append(
+        AgentContextItem(
+            item_id="2",
+            role="assistant",
+            content=None,
+            tool_calls=[AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))],
+        )
+    )
+    ctx.append(
+        AgentContextItem(
+            item_id="3",
+            role="tool",
+            content="ok",
+            tool_call_id="c1",
+            name="x",
+        )
+    )
     msgs = ctx.to_messages_array()
     assert msgs[0].role == "assistant" and msgs[0].tool_calls is not None
     assert msgs[1].role == "tool" and msgs[1].tool_call_id == "c1"
-
-
 
 
 class _StubCompactor:
@@ -99,19 +101,23 @@ async def test_compact_old_items_separate_thresholds_for_tools() -> None:
         tool_call_compaction_keep_last_turns=1,
     )
     for i in range(3):
-        ctx.append(AgentContextItem(
-            item_id=f"a{i}",
-            role="assistant",
-            content=None,
-            tool_calls=[AgentToolCall(id=f"c{i}", function=AgentToolFunction(name="x", arguments="{}"))],
-        ))
-        ctx.append(AgentContextItem(
-            item_id=f"r{i}",
-            role="tool",
-            content="ok",
-            tool_call_id=f"c{i}",
-            name="x",
-        ))
+        ctx.append(
+            AgentContextItem(
+                item_id=f"a{i}",
+                role="assistant",
+                content=None,
+                tool_calls=[AgentToolCall(id=f"c{i}", function=AgentToolFunction(name="x", arguments="{}"))],
+            )
+        )
+        ctx.append(
+            AgentContextItem(
+                item_id=f"r{i}",
+                role="tool",
+                content="ok",
+                tool_call_id=f"c{i}",
+                name="x",
+            )
+        )
 
     stub = _StubCompactor()
     await ctx.compact_old_items(compactor=stub.compact)

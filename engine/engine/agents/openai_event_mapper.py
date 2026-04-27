@@ -81,11 +81,7 @@ class OpenAiEventMapper:
         # raw_item is openai.types.responses.ResponseOutputMessage
         item_id = str(getattr(raw_item, "id", "") or "")
         parts = getattr(raw_item, "content", None) or []
-        text_parts = [
-            getattr(p, "text", "")
-            for p in parts
-            if getattr(p, "type", None) in ("output_text", "text")
-        ]
+        text_parts = [getattr(p, "text", "") for p in parts if getattr(p, "type", None) in ("output_text", "text")]
         return item_id, "".join(text_parts)
 
     def _build_assistant(
@@ -207,4 +203,3 @@ class OpenAiEventMapper:
             ),
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
-

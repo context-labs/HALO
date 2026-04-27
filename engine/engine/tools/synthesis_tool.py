@@ -39,7 +39,7 @@ class SynthesisTool:
     def __init__(self, model_name: str, client: AsyncOpenAI | None = None) -> None:
         """``client`` is injectable for tests; defaults to a fresh ``AsyncOpenAI``."""
         self._model_name = model_name
-        self._client = client or AsyncOpenAI()
+        self._client = client
 
     async def run(self, tool_context: ToolContext, arguments: SynthesizeTracesArguments) -> SynthesizeTracesResult:
         """Render each trace, prepend the focus hint if set, and return the synthesis model's plain-text reply."""
@@ -51,6 +51,9 @@ class SynthesisTool:
         for tid in arguments.trace_ids:
             rendered = store.render_trace(tid, budget=8_000)
             user_text_parts.append(rendered)
+
+        if self._client is None:
+            self._client = AsyncOpenAI()
 
         response = await self._client.chat.completions.create(
             model=self._model_name,

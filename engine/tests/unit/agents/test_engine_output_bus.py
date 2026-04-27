@@ -53,15 +53,17 @@ async def test_bus_fail_propagates_after_drain() -> None:
 async def test_bus_handles_deltas_and_items() -> None:
     bus = EngineOutputBus()
     await bus.emit(_msg(text="full"))
-    await bus.emit(AgentTextDelta(
-        sequence=0,
-        agent_id="root",
-        parent_agent_id=None,
-        parent_tool_call_id=None,
-        depth=0,
-        item_id="x",
-        text_delta="par",
-    ))
+    await bus.emit(
+        AgentTextDelta(
+            sequence=0,
+            agent_id="root",
+            parent_agent_id=None,
+            parent_tool_call_id=None,
+            depth=0,
+            item_id="x",
+            text_delta="par",
+        )
+    )
     await bus.close()
     events = [ev async for ev in bus.stream()]
     assert [type(ev).__name__ for ev in events] == ["AgentOutputItem", "AgentTextDelta"]

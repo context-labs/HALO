@@ -1,7 +1,9 @@
 .venv/
 .sandbox-venv/
+.cache/
 __pycache__/
 .pytest_cache/
+test-results/
 *.egg-info/
 *.engine-index.jsonl
 *.engine-index.meta.json

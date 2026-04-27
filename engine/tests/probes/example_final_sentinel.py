@@ -40,22 +40,29 @@ async def probe_root_sentinel_stripped() -> None:
         [make_assistant_text("the answer\n<final/>", item_id="m1")],
     )
     result = await run_with_fake(runner)
-    _check(result.error is None, "root-sentinel: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(result.output_items) == 1,
-           "root-sentinel: exactly one output item",
-           observed=f"items={len(result.output_items)}")
+    _check(
+        result.error is None,
+        "root-sentinel: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(result.output_items) == 1,
+        "root-sentinel: exactly one output item",
+        observed=f"items={len(result.output_items)}",
+    )
     if result.output_items:
         item = result.output_items[0]
-        _check(item.final is True,
-               "root-sentinel: item.final=True",
-               observed=f"final={item.final}")
-        _check("<final/>" not in (item.item.content or ""),
-               "root-sentinel: <final/> stripped from content",
-               observed=f"content={item.item.content!r}")
-        _check((item.item.content or "").strip() == "the answer",
-               "root-sentinel: surrounding text preserved",
-               observed=f"content={item.item.content!r}")
+        _check(item.final is True, "root-sentinel: item.final=True", observed=f"final={item.final}")
+        _check(
+            "<final/>" not in (item.item.content or ""),
+            "root-sentinel: <final/> stripped from content",
+            observed=f"content={item.item.content!r}",
+        )
+        _check(
+            (item.item.content or "").strip() == "the answer",
+            "root-sentinel: surrounding text preserved",
+            observed=f"content={item.item.content!r}",
+        )
 
 
 async def probe_root_multiple_messages_last_is_final() -> None:
@@ -68,20 +75,20 @@ async def probe_root_multiple_messages_last_is_final() -> None:
         ],
     )
     result = await run_with_fake(runner)
-    _check(result.error is None,
-           "multi-msg: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
-    _check(len(result.output_items) == 2,
-           "multi-msg: two output items emitted",
-           observed=f"items={len(result.output_items)}")
+    _check(
+        result.error is None,
+        "multi-msg: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
+    _check(
+        len(result.output_items) == 2,
+        "multi-msg: two output items emitted",
+        observed=f"items={len(result.output_items)}",
+    )
     if len(result.output_items) >= 2:
         m1, m2 = result.output_items[0], result.output_items[1]
-        _check(m1.final is False,
-               "multi-msg: first item not final",
-               observed=f"final={m1.final}")
-        _check(m2.final is True,
-               "multi-msg: second (sentinel-bearing) item is final",
-               observed=f"final={m2.final}")
+        _check(m1.final is False, "multi-msg: first item not final", observed=f"final={m1.final}")
+        _check(m2.final is True, "multi-msg: second (sentinel-bearing) item is final", observed=f"final={m2.final}")
 
 
 async def probe_sentinel_in_middle_of_text() -> None:
@@ -92,22 +99,26 @@ async def probe_sentinel_in_middle_of_text() -> None:
         [make_assistant_text("answer is <final/> 42", item_id="m1")],
     )
     result = await run_with_fake(runner)
-    _check(result.error is None,
-           "midtext-sentinel: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "midtext-sentinel: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     if result.output_items:
         item = result.output_items[0]
-        _check(item.final is True,
-               "midtext-sentinel: item.final=True",
-               observed=f"final={item.final}")
-        _check("<final/>" not in (item.item.content or ""),
-               "midtext-sentinel: sentinel removed from content",
-               observed=f"content={item.item.content!r}")
+        _check(item.final is True, "midtext-sentinel: item.final=True", observed=f"final={item.final}")
+        _check(
+            "<final/>" not in (item.item.content or ""),
+            "midtext-sentinel: sentinel removed from content",
+            observed=f"content={item.item.content!r}",
+        )
         # rstrip means trailing whitespace from the now-removed sentinel
         # gets cleaned up; "answer is " + "" + " 42" → "answer is  42" (rstripped)
-        _check((item.item.content or "") == "answer is  42",
-               "midtext-sentinel: content is 'answer is  42' (double space, rstripped)",
-               observed=f"content={item.item.content!r}")
+        _check(
+            (item.item.content or "") == "answer is  42",
+            "midtext-sentinel: content is 'answer is  42' (double space, rstripped)",
+            observed=f"content={item.item.content!r}",
+        )
 
 
 async def probe_sentinel_only() -> None:
@@ -118,17 +129,21 @@ async def probe_sentinel_only() -> None:
         [make_assistant_text("<final/>", item_id="m1")],
     )
     result = await run_with_fake(runner)
-    _check(result.error is None,
-           "empty-sentinel: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "empty-sentinel: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     if result.output_items:
         item = result.output_items[0]
         # When the entire text is <final/>, after stripping text is "" → content=None.
         # But also: the "if is_root and text and FINAL_SENTINEL in text" guard requires
         # truthy text to even strip — so let's see what happens.
-        _check(item.final is True,
-               "empty-sentinel: item.final=True even with sentinel-only message",
-               observed=f"final={item.final} content={item.item.content!r}")
+        _check(
+            item.final is True,
+            "empty-sentinel: item.final=True even with sentinel-only message",
+            observed=f"final={item.final} content={item.item.content!r}",
+        )
 
 
 async def probe_two_sentinel_messages_in_one_turn() -> None:
@@ -142,13 +157,17 @@ async def probe_two_sentinel_messages_in_one_turn() -> None:
         ],
     )
     result = await run_with_fake(runner)
-    _check(result.error is None,
-           "double-sentinel: completes without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    _check(
+        result.error is None,
+        "double-sentinel: completes without error",
+        observed=f"error={type(result.error).__name__ if result.error else None}",
+    )
     final_items = [it for it in result.output_items if it.final]
-    _check(len(final_items) == 2,
-           "double-sentinel: both items get final=True (mapper-level, not stop signal)",
-           observed=f"final_count={len(final_items)} of {len(result.output_items)}")
+    _check(
+        len(final_items) == 2,
+        "double-sentinel: both items get final=True (mapper-level, not stop signal)",
+        observed=f"final_count={len(final_items)} of {len(result.output_items)}",
+    )
 
 
 async def main() -> int:

@@ -71,14 +71,16 @@ class AgentContext:
 
         items: list[AgentContextItem] = [sys_item]
         for i, msg in enumerate(body):
-            items.append(AgentContextItem(
-                item_id=f"in-{i}",
-                role=msg.role,
-                content=msg.content,
-                tool_calls=msg.tool_calls,
-                tool_call_id=msg.tool_call_id,
-                name=msg.name,
-            ))
+            items.append(
+                AgentContextItem(
+                    item_id=f"in-{i}",
+                    role=msg.role,
+                    content=msg.content,
+                    tool_calls=msg.tool_calls,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
+            )
 
         return cls(
             items=items,

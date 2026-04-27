@@ -63,9 +63,7 @@ class SandboxRunner:
             elif system == "Darwin":
                 profile_path = work_dir / "profile.sb"
                 profile_path.write_text(render_macos_profile(policy=policy))
-                argv = build_macos_sandbox_exec_command(
-                    policy=policy, script_path=script, profile_path=profile_path
-                )
+                argv = build_macos_sandbox_exec_command(policy=policy, script_path=script, profile_path=profile_path)
             else:
                 raise RuntimeError(f"unsupported platform {system}")
 

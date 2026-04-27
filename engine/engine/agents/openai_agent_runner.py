@@ -89,9 +89,7 @@ class OpenAiAgentRunner:
             agent_execution.record_llm_success()
 
             async for raw_event in stream.stream_events():
-                mapped = self._mapper.to_mapped_event(
-                    raw_event, execution=agent_execution, is_root=is_root
-                )
+                mapped = self._mapper.to_mapped_event(raw_event, execution=agent_execution, is_root=is_root)
                 if mapped.context_item is not None:
                     agent_context.append(mapped.context_item)
                 if mapped.output_item is not None:
@@ -113,6 +111,5 @@ class OpenAiAgentRunner:
             return
 
         raise EngineAgentExhaustedError(
-            f"agent {agent_execution.agent_id} exhausted "
-            f"after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
+            f"agent {agent_execution.agent_id} exhausted after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
         ) from last_exc

@@ -18,8 +18,11 @@ def test_agent_execution_defaults() -> None:
 
 def test_record_and_reset_failures() -> None:
     execution = AgentExecution(
-        agent_id="a", agent_name="a", depth=0,
-        parent_agent_id=None, parent_tool_call_id=None,
+        agent_id="a",
+        agent_name="a",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
     )
     execution.record_llm_failure()
     execution.record_llm_failure()
