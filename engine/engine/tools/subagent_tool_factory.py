@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agents import Agent, FunctionTool, RunContextWrapper, Tool
+from agents.agent_tool_input import AgentAsToolInput
 from agents.tool_context import ToolContext as SdkToolContext
 
 from engine.agents.agent_context import AgentContext
@@ -169,6 +170,13 @@ def _build_subagent_as_tool(
         # is called, allowing us to only create a single Agent[EngineRunState] instance?
         # The current pattern is required so that the child_execution is available to pass into _child_tools_for_depth.
         # If we do need to keep this pattern ,split out this inline function into a standalone for readability
+        # ``as_tool()`` builds a tool whose ``raw_arguments`` is JSON-encoded
+        # ``AgentAsToolInput`` (i.e. ``{"input": "..."}``); the SDK's own
+        # ``_run_agent_impl`` extracts ``params["input"]`` before calling the
+        # nested agent, so we mirror that here. Without this, the subagent
+        # would see the raw JSON wrapper instead of the delegated question.
+        delegated_input = AgentAsToolInput.model_validate_json(raw_arguments).input
+
         async with semaphore:
             child_execution = AgentExecution(
                 agent_id=f"sub-{uuid.uuid4().hex[:8]}",
@@ -196,7 +204,7 @@ def _build_subagent_as_tool(
                     AgentContextItem(
                         item_id="sys-0", role="system", content=subagent_system_prompt
                     ),
-                    AgentContextItem(item_id="in-0", role="user", content=raw_arguments),
+                    AgentContextItem(item_id="in-0", role="user", content=delegated_input),
                 ],
                 compaction_model=engine_config.compaction_model,
                 text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
