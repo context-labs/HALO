@@ -66,7 +66,10 @@ async def probe_baseline_success() -> None:
         "baseline: run completes without error",
         observed=f"error={type(result.error).__name__ if result.error else None}",
     )
-    _check(any(item.final for item in result.output_items), "baseline: at least one item has final=True")
+    _check(
+        any(item.final for item in result.output_items),
+        "baseline: at least one item has final=True",
+    )
     _check(
         len(runner.calls) == 1,
         "baseline: FakeRunner.run_streamed called exactly once",
@@ -94,7 +97,10 @@ async def probe_retry_then_success() -> None:
         "retry-then-success: FakeRunner called twice (1 retry + 1 success)",
         observed=f"calls={len(runner.calls)}",
     )
-    _check(any(item.final for item in result.output_items), "retry-then-success: at least one item has final=True")
+    _check(
+        any(item.final for item in result.output_items),
+        "retry-then-success: at least one item has final=True",
+    )
 
 
 async def probe_circuit_breaker_exhaustion() -> None:

@@ -115,8 +115,12 @@ async def test_semaphore_wrapper_limits_parallelism() -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_returns_failure_on_exception() -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
-        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        root_agent=AgentConfig(
+            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
+        subagent=AgentConfig(
+            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,
@@ -147,8 +151,12 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
-        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        root_agent=AgentConfig(
+            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
+        subagent=AgentConfig(
+            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,
@@ -161,7 +169,9 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
             type="run_item_stream_event",
             item=SimpleNamespace(
                 type="tool_call_item",
-                raw_item=SimpleNamespace(call_id="c1", id="c1", name="query_traces", arguments="{}"),
+                raw_item=SimpleNamespace(
+                    call_id="c1", id="c1", name="query_traces", arguments="{}"
+                ),
             ),
         ),
         SimpleNamespace(
@@ -169,7 +179,9 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
             item=SimpleNamespace(
                 type="message_output_item",
                 raw_item=SimpleNamespace(
-                    id="m1", role="assistant", content=[SimpleNamespace(type="output_text", text="done")]
+                    id="m1",
+                    role="assistant",
+                    content=[SimpleNamespace(type="output_text", text="done")],
                 ),
             ),
         ),
@@ -208,8 +220,12 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
-        subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        root_agent=AgentConfig(
+            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
+        subagent=AgentConfig(
+            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,

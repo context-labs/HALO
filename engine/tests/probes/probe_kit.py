@@ -99,7 +99,9 @@ class FakeRunner:
         # Record every kwarg the engine forwards. Probes inspect
         # `runner.calls[i]` to verify the engine passed what it should
         # have (e.g. max_turns from AgentConfig).
-        self.calls.append({"starting_agent": starting_agent, "input": input, "context": context, **kwargs})
+        self.calls.append(
+            {"starting_agent": starting_agent, "input": input, "context": context, **kwargs}
+        )
         if not self._programs:
             raise RuntimeError("FakeRunner exhausted; called more times than programs supplied")
         program = self._programs.pop(0)
@@ -412,7 +414,9 @@ async def check_raises(
     a sync callable. Anything else: pass a zero-arg lambda.
     """
     try:
-        result = awaitable_or_callable() if callable(awaitable_or_callable) else awaitable_or_callable
+        result = (
+            awaitable_or_callable() if callable(awaitable_or_callable) else awaitable_or_callable
+        )
         if asyncio.iscoroutine(result):
             await result
     except expected_type as exc:

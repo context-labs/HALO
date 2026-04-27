@@ -52,7 +52,9 @@ def _item_as_prompt(item: AgentContextItem) -> str:
         return f"USER MESSAGE:\n{item.content}"
     if item.role == "assistant":
         if item.tool_calls:
-            calls = "\n".join(f"- {tc.function.name}({tc.function.arguments})" for tc in item.tool_calls)
+            calls = "\n".join(
+                f"- {tc.function.name}({tc.function.arguments})" for tc in item.tool_calls
+            )
             return f"ASSISTANT TOOL CALLS:\n{calls}"
         return f"ASSISTANT MESSAGE:\n{item.content}"
     if item.role == "tool":

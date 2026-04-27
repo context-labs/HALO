@@ -88,7 +88,11 @@ async def probe_root_multiple_messages_last_is_final() -> None:
     if len(result.output_items) >= 2:
         m1, m2 = result.output_items[0], result.output_items[1]
         _check(m1.final is False, "multi-msg: first item not final", observed=f"final={m1.final}")
-        _check(m2.final is True, "multi-msg: second (sentinel-bearing) item is final", observed=f"final={m2.final}")
+        _check(
+            m2.final is True,
+            "multi-msg: second (sentinel-bearing) item is final",
+            observed=f"final={m2.final}",
+        )
 
 
 async def probe_sentinel_in_middle_of_text() -> None:
@@ -106,7 +110,9 @@ async def probe_sentinel_in_middle_of_text() -> None:
     )
     if result.output_items:
         item = result.output_items[0]
-        _check(item.final is True, "midtext-sentinel: item.final=True", observed=f"final={item.final}")
+        _check(
+            item.final is True, "midtext-sentinel: item.final=True", observed=f"final={item.final}"
+        )
         _check(
             "<final/>" not in (item.item.content or ""),
             "midtext-sentinel: sentinel removed from content",

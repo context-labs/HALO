@@ -85,7 +85,12 @@ def test_result_wrappers_tool_boundary() -> None:
     assert QueryTracesResult(result=TraceQueryResult(traces=[], total=0)).result.total == 0
     assert ViewTraceResult(result=TraceView(trace_id="t", spans=[])).result.trace_id == "t"
     assert CountTracesResult(result=TraceCountResult(total=0)).result.total == 0
-    assert SearchTraceResult(result=TraceSearchResult(trace_id="t", match_count=0, matches=[])).result.match_count == 0
+    assert (
+        SearchTraceResult(
+            result=TraceSearchResult(trace_id="t", match_count=0, matches=[])
+        ).result.match_count
+        == 0
+    )
     ov = DatasetOverview(
         total_traces=0,
         total_spans=0,

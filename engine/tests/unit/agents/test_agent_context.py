@@ -45,7 +45,9 @@ def test_to_messages_array_assistant_tool_call_item() -> None:
             item_id="2",
             role="assistant",
             content=None,
-            tool_calls=[AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))],
+            tool_calls=[
+                AgentToolCall(id="c1", function=AgentToolFunction(name="x", arguments="{}"))
+            ],
         )
     )
     ctx.append(
@@ -106,7 +108,9 @@ async def test_compact_old_items_separate_thresholds_for_tools() -> None:
                 item_id=f"a{i}",
                 role="assistant",
                 content=None,
-                tool_calls=[AgentToolCall(id=f"c{i}", function=AgentToolFunction(name="x", arguments="{}"))],
+                tool_calls=[
+                    AgentToolCall(id=f"c{i}", function=AgentToolFunction(name="x", arguments="{}"))
+                ],
             )
         )
         ctx.append(
@@ -137,7 +141,11 @@ async def test_compact_old_items_skips_system_and_already_compacted() -> None:
         tool_call_compaction_keep_last_turns=0,
     )
     ctx.append(AgentContextItem(item_id="s", role="system", content="sys"))
-    ctx.append(AgentContextItem(item_id="u1", role="user", content="hi", is_compacted=True, compaction_summary="x"))
+    ctx.append(
+        AgentContextItem(
+            item_id="u1", role="user", content="hi", is_compacted=True, compaction_summary="x"
+        )
+    )
     ctx.append(AgentContextItem(item_id="u2", role="user", content="hello"))
     stub = _StubCompactor()
     await ctx.compact_old_items(compactor=stub.compact)

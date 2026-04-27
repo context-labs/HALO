@@ -34,7 +34,9 @@ class GetContextItemTool:
     arguments_model = GetContextItemArguments
     result_model = GetContextItemResult
 
-    async def run(self, tool_context: ToolContext, arguments: GetContextItemArguments) -> GetContextItemResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: GetContextItemArguments
+    ) -> GetContextItemResult:
         """Look up the item in the calling agent's AgentContext and return it verbatim."""
         agent_context = tool_context.require_agent_context()
         item = agent_context.get_item(arguments.item_id)

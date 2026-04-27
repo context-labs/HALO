@@ -96,7 +96,9 @@ def _child_tools_for_depth(
             SynthesisTool(model_name=engine_config.synthesis_model.name),
             context_factory=make_ctx,
         ),
-        to_sdk_function_tool(RunCodeTool(sandbox_config=engine_config.sandbox), context_factory=make_ctx),
+        to_sdk_function_tool(
+            RunCodeTool(sandbox_config=engine_config.sandbox), context_factory=make_ctx
+        ),
     ]
 
     if depth >= engine_config.maximum_depth:
@@ -190,7 +192,9 @@ def _build_subagent_as_tool(
 
             child_context = AgentContext(
                 items=[
-                    AgentContextItem(item_id="sys-0", role="system", content=subagent_system_prompt),
+                    AgentContextItem(
+                        item_id="sys-0", role="system", content=subagent_system_prompt
+                    ),
                     AgentContextItem(item_id="in-0", role="user", content=raw_arguments),
                 ],
                 compaction_model=engine_config.compaction_model,
@@ -236,7 +240,9 @@ def _build_subagent_as_tool(
                     type(exc).__name__,
                     exc,
                 )
-                return _failure_result(child_execution, f"Subagent failed: {type(exc).__name__}: {exc}")
+                return _failure_result(
+                    child_execution, f"Subagent failed: {type(exc).__name__}: {exc}"
+                )
 
             answer = _extract_final_answer(child_context)
             result = SubagentToolResult(

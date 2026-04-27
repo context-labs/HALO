@@ -167,7 +167,11 @@ async def probe_child_execution_registered_with_correct_metadata() -> None:
     await subagent_tool.on_invoke_tool(ctx, "delegate this")
 
     children = [ex for aid, ex in state.executions_by_agent_id.items() if aid.startswith("sub-")]
-    check(len(children) == 1, "register: exactly one subagent execution registered", observed=f"count={len(children)}")
+    check(
+        len(children) == 1,
+        "register: exactly one subagent execution registered",
+        observed=f"count={len(children)}",
+    )
     if not children:
         return
     child = children[0]
@@ -270,7 +274,11 @@ async def probe_depth_guard_raises_before_any_sdk_call() -> None:
         "depth-guard: invoking child_depth > maximum_depth raises EngineMaxDepthExceededError",
         observed=f"got={type(exc).__name__ if exc else 'no raise'}",
     )
-    check(len(runner.calls) == 0, "depth-guard: no FakeRunner call was consumed", observed=f"calls={len(runner.calls)}")
+    check(
+        len(runner.calls) == 0,
+        "depth-guard: no FakeRunner call was consumed",
+        observed=f"calls={len(runner.calls)}",
+    )
 
 
 async def main() -> int:

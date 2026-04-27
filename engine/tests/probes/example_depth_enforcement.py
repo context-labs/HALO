@@ -86,7 +86,11 @@ async def probe_depth_zero_no_subagent_tool() -> None:
         agent_execution=root_exec,
     )
     names = _tool_names(sdk_agent.tools)
-    _check("call_subagent" not in names, "depth=0: root has NO call_subagent tool", observed=f"tools={names}")
+    _check(
+        "call_subagent" not in names,
+        "depth=0: root has NO call_subagent tool",
+        observed=f"tools={names}",
+    )
     _check(len(names) > 0, "depth=0: root still has leaf tools", observed=f"tools={names}")
 
 
@@ -107,7 +111,9 @@ async def probe_depth_one_root_has_subagent_tool() -> None:
         agent_execution=root_exec,
     )
     names = _tool_names(sdk_agent.tools)
-    _check("call_subagent" in names, "depth=1: root has call_subagent tool", observed=f"tools={names}")
+    _check(
+        "call_subagent" in names, "depth=1: root has call_subagent tool", observed=f"tools={names}"
+    )
 
 
 async def probe_depth_one_subagent_has_no_subagent_tool() -> None:
@@ -131,7 +137,9 @@ async def probe_depth_one_subagent_has_no_subagent_tool() -> None:
     )
     names = _tool_names(depth1_tools)
     _check(
-        "call_subagent" not in names, "depth=1 child: depth-1 subagent has NO call_subagent", observed=f"tools={names}"
+        "call_subagent" not in names,
+        "depth=1 child: depth-1 subagent has NO call_subagent",
+        observed=f"tools={names}",
     )
 
 
@@ -148,10 +156,24 @@ async def probe_depth_two_intermediate_has_subagent_tool() -> None:
         parent_agent_id=None,
         parent_tool_call_id=None,
     )
-    d1 = _tool_names(_child_tools_for_depth(depth=1, run_state=run_state, semaphore=semaphore, parent_execution=parent))
-    d2 = _tool_names(_child_tools_for_depth(depth=2, run_state=run_state, semaphore=semaphore, parent_execution=parent))
-    _check("call_subagent" in d1, "depth=2 cfg: depth-1 has call_subagent", observed=f"d1_tools={d1}")
-    _check("call_subagent" not in d2, "depth=2 cfg: depth-2 leaf has NO call_subagent", observed=f"d2_tools={d2}")
+    d1 = _tool_names(
+        _child_tools_for_depth(
+            depth=1, run_state=run_state, semaphore=semaphore, parent_execution=parent
+        )
+    )
+    d2 = _tool_names(
+        _child_tools_for_depth(
+            depth=2, run_state=run_state, semaphore=semaphore, parent_execution=parent
+        )
+    )
+    _check(
+        "call_subagent" in d1, "depth=2 cfg: depth-1 has call_subagent", observed=f"d1_tools={d1}"
+    )
+    _check(
+        "call_subagent" not in d2,
+        "depth=2 cfg: depth-2 leaf has NO call_subagent",
+        observed=f"d2_tools={d2}",
+    )
 
 
 async def probe_end_to_end_depth_zero_run() -> None:

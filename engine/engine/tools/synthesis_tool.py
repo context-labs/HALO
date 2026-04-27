@@ -41,7 +41,9 @@ class SynthesisTool:
         self._model_name = model_name
         self._client = client
 
-    async def run(self, tool_context: ToolContext, arguments: SynthesizeTracesArguments) -> SynthesizeTracesResult:
+    async def run(
+        self, tool_context: ToolContext, arguments: SynthesizeTracesArguments
+    ) -> SynthesizeTracesResult:
         """Render each trace, prepend the focus hint if set, and return the synthesis model's plain-text reply."""
         user_text_parts = [f"trace_ids: {', '.join(arguments.trace_ids)}"]
         if arguments.focus:
