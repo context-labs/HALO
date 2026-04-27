@@ -202,3 +202,152 @@ async def test_runner_retries_on_connection_error_then_fails() -> None:
             is_root=True,
         )
     assert call_count == 10
+
+
+class _RaisingStream:
+    """Yields nothing and raises ``exc`` on the first iteration step."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def stream_events(self):
+        raise self._exc
+        yield  # pragma: no cover - makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_when_stream_iteration_raises_retriable() -> None:
+    """Lazy LLM errors surface from ``stream_events()`` and must engage the breaker."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_that_raises(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        return _RaisingStream(APIConnectionError(request=fake_request))
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_raises,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 10
+
+
+@pytest.mark.asyncio
+async def test_runner_propagates_non_retriable_stream_iteration_error() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
+
+    async def stream_that_raises(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        return _RaisingStream(
+            BadRequestError(
+                message="bad field",
+                response=fake_response,
+                body={"error": {"message": "bad field"}},
+            )
+        )
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_raises,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    with pytest.raises(BadRequestError):
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_rebuilds_messages_per_retry() -> None:
+    """A retry should re-render ``agent_context``; appended items must reach the next attempt."""
+    from engine.agents.agent_context_items import AgentContextItem
+
+    bus = EngineOutputBus()
+    ctx = _context()
+    ctx.append(AgentContextItem(item_id="u-0", role="user", content="initial"))
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    seen_inputs: list[list[dict]] = []
+    call_count = 0
+
+    async def fake_run_streamed(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        seen_inputs.append(list(input))
+        if call_count == 1:
+            ctx.append(AgentContextItem(item_id="u-1", role="user", content="appended"))
+            raise APIConnectionError(request=fake_request)
+        return _FakeStream([_assistant_event("done\n<final/>")])
+
+    async def noop_compactor(_):
+        return ""
+
+    runner = OpenAiAgentRunner(
+        run_streamed=fake_run_streamed,
+        compactor_factory=lambda _: noop_compactor,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+    await bus.close()
+
+    assert call_count == 2
+    assert len(seen_inputs[0]) == 1
+    assert len(seen_inputs[1]) == 2
+    assert seen_inputs[1][1]["content"] == "appended"

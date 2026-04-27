@@ -65,16 +65,41 @@ class OpenAiAgentRunner:
 
         Raises ``EngineAgentExhaustedError`` when consecutive transient LLM failures
         exceed ``MAX_CONSECUTIVE_LLM_FAILURES``. Non-retriable exceptions propagate.
+
+        ``Runner.run_streamed`` returns immediately and the actual LLM request happens
+        lazily inside ``stream.stream_events()``, so the retry try/except wraps the
+        full iteration — connection errors, timeouts, rate limits, and 5xx surface
+        there, not on the ``run_streamed`` call.
         """
-        messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
         last_exc: BaseException | None = None
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
+            # Rebuild per attempt so a retry sees any context items appended before
+            # the failure point (and any compaction that has run since).
+            messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
             try:
-                # TODO: Pretty sure an iterator wont throw here
                 stream = await self._run_streamed(
                     agent=sdk_agent, input=messages, context=run_context
                 )
+                async for raw_event in stream.stream_events():
+                    mapped = self._mapper.to_mapped_event(
+                        raw_event, execution=agent_execution, is_root=is_root
+                    )
+                    if mapped.context_item is not None:
+                        agent_context.append(mapped.context_item)
+                    if mapped.output_item is not None:
+                        emitted = await output_bus.emit(mapped.output_item)
+                        if agent_execution.output_start_sequence is None:
+                            agent_execution.output_start_sequence = emitted.sequence
+                        agent_execution.output_end_sequence = emitted.sequence
+                        item = mapped.output_item.item
+                        if item.role == "assistant":
+                            if item.tool_calls:
+                                agent_execution.tool_calls_made += len(item.tool_calls)
+                            else:
+                                agent_execution.turns_used += 1
+                    if mapped.delta is not None:
+                        await output_bus.emit(mapped.delta)
             except Exception as exc:
                 if not _is_retriable_llm_error(exc):
                     raise
@@ -89,27 +114,6 @@ class OpenAiAgentRunner:
                 continue
 
             agent_execution.record_llm_success()
-
-            async for raw_event in stream.stream_events():
-                mapped = self._mapper.to_mapped_event(
-                    raw_event, execution=agent_execution, is_root=is_root
-                )
-                if mapped.context_item is not None:
-                    agent_context.append(mapped.context_item)
-                if mapped.output_item is not None:
-                    emitted = await output_bus.emit(mapped.output_item)
-                    if agent_execution.output_start_sequence is None:
-                        agent_execution.output_start_sequence = emitted.sequence
-                    agent_execution.output_end_sequence = emitted.sequence
-                    item = mapped.output_item.item
-                    if item.role == "assistant":
-                        if item.tool_calls:
-                            agent_execution.tool_calls_made += len(item.tool_calls)
-                        else:
-                            agent_execution.turns_used += 1
-                if mapped.delta is not None:
-                    await output_bus.emit(mapped.delta)
-
             # TODO: Remove passing in compactor_factory, the compactor agent/llm config should be instantiated once and re used
             await agent_context.compact_old_items(self._compactor_factory(agent_execution))
             return
