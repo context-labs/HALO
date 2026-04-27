@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from loguru import logger
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from engine.agents.agent_context import AgentContext, Compactor
@@ -26,6 +26,7 @@ MAX_CONSECUTIVE_LLM_FAILURES = 10
 
 RunStreamedCallable = Callable[..., Awaitable[Any]]
 CompactorFactory = Callable[[AgentExecution], Compactor]
+logger = logging.getLogger(__name__)
 
 
 class OpenAiAgentRunner:
@@ -106,7 +107,7 @@ class OpenAiAgentRunner:
                 last_exc = exc
                 agent_execution.record_llm_failure()
                 logger.warning(
-                    "llm call failed for agent_id={} (failure {} of {})",
+                    "llm call failed for agent_id=%s (failure %s of %s)",
                     agent_execution.agent_id,
                     agent_execution.consecutive_llm_failures,
                     MAX_CONSECUTIVE_LLM_FAILURES,
