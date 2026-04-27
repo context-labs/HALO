@@ -30,9 +30,9 @@ permissions:
   checks: write   # called workflows publish JUnit reports via checks API
 
 jobs:
-  checks:
-    name: Checks
-    uses: ./.github/workflows/engine--checks.yml
+  lint-format-typecheck:
+    name: Lint, Format & Typecheck
+    uses: ./.github/workflows/engine--lint-format-typecheck.yml
     secrets: inherit
 
   unit-tests:
@@ -42,7 +42,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    needs: [checks, unit-tests]
+    needs: [lint-format-typecheck, unit-tests]
     uses: ./.github/workflows/engine--integration-tests.yml
     secrets: inherit
 
@@ -184,7 +184,7 @@ jobs:
 
   summary:
     name: Release Summary
-    needs: [checks, unit-tests, integration-tests, e2e-tests, bump-version, build, publish]
+    needs: [lint-format-typecheck, unit-tests, integration-tests, e2e-tests, bump-version, build, publish]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -193,7 +193,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           SEMVER_ACTION: ${{ inputs.semver_action }}
           NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
-          CHECKS_RESULT: ${{ needs.checks.result }}
+          LINT_RESULT: ${{ needs.lint-format-typecheck.result }}
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           E2E_RESULT: ${{ needs.e2e-tests.result }}
@@ -208,11 +208,11 @@ jobs:
             echo "**New version:** ${NEW_VERSION:-unknown}"
             echo "**Dry run:** ${DRY_RUN}"
             echo ""
-            echo "**Checks:**          ${CHECKS_RESULT}"
-            echo "**Unit Tests:**      ${UNIT_RESULT}"
-            echo "**Integration:**     ${INTEGRATION_RESULT}"
-            echo "**E2E:**             ${E2E_RESULT}"
-            echo "**Version Bump:**    ${BUMP_RESULT}"
-            echo "**Build:**           ${BUILD_RESULT}"
-            echo "**Publish:**         ${PUBLISH_RESULT}"
+            echo "**Lint/Format/Typecheck:** ${LINT_RESULT}"
+            echo "**Unit Tests:**            ${UNIT_RESULT}"
+            echo "**Integration:**           ${INTEGRATION_RESULT}"
+            echo "**E2E:**                   ${E2E_RESULT}"
+            echo "**Version Bump:**          ${BUMP_RESULT}"
+            echo "**Build:**                 ${BUILD_RESULT}"
+            echo "**Publish:**               ${PUBLISH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
