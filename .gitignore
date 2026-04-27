@@ -6,7 +6,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
-data/
+/data/
 
 # Local environment files (but keep the template)
 .env
