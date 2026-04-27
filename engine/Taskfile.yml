@@ -22,6 +22,17 @@ tasks:
         echo "[setup] Engine venv ready at {{.VENV}}"
       - task: setup-git-hooks
 
+  ci:setup:
+    desc: "Install engine dependencies for CI (no git hooks)"
+    cmds:
+      - task: install-uv
+        vars:
+          CLI_ARGS: "-y"
+      - |
+        echo "[ci-setup] Syncing engine venv from lockfile..."
+        UV_CACHE_DIR="{{.UV_CACHE_DIR}}" UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
+        echo "[ci-setup] Engine venv ready at {{.VENV}}"
+
   setup-git-hooks:
     desc: Install engine git hooks
     cmds:
@@ -142,17 +153,24 @@ tasks:
           --junitxml=test-results/unit.xml {{.CLI_ARGS}}
 
   test:integration:
-    desc: Run engine integration tests
+    desc: "Run engine integration tests (secrets via Infisical; pass pytest target after --)"
     deps: [_require-python]
     cmds:
       - mkdir -p test-results .cache/pytest-integration
       - |
-        {{.PYTHON_BIN}} -m pytest tests/integration \
-          -o "cache_dir=.cache/pytest-integration" \
-          --junitxml=test-results/integration.xml {{.CLI_ARGS}}
+        CLI_ARGS="{{.CLI_ARGS}}"
+        if [ -z "$CLI_ARGS" ]; then
+          TARGETS="tests/integration"
+        else
+          TARGETS="$CLI_ARGS"
+        fi
+        infisical run --env=dev --path=/engine-tests -- \
+          {{.PYTHON_BIN}} -m pytest $TARGETS \
+            -o "cache_dir=.cache/pytest-integration" \
+            --junitxml=test-results/integration.xml
 
   test:e2e:
-    desc: "Run engine E2E tests (requires OPENAI_API_KEY; pass pytest target after --)"
+    desc: "Run engine E2E tests (secrets via Infisical; pass pytest target after --)"
     deps: [_require-python]
     cmds:
       - mkdir -p test-results/e2e .cache/pytest-e2e
@@ -163,14 +181,15 @@ tasks:
         else
           TARGETS="$CLI_ARGS"
         fi
-        {{.PYTHON_BIN}} -m pytest $TARGETS \
-          -o "cache_dir=.cache/pytest-e2e" \
-          --junitxml=test-results/e2e/junit.xml \
-          --durations=10 \
-          -vv -s -rA
+        infisical run --env=dev --path=/engine-tests -- \
+          {{.PYTHON_BIN}} -m pytest $TARGETS \
+            -o "cache_dir=.cache/pytest-e2e" \
+            --junitxml=test-results/e2e/junit.xml \
+            --durations=10 \
+            -vv -s -rA
 
   check:
-    desc: Run pinned-version, lint, format, type, unit, and integration checks
+    desc: Run pinned-version, lint, format, type, and unit checks
     cmds:
       - task: pinned-versions
       - task: lint
