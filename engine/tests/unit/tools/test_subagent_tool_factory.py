@@ -143,7 +143,7 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
         parent_execution=_fake_parent(),
     )
 
-    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
     result = SubagentToolResult.model_validate_json(result_json)
     assert "SDK exploded" in result.answer
 
@@ -211,10 +211,61 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
         semaphore=sem,
         parent_execution=_fake_parent(),
     )
-    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
     result = SubagentToolResult.model_validate_json(result_json)
     assert result.turns_used == 1
     assert result.tool_calls_made == 1
+
+
+@pytest.mark.asyncio
+async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
+    """The subagent's first user message must be ``params["input"]``, not the JSON wrapper."""
+    cfg = EngineConfig(
+        root_agent=AgentConfig(
+            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
+        subagent=AgentConfig(
+            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
+        ),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    captured_inputs: list[list[dict]] = []
+
+    class _EmptyStream:
+        async def stream_events(self):
+            return
+            yield  # pragma: no cover - makes this an async generator
+
+        async def wait_for_final_output(self):
+            return self
+
+    class _CapturingRunner:
+        @staticmethod
+        def run_streamed(*, starting_agent, input, context, max_turns):
+            captured_inputs.append(list(input))
+            return _EmptyStream()
+
+    run_state.runner = _CapturingRunner
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(
+        run_state=run_state,
+        child_depth=1,
+        semaphore=sem,
+        parent_execution=_fake_parent(),
+    )
+
+    await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "what is the failure rate?"}')
+
+    assert len(captured_inputs) == 1
+    user_messages = [m for m in captured_inputs[0] if m.get("role") == "user"]
+    assert len(user_messages) == 1
+    assert user_messages[0]["content"] == "what is the failure rate?"
 
 
 @pytest.mark.asyncio
@@ -266,6 +317,6 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         semaphore=sem,
         parent_execution=_fake_parent(),
     )
-    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
     result = SubagentToolResult.model_validate_json(result_json)
     assert result.answer == "child says 42"
