@@ -94,9 +94,13 @@ class FakeRunner:
         starting_agent: Any,
         input: Any,
         context: Any = None,
+        **kwargs: Any,
     ) -> Any:
+        # Record every kwarg the engine forwards. Probes inspect
+        # `runner.calls[i]` to verify the engine passed what it should
+        # have (e.g. max_turns from AgentConfig).
         self.calls.append(
-            {"starting_agent": starting_agent, "input": input, "context": context}
+            {"starting_agent": starting_agent, "input": input, "context": context, **kwargs}
         )
         if not self._programs:
             raise RuntimeError(

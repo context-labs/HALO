@@ -143,7 +143,10 @@ def _build_subagent_as_tool(
 
             async def _run_streamed(*, agent, input, context):
                 return run_state.runner.run_streamed(
-                    starting_agent=agent, input=input, context=context
+                    starting_agent=agent,
+                    input=input,
+                    context=context,
+                    max_turns=engine_config.subagent.maximum_turns,
                 )
 
             runner = OpenAiAgentRunner(
