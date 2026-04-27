@@ -13,15 +13,18 @@ from engine.engine_config import EngineConfig
 CompactorFactory = Callable[[AgentExecution], Compactor]
 
 
-def build_openai_compactor_factory(
+def build_compactor_factory(
     engine_config: EngineConfig,
     client: AsyncOpenAI | None = None,
 ) -> CompactorFactory:
-    """Returns a factory that produces a Compactor bound to an OpenAI client.
+    """Returns a factory that produces a Compactor bound to an OpenAI-compatible client.
 
     The factory takes an AgentExecution (currently unused but reserved for
     future per-agent compaction policies) and returns a callable that the
-    AgentContext can invoke per item it wants compacted.
+    AgentContext can invoke per item it wants compacted. When ``client`` is
+    not supplied, it is constructed from ``engine_config.model_provider`` so
+    compaction routes through whichever OpenAI-compatible endpoint the run is
+    configured for.
     """
     openai_client = client
 
@@ -29,7 +32,10 @@ def build_openai_compactor_factory(
         async def compact(item: AgentContextItem) -> str:
             nonlocal openai_client
             if openai_client is None:
-                openai_client = AsyncOpenAI()
+                openai_client = AsyncOpenAI(
+                    base_url=engine_config.model_provider.base_url,
+                    api_key=engine_config.model_provider.api_key,
+                )
 
             user_text = _item_as_prompt(item)
             response = await openai_client.chat.completions.create(

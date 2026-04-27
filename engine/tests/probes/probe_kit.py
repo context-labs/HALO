@@ -218,8 +218,7 @@ def make_default_config(
 ) -> EngineConfig:
     """Sensible defaults for an EngineConfig used in probes.
     The model name is irrelevant when ``runner=FakeRunner`` is injected
-    (no real LLM call happens), so any string from ``AvailableModelName``
-    works."""
+    (no real LLM call happens), so any string works."""
     agent = AgentConfig(
         name="root",
         instructions="Answer briefly.",
