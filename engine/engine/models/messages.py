@@ -6,9 +6,12 @@ from openai.types.chat import ChatCompletionContentPartParam
 from pydantic import BaseModel, ConfigDict
 
 MessageContent: TypeAlias = str | list[ChatCompletionContentPartParam] | None
+"""OpenAI-compatible message content: plain text, structured parts, or absent."""
 
 
 class AgentToolFunction(BaseModel):
+    """The ``function`` block of an OpenAI tool call: tool name plus serialized JSON arguments."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -16,6 +19,8 @@ class AgentToolFunction(BaseModel):
 
 
 class AgentToolCall(BaseModel):
+    """One tool call emitted by the assistant, in OpenAI's ``tool_calls`` array shape."""
+
     model_config = ConfigDict(extra="forbid")
 
     id: str
@@ -24,6 +29,13 @@ class AgentToolCall(BaseModel):
 
 
 class AgentMessage(BaseModel):
+    """OpenAI/HF-compatible chat message; the on-the-wire shape sent to the model.
+
+    The Engine deliberately uses the standard OpenAI fields without extras so message
+    arrays remain valid for any compatible provider. Engine-specific metadata lives on
+    ``AgentContextItem`` and ``AgentOutputItem`` instead of polluting this shape.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     role: Literal["system", "user", "assistant", "tool"]

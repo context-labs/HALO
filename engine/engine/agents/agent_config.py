@@ -6,6 +6,8 @@ from engine.model_config import ModelConfig
 
 
 class AgentConfig(BaseModel):
+    """Identity, system prompt, model binding, and turn cap for one Engine agent (root or subagent)."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str

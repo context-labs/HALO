@@ -37,6 +37,12 @@ def build_root_sdk_agent(
     run_state: EngineRunState,
     agent_execution: AgentExecution,
 ) -> Agent[EngineRunState]:
+    """Construct the root SDK Agent wired with all leaf tools plus a depth-aware ``call_subagent``.
+
+    Subagent spawning is gated by a single shared ``asyncio.Semaphore`` sized to
+    ``maximum_parallel_subagents`` — every subagent invocation across the run
+    contends on the same semaphore.
+    """
     semaphore = asyncio.Semaphore(engine_config.maximum_parallel_subagents)
     tools = _child_tools_for_depth(
         depth=0,
@@ -60,6 +66,12 @@ def _child_tools_for_depth(
     semaphore: asyncio.Semaphore,
     parent_execution: AgentExecution,
 ) -> list[FunctionTool]:
+    """Return the tool list available to an agent at ``depth``.
+
+    Always includes the leaf trace/synthesis/run_code/get_context tools. A
+    ``call_subagent`` tool is appended only when ``depth < maximum_depth``, which
+    is how depth enforcement is wired structurally rather than via runtime checks.
+    """
     engine_config = run_state.config
 
     def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
@@ -102,6 +114,13 @@ def _build_subagent_as_tool(
     semaphore: asyncio.Semaphore,
     parent_execution: AgentExecution,
 ) -> FunctionTool:
+    """Wrap a fresh subagent as an SDK FunctionTool with depth gating, bus streaming, and a typed result.
+
+    Uses ``Agent.as_tool`` for the schema, then overrides ``on_invoke_tool`` so each
+    invocation builds its own child Agent + AgentContext + AgentExecution and streams
+    child events through the shared bus. Returns a JSON-serialized
+    ``SubagentToolResult`` to the parent on success or failure.
+    """
     engine_config = run_state.config
     subagent_system_prompt = render_subagent_system_prompt(
         instructions=engine_config.subagent.instructions,
@@ -133,6 +152,7 @@ def _build_subagent_as_tool(
     # ``ToolContext``. With ``RunContextWrapper`` the SDK forks down to a bare
     # wrapper and ``tool_call_id`` is lost.
     async def guarded_invoke(ctx: SdkToolContext[Any], raw_arguments: str) -> str:
+        """SDK-side tool entrypoint for ``call_subagent``: gate, semaphore-acquire, run, return result."""
         if child_depth > engine_config.maximum_depth:
             raise EngineMaxDepthExceededError(
                 f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
@@ -232,6 +252,7 @@ def _extract_final_answer(context: AgentContext) -> str:
 
 
 def _failure_result(execution: AgentExecution, message: str) -> str:
+    """Build the JSON SubagentToolResult returned to the parent when a subagent fails recoverably."""
     return SubagentToolResult(
         child_agent_id=execution.agent_id,
         answer=message,
@@ -246,6 +267,7 @@ def _wrap_with_semaphore(
     fn: Callable[..., Awaitable[Any]],
     semaphore: asyncio.Semaphore,
 ) -> Callable[..., Awaitable[Any]]:
+    """Decorator that gates an awaitable behind ``semaphore`` (utility, not used on the hot path)."""
     async def wrapped(*args, **kwargs):
         async with semaphore:
             return await fn(*args, **kwargs)

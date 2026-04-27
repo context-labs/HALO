@@ -10,6 +10,8 @@ from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRo
 
 @dataclass
 class _RowAccumulator:
+    """Mutable per-trace_id rollup used during a single index-building pass; converts to TraceIndexRow at the end."""
+
     trace_id: str
     byte_offsets: list[int] = field(default_factory=list)
     byte_lengths: list[int] = field(default_factory=list)
@@ -25,6 +27,7 @@ class _RowAccumulator:
     project_id: str | None = None
 
     def absorb(self, *, span: SpanRecord, byte_offset: int, byte_length: int) -> None:
+        """Fold one span into the accumulator: record its byte slice and update rollup fields."""
         self.byte_offsets.append(byte_offset)
         self.byte_lengths.append(byte_length)
         self.span_count += 1
@@ -61,6 +64,7 @@ class _RowAccumulator:
             self.project_id = proj
 
     def finalize(self) -> TraceIndexRow:
+        """Snapshot the accumulated state into the immutable TraceIndexRow that gets written to the sidecar."""
         return TraceIndexRow(
             trace_id=self.trace_id,
             byte_offsets=self.byte_offsets,
@@ -79,12 +83,25 @@ class _RowAccumulator:
 
 
 class TraceIndexBuilder:
+    """Build-once index creator for the flat OTel JSONL trace input.
+
+    Index is sidecar-style next to the trace file. ``ensure_index_exists`` reuses
+    an existing index as-is (no freshness check by design) and only fails fast on
+    an unsupported schema version. ``build_index`` is the actual scan + write path.
+    """
+
     @classmethod
     async def ensure_index_exists(
         cls,
         trace_path: Path,
         config: TraceIndexConfig,
     ) -> Path:
+        """Return a usable index path, building one only if missing.
+
+        If both the index and meta sidecars exist, the meta's schema_version is
+        validated against ``config.schema_version`` — mismatches fail fast rather
+        than silently rebuilding.
+        """
         index_path = config.index_path or Path(str(trace_path) + ".engine-index.jsonl")
         meta_path = cls._meta_path_for(index_path)
 
@@ -107,6 +124,7 @@ class TraceIndexBuilder:
 
     @staticmethod
     def _meta_path_for(index_path: Path) -> Path:
+        """Convention: ``<trace>.engine-index.jsonl`` ↔ ``<trace>.engine-index.meta.json``."""
         name = index_path.name
         if name.endswith(".engine-index.jsonl"):
             return index_path.with_name(name[: -len(".jsonl")] + ".meta.json")
@@ -120,6 +138,12 @@ class TraceIndexBuilder:
         meta_path: Path,
         schema_version: int,
     ) -> None:
+        """Single-pass binary scan over the JSONL, grouping by trace_id and writing the sidecars atomically.
+
+        Reads in binary mode so byte_offset/byte_length are exact, accumulates per-trace
+        rollups, then writes ``<file>.tmp`` then renames into place so a partially-written
+        index is never observable.
+        """
         if schema_version != 1:
             raise ValueError(f"unsupported trace index schema_version={schema_version}")
 

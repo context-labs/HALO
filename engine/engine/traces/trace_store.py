@@ -17,7 +17,15 @@ if TYPE_CHECKING:
 
 
 class TraceStore:
+    """Pure read/query/render API over a built index plus the canonical JSONL.
+
+    Deliberately depends only on stdlib + Pydantic + ``engine.traces.models`` so the
+    sandbox can import and instantiate it directly inside user code, with no agent
+    SDK / async runtime / tool dependencies in the import graph.
+    """
+
     def __init__(self, trace_path: Path, index_path: Path, rows: list[TraceIndexRow]) -> None:
+        """Hold paths plus the in-memory index rows; prefer ``load`` for constructing from disk."""
         self._trace_path = trace_path
         self._index_path = index_path
         self._rows = rows
@@ -25,23 +33,28 @@ class TraceStore:
 
     @classmethod
     def load(cls, trace_path: Path, index_path: Path) -> "TraceStore":
+        """Read the sidecar index file line-by-line and construct a TraceStore."""
         raw = index_path.read_text().splitlines()
         rows = [TraceIndexRow.model_validate_json(line) for line in raw if line]
         return cls(trace_path=trace_path, index_path=index_path, rows=rows)
 
     @property
     def trace_count(self) -> int:
+        """Total trace count in the loaded index (no filtering)."""
         return len(self._rows)
 
     @property
     def trace_path(self) -> Path:
+        """The canonical JSONL path this store reads spans from."""
         return self._trace_path
 
     @property
     def index_path(self) -> Path:
+        """The sidecar index path this store was loaded from."""
         return self._index_path
 
     def view_trace(self, trace_id: str) -> "TraceView":
+        """Read all spans of one trace by seeking to each indexed byte offset and parsing as SpanRecord."""
         from engine.traces.models.canonical_span import SpanRecord
         from engine.traces.models.trace_query_models import TraceView
 
@@ -63,6 +76,7 @@ class TraceStore:
         limit: int = 50,
         offset: int = 0,
     ) -> "TraceQueryResult":
+        """Filter rows in memory, slice with ``offset:offset+limit``, and project each into a TraceSummary."""
         from engine.traces.models.trace_query_models import TraceQueryResult, TraceSummary
 
         filtered = [row for row in self._rows if _matches_filters(row, filters)]
@@ -84,12 +98,14 @@ class TraceStore:
         return TraceQueryResult(traces=summaries, total=len(filtered))
 
     def count_traces(self, filters: "TraceFilters") -> "TraceCountResult":
+        """Count matching rows without materializing summaries — cheaper than ``query_traces``."""
         from engine.traces.models.trace_query_models import TraceCountResult
 
         total = sum(1 for row in self._rows if _matches_filters(row, filters))
         return TraceCountResult(total=total)
 
     def get_overview(self, filters: "TraceFilters") -> "DatasetOverview":
+        """Aggregate the filtered subset into a single DatasetOverview rollup row."""
         from engine.traces.models.trace_query_models import DatasetOverview
 
         rows = [r for r in self._rows if _matches_filters(r, filters)]
@@ -122,6 +138,7 @@ class TraceStore:
         )
 
     def search_trace(self, trace_id: str, pattern: str) -> "TraceSearchResult":
+        """Substring search on raw JSON span text within one trace; returns matching span lines verbatim."""
         from engine.traces.models.trace_query_models import TraceSearchResult
 
         if trace_id not in self._rows_by_id:
@@ -138,6 +155,7 @@ class TraceStore:
         return TraceSearchResult(trace_id=trace_id, match_count=len(matches), matches=matches)
 
     def render_trace(self, trace_id: str, budget: int) -> str:
+        """Render a trace as plain text suitable for prompt/tool consumption, truncated to ``budget`` bytes."""
         view = self.view_trace(trace_id)
         lines: list[str] = [f"trace_id: {trace_id}", f"spans: {len(view.spans)}"]
         for s in view.spans:
@@ -161,6 +179,7 @@ class TraceStore:
 
 
 def _matches_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
+    """ANDed predicate: row passes only if every set filter matches."""
     if filters.has_errors is not None and row.has_errors != filters.has_errors:
         return False
     if filters.model_names is not None and not any(m in row.model_names for m in filters.model_names):

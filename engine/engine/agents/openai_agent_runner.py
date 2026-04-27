@@ -14,6 +14,7 @@ from engine.errors import EngineAgentExhaustedError
 
 
 def _is_retriable_llm_error(exc: BaseException) -> bool:
+    """Classify an exception as a transient LLM failure worth retrying."""
     if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
         return True
     if isinstance(exc, APIStatusError):
@@ -28,12 +29,24 @@ CompactorFactory = Callable[[AgentExecution], Compactor]
 
 
 class OpenAiAgentRunner:
+    """Drives one OpenAI Agents SDK ``Agent`` and bridges its event stream into Engine state.
+
+    Per call to ``run``, retries the SDK call on transient LLM errors up to a circuit
+    breaker, normalizes streamed SDK events through ``OpenAiEventMapper``, appends
+    context items, emits output items to the bus, and runs compaction when the turn
+    completes. Used by both the root agent (in ``main.py``) and subagents (in
+    ``subagent_tool_factory``).
+    """
+
     def __init__(
         self,
         run_streamed: RunStreamedCallable,
         compactor_factory: CompactorFactory,
         event_mapper: OpenAiEventMapper | None = None,
     ) -> None:
+        """``run_streamed`` is injected so root and subagent paths can supply their own
+        max_turns and starting agent. ``compactor_factory`` produces a per-execution
+        compactor bound to whatever model EngineConfig pins for compaction."""
         self._run_streamed = run_streamed
         self._compactor_factory = compactor_factory
         self._mapper = event_mapper or OpenAiEventMapper()
@@ -48,6 +61,11 @@ class OpenAiAgentRunner:
         is_root: bool,
         run_context: Any | None = None,
     ) -> None:
+        """Execute one agent end-to-end: SDK stream → context items → bus → compaction.
+
+        Raises ``EngineAgentExhaustedError`` when consecutive transient LLM failures
+        exceed ``MAX_CONSECUTIVE_LLM_FAILURES``. Non-retriable exceptions propagate.
+        """
         messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
         last_exc: BaseException | None = None
 

@@ -12,12 +12,25 @@ from engine.models.messages import AgentMessage, AgentToolCall, AgentToolFunctio
 
 @dataclass
 class MappedEvent:
+    """One normalized SDK event, split by what the runner should do with each piece.
+
+    A single raw event can produce up to three things: a context item to append, an
+    output item to emit on the bus, and/or a streaming text delta. Any may be None.
+    """
+
     context_item: AgentContextItem | None = None
     output_item: AgentOutputItem | None = None
     delta: AgentTextDelta | None = None
 
 
 class OpenAiEventMapper:
+    """Normalizes OpenAI Agents SDK stream events into Engine context/output/delta items.
+
+    Owns the boundary between the SDK's internal event shapes and the Engine's typed
+    AgentContextItem / AgentOutputItem / AgentTextDelta. Detects the ``<final/>``
+    sentinel on root-agent assistant text and marks the corresponding output item.
+    """
+
     def to_mapped_event(
         self,
         raw_event: Any,
@@ -25,6 +38,7 @@ class OpenAiEventMapper:
         execution: AgentExecution,
         is_root: bool,
     ) -> MappedEvent:
+        """Dispatch an SDK event to the right sub-mapper by ``type``; unknown shapes are dropped."""
         kind = getattr(raw_event, "type", None)
 
         if kind == "raw_response_event":

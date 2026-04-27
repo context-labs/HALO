@@ -16,6 +16,13 @@ from engine.sandbox.sandbox_results import run_process_capped
 
 
 class SandboxRunner:
+    """Top-level sandbox entrypoint: picks the platform backend and orchestrates one run.
+
+    Per call to ``run_python``: creates a temp work dir, renders the bootstrap script
+    that preloads TraceStore, composes the policy, hands argv to bubblewrap (Linux)
+    or sandbox-exec (macOS), and captures capped output via ``run_process_capped``.
+    """
+
     def __init__(self, sandbox_venv: Path) -> None:
         self._sandbox_venv = sandbox_venv
 
@@ -27,6 +34,7 @@ class SandboxRunner:
         index_path: Path,
         config: SandboxConfig,
     ) -> CodeExecutionResult:
+        """Run user-supplied Python in the sandbox; returns a typed result regardless of pass/fail/timeout."""
         system = platform.system()
 
         with tempfile.TemporaryDirectory(prefix="halo-sbx-") as tmp:

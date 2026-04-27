@@ -9,6 +9,12 @@ from engine.traces.models.trace_index_config import TraceIndexConfig
 
 
 class EngineConfig(BaseModel):
+    """Top-level configuration for one Engine run.
+
+    Composes per-domain configs (agents, model bindings, trace index, sandbox) plus
+    the compaction thresholds and depth/parallelism caps that bound a run.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     root_agent: AgentConfig
