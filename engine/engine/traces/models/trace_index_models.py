@@ -29,9 +29,18 @@ class TraceIndexRow(BaseModel):
 
 
 class TraceIndexMeta(BaseModel):
-    """Sidecar meta file: schema version (validated on load) and total trace count for sanity checks."""
+    """Sidecar meta file: schema version, total trace count, and a stat fingerprint of the source JSONL.
+
+    ``source_size`` and ``source_mtime_ns`` are restatted on every
+    ``ensure_index_exists`` call and compared against the stored values to
+    detect a stale index when the underlying trace JSONL has changed. This is
+    intentionally not a content hash — appends bump size and any write bumps
+    mtime, which is sufficient for a local, append-mostly trace log.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int = Field(ge=1)
     trace_count: int = Field(ge=0)
+    source_size: int = Field(ge=0)
+    source_mtime_ns: int = Field(ge=0)
