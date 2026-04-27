@@ -25,6 +25,13 @@ def test_row_roundtrip() -> None:
 
 
 def test_meta_defaults() -> None:
-    meta = TraceIndexMeta(schema_version=1, trace_count=3)
+    meta = TraceIndexMeta(
+        schema_version=1,
+        trace_count=3,
+        source_size=1024,
+        source_mtime_ns=1_700_000_000_000_000_000,
+    )
     assert meta.schema_version == 1
     assert meta.trace_count == 3
+    assert meta.source_size == 1024
+    assert meta.source_mtime_ns == 1_700_000_000_000_000_000
