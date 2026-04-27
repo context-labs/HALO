@@ -153,13 +153,19 @@ tasks:
           --junitxml=test-results/unit.xml {{.CLI_ARGS}}
 
   test:integration:
-    desc: "Run engine integration tests (secrets via Infisical)"
+    desc: "Run engine integration tests (secrets via Infisical; pass pytest target after --)"
     deps: [_require-python]
     cmds:
       - mkdir -p test-results .cache/pytest-integration
       - |
+        CLI_ARGS="{{.CLI_ARGS}}"
+        if [ -z "$CLI_ARGS" ]; then
+          TARGETS="tests/integration"
+        else
+          TARGETS="$CLI_ARGS"
+        fi
         infisical run --env=dev --path=/engine-tests -- \
-          {{.PYTHON_BIN}} -m pytest tests/integration \
+          {{.PYTHON_BIN}} -m pytest $TARGETS \
             -o "cache_dir=.cache/pytest-integration" \
             --junitxml=test-results/integration.xml
 
