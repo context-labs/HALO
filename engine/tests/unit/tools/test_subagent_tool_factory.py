@@ -104,6 +104,30 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
+    """Defense-in-depth: structural guard in ``_child_tools_for_depth`` keeps this
+    unreachable in normal flow, but the runtime check must still fire if a future
+    refactor bypasses the structural enforcement. Constructed directly to exercise it."""
+    from engine.errors import EngineMaxDepthExceededError
+
+    cfg = _engine_config(max_depth=2)
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+    run_state.runner = MagicMock()
+
+    sem = asyncio.Semaphore(1)
+    tool = _build_subagent_as_tool(
+        run_state=run_state,
+        child_depth=cfg.maximum_depth + 1,
+        semaphore=sem,
+        parent_execution=_fake_parent(),
+    )
+
+    with pytest.raises(EngineMaxDepthExceededError):
+        await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
+
+
+@pytest.mark.asyncio
 async def test_get_context_item_resolves_through_wired_agent_context() -> None:
     """``make_ctx`` must populate ``ToolContext.agent_context`` so ``get_context_item``
     can resolve item ids against the calling agent's stored items."""
