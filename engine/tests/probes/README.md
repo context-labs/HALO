@@ -21,8 +21,14 @@ go wrong, design probes that match what the code actually does. The
 "Areas worth probing" list below is a seed for ideas, not a checklist —
 the engine's surface is much larger than that list. Your job is to
 *think*, then drive the engine with `probe_kit` primitives and report
-honestly. The probes themselves are likely to be deleted after this run;
-the report is the durable artifact.
+honestly.
+
+**Probe lifecycle (important):** probes that PASS get deleted by you when
+you're done — the engine is correct in that area, the probe served its
+purpose, the directory stays navigable. Probes that FAIL stay in place —
+they are the canonical bug repro and the user evaluates / deletes them
+once the bug is fixed. The durable artifact is your report; the
+durable code is what survives the lifecycle.
 
 ## When to use
 
@@ -91,17 +97,24 @@ You **MUST**:
 6. **Compose, don't copy.** Each new probe goes in its own
    `probe_<topic>.py` script under this directory. Do not edit any
    `example_*.py` file — those are committed exemplars.
-7. **Probes are ephemeral, the report is the deliverable.** Your
-   `probe_*.py` files will likely be deleted after this run. The user
-   keeps a probe as an `example_*` only when it is exceptionally well
-   written or surfaced a particularly subtle bug. Optimize your effort
-   accordingly — the report you produce is what matters.
+7. **Manage probe lifecycle before reporting.** When you finish, do this
+   sweep over each probe you wrote:
+   - **All checks PASS → delete the file.** The engine is correct; the
+     probe is no longer needed. Cleanup keeps the directory navigable.
+   - **Any check FAILED → leave the file in place.** It is the canonical
+     reproduction of the bug. The user decides what to do with it once
+     the bug is fixed.
+   - **Either case — does the probe demonstrate a NOVEL TESTING TECHNIQUE
+     not present in any `example_*.py`?** If yes, list it under
+     "Suggested example promotions" in your report. The bar is the
+     *technique*, not the code surface — see the section below for what
+     counts as novel.
 
 You **MUST NOT**:
 
 - Skip running scripts you wrote ("looks right" is not evidence).
-- Wrap engine calls in `try/except` to "make tests pass". A `FAIL` is the
-  correct outcome when behavior is wrong.
+- Use `try/except` to *hide* an unexpected failure. (Using it to *assert*
+  an expected raise is fine — prefer `check_raises` from `probe_kit`.)
 - Pull in `unittest.mock`, `pytest-mock`, or any other mocking library.
 - Invent new helpers when the existing primitives compose. If you find
   yourself wanting `make_subagent_response`, you probably want
@@ -114,14 +127,23 @@ You **MUST NOT**:
 
 1. **Research first.** This step is the most important and the one most
    likely to be skipped. Read at least:
-   - `engine/main.py` (the public entrypoint and `_drive` lifecycle)
-   - `engine/agents/openai_agent_runner.py` (the loop, retries, circuit
-     breaker)
-   - `engine/agents/openai_event_mapper.py` (what each SDK event becomes)
-   - `engine/agents/agent_context.py` (compaction logic)
-   - `engine/tools/subagent_tool_factory.py` (depth + subagent
-     construction)
-   - any module relevant to the area you're considering probing.
+   - `engine/main.py` — the public entrypoint and `_drive` lifecycle.
+   - `engine/agents/openai_agent_runner.py` — the loop, retries, circuit
+     breaker, where compaction triggers.
+   - `engine/agents/openai_event_mapper.py` — what each SDK event becomes
+     (context item, output item, delta).
+   - `engine/agents/agent_context.py` — compaction logic and the rendering
+     templates for compacted items.
+   - `engine/agents/agent_context_items.py` — the shape of a stored item.
+   - `engine/agents/engine_output_bus.py` — sequencing and stream lifecycle.
+   - `engine/agents/runner_protocol.py` — the seam itself; small but
+     load-bearing.
+   - `engine/tools/subagent_tool_factory.py` — depth + subagent
+     construction; where `_run_streamed` closures live.
+   - `engine/tools/tool_protocol.py` — `ToolContext` shape and the
+     `EngineTool` adapter.
+   - `engine/traces/trace_store.py` — what trace tools query.
+   - any other module relevant to the area you're considering probing.
 
    Then read every `example_*.py` here — they are committed exemplars
    that show how to structure probes, how to compose `probe_kit`
@@ -157,51 +179,22 @@ You **MUST NOT**:
 
 ## Areas worth probing
 
-Each line points at one pathway. The agent picks freely; this list is not
-exhaustive.
+A seed list. The engine has a much larger surface; pick what your
+research surfaces, not what's listed here.
 
-- **Streaming contract.** Sequencing of `AgentOutputItem` and
-  `AgentTextDelta`; deltas filtered out by `run_engine_async`; deadlock
-  when the driver task raises before closing the bus.
-- **Final sentinel.** `<final/>` stripped from root assistant text and
-  marked `final=True`; subagent's `<final/>` does **not** flag final;
-  multiple sentinel-bearing messages.
-- **Circuit breaker.** Retriable error → retry → success; ten consecutive
-  retriable errors → `EngineAgentExhaustedError`; non-retriable error
-  propagates immediately.
-- **Maximum turns.** `AgentConfig.maximum_turns` should be forwarded as
-  `max_turns` to `Runner.run_streamed`. Probe by inspecting
-  `runner.calls[i]` — `FakeRunner` records every kwarg the engine passes.
-  If `max_turns` is missing or wrong, that's a bug; report it with a
-  proposed fix.
-- **Compaction.** Per-turn trigger; eligibility split between text vs
-  tool items; system message never compacted; rendered output uses the
-  compaction summary.
-- **Depth enforcement.** `maximum_depth=0` → root has no `call_subagent`
-  tool; `maximum_depth=1` → depth-1 subagent has no `call_subagent`.
-  Use `await make_run_state(cfg)` then call `_child_tools_for_depth(...)`
-  directly — no need for a full `run_with_fake`.
-- **Subagent lifecycle (unit-style only).** Cannot be probed end-to-end
-  through `run_with_fake` — see "What FakeRunner can and cannot do" above.
-  To probe: build a state via `make_run_state`, install a `FakeRunner` for
-  the child, call `_build_subagent_as_tool(...).on_invoke_tool(None, "{}")`
-  directly. Probes: failure → `SubagentToolResult(answer="Subagent failed:
-  ...")`; success → answer extracted from child's final assistant message.
-- **Tool dispatch (unit-style only).** Same FakeRunner constraint as
-  subagents. Construct a `ToolContext`, instantiate the tool class, call
-  its `.run(...)` directly. Probe each trace tool's behavior on real
-  `TraceStore` state (use `make_run_state`). Probe error paths too —
-  what happens when a tool's required field on `ToolContext` is missing,
-  what happens with unknown trace_ids, what happens with empty filters.
-- **AgentContext input handling.** No system message → engine prepends
-  rendered prompt; system message at front → passed through unchanged;
-  multi-message continuation preserves stable `item_id`s. Inspect via
-  `runner.calls[0]["input"]`.
-- **Sandbox / `run_code`.** Default venv path resolution from an installed
-  vs editable install; timeout / stdout-cap / stderr-cap; network and
-  filesystem-write denials. (These need `bwrap` available, and per the
-  constraint above, can only be probed by calling `RunCodeTool.run`
-  directly — `FakeRunner` won't dispatch the SDK tool.)
+- Streaming contract — sequencing, lifecycle, deadlock paths.
+- Final sentinel — root vs subagent, stripping, multi-message.
+- Circuit breaker / retry classification.
+- `AgentConfig.maximum_turns` forwarding.
+- Compaction — eligibility, system immunity, render templates.
+- Depth enforcement — tool-list construction.
+- Subagent lifecycle (unit-style only — see "What FakeRunner can and cannot do").
+- Tool dispatch (unit-style only).
+- `AgentContext.from_input_messages` behavior on varied inputs.
+- Sandbox / `run_code` (unit-style only; needs `bwrap`).
+- Anything else you spot while reading. Edge cases (empty inputs, `None`
+  content, unicode in deltas, two tool calls in one assistant message,
+  sentinel mid-text, zero-length streams) are usually undercovered.
 
 ## Common assertion patterns
 
@@ -221,7 +214,7 @@ exhaustive.
 
 ## How to write a probe
 
-Skeleton (mimic the example):
+Skeleton:
 
 ```python
 from __future__ import annotations
@@ -231,51 +224,56 @@ import sys
 from tests.probes.probe_kit import (
     FakeRunner, make_assistant_text, make_tool_call, make_tool_output,
     run_with_fake, isolated_trace_copy, make_run_state,
+    make_tool_context, make_checker, check_raises,
 )
 
-_FAILURES: list[str] = []
-
-def _check(condition: bool, description: str, observed: str = "") -> None:
-    if condition:
-        print(f"PASS: {description}")
-    else:
-        suffix = f" — observed: {observed}" if observed else ""
-        print(f"FAIL: {description}{suffix}")
-        _FAILURES.append(description)
+check, failures = make_checker()
 
 async def probe_<thing>() -> None:
     runner = FakeRunner(...)  # script the events
     result = await run_with_fake(runner)
-    _check(result.error is None, "<thing>: completed without error",
-           observed=f"error={type(result.error).__name__ if result.error else None}")
+    check(result.error is None, "<thing>: completed without error",
+          observed=f"error={type(result.error).__name__ if result.error else None}")
     # more checks...
 
 async def main() -> int:
     await probe_<thing>()
-    if _FAILURES:
-        print(f"\n{len(_FAILURES)} check(s) failed:")
-        for d in _FAILURES:
-            print(f"  - {d}")
-        return 1
-    print("\nAll checks passed.")
-    return 0
+    return failures.report_and_exit_code()
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
 ```
 
-Conventions for `_check` descriptions: `"<probe topic>: <observation>"`.
+`check, failures = make_checker()` removes the `_check` / `_FAILURES`
+boilerplate that older `example_*.py` files duplicate inline. Older
+examples still work — both styles are fine — but new probes should use
+the helper.
+
+Conventions for check descriptions: `"<probe topic>: <observation>"`.
 Keep them short and grep-able. The `observed` argument is for the *fact*
 that contradicted your expectation — type names, counts, sequence numbers.
 
-For probes that need to inspect engine internals (tool list construction,
-direct tool/subagent calls), skip `run_with_fake` and use:
+For probes that inspect engine internals (tool list construction, direct
+tool/subagent calls), skip `run_with_fake` and use:
 
 ```python
 state = await make_run_state(make_default_config(maximum_depth=1))
 state.runner = FakeRunner(...)  # if needed
 # now call _child_tools_for_depth(...), or
 # _build_subagent_as_tool(...).on_invoke_tool(...), etc.
+
+# For tool probes that need a ToolContext:
+ctx = make_tool_context(state, agent_context=..., agent_execution=...)
+result = await SomeTool().run(ctx, args)
+```
+
+For probes that *expect* an exception (e.g. `KeyError` on unknown
+trace_id), use `check_raises` instead of writing the try/except yourself:
+
+```python
+exc = await check_raises(lambda: store.view_trace("nope"), KeyError)
+check(exc is not None, "view_trace: unknown id raises KeyError",
+      observed=f"got={type(exc).__name__ if exc else 'no raise'}")
 ```
 
 ## Reporting back
@@ -307,13 +305,46 @@ For **every FAIL**, one structured entry in this exact shape:
   function.
 - **Confidence:** high / medium / low. Be honest. "Low" is acceptable
   and useful — it tells the reader to verify before applying.
+- **Repro:** *(optional, only when the probe file is left behind)* the
+  one-line command to re-run the failing check, e.g.
+  `cd engine && uv run python -m tests.probes.probe_<topic>`. Skip this
+  field for ephemeral probes that you've deleted.
 ```
 
 For **PASS** and **SURPRISE** items, one-line bullets are fine. Group
 them under `### PASS notes` and `### Surprises` if there's anything worth
 calling out (e.g. behavior that passed but seems fragile).
 
-### Section 3 — Framework feedback (optional)
+### Section 3 — Suggested example promotions (optional)
+
+If any probe you wrote demonstrates a **novel testing technique** not
+present in any `example_*.py`, list it here so the user can decide
+whether to promote it. One bullet per probe, in this shape:
+
+```
+- `probe_<topic>.py` — novel pattern: <one-line description of the
+  technique>. Existing examples use <X / Y / Z patterns>; this one adds
+  <new pattern>. Recommend promotion / replacement of <name> / addition.
+```
+
+**What counts as novel** (non-exhaustive):
+- A new helper composition or `probe_kit` primitive usage
+- A different way of inspecting engine state
+- A different way of constructing FakeRunner programs
+- A unit-style approach not yet exemplified
+- A new way of handling expected vs unexpected exceptions
+
+**What does NOT count:**
+- "I probed area X which no example covers" — that's coverage, not
+  technique. Coverage is fine; we don't promote for coverage.
+- "I added more variations of an existing pattern" — variations are good
+  but not promotion-worthy.
+- "I wrote a passing probe" — passing probes are deleted, not promoted.
+
+If the probe surfaced a bug AND demonstrates a novel technique, it
+qualifies on both axes — note both.
+
+### Section 4 — Framework feedback (optional)
 
 Anything in `probe_kit` or this README that got in your way: missing
 helper, unclear instruction, a pathway you tried to probe but couldn't
@@ -390,3 +421,9 @@ unprobed.
   at `maximum_depth=0/1/2`, plus an end-to-end check via
   `runner.calls[0]["starting_agent"].tools`. Demonstrates `make_run_state`
   for direct internal inspection without `run_with_fake`.
+- `example_compaction.py` — `AgentContext.compact_old_items` against
+  varied histories: no-op under threshold, system never compacted,
+  text-vs-tool eligibility split, render-label correctness for plain
+  vs tool-call assistants. Demonstrates a `_RecordingCompactor` class
+  (a real callable that records calls — not a mock) and direct
+  `AgentContext` probing without `run_with_fake` at all.
