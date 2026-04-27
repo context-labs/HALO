@@ -11,6 +11,12 @@ from engine.sandbox.platform_commands import (
     render_macos_profile,
 )
 from engine.sandbox.sandbox_config import SandboxPolicy
+from engine.sandbox.sandbox_paths import (
+    SANDBOX_BOOTSTRAP_FILENAME,
+    SANDBOX_DEV_PATH,
+    SANDBOX_PROFILE_FILENAME,
+    SANDBOX_TMP_DIRNAME,
+)
 
 
 def _policy(tmp_path: Path) -> SandboxPolicy:
@@ -41,7 +47,7 @@ def _policy(tmp_path: Path) -> SandboxPolicy:
 
 def test_linux_command_exact_shape(tmp_path: Path) -> None:
     policy = _policy(tmp_path)
-    script = tmp_path / "work" / "bootstrap.py"
+    script = tmp_path / "work" / SANDBOX_BOOTSTRAP_FILENAME
     script.write_text("")
     bwrap = tmp_path / "bin" / "bwrap"
     bwrap.parent.mkdir()
@@ -66,7 +72,7 @@ def test_linux_command_exact_shape(tmp_path: Path) -> None:
         "--unshare-net",
         "--clearenv",
         "--dev",
-        "/dev",
+        str(SANDBOX_DEV_PATH),
         "--ro-bind",
         str(trace),
         str(trace),
@@ -99,7 +105,7 @@ def test_linux_command_exact_shape(tmp_path: Path) -> None:
         "1",
         "--setenv",
         "TMPDIR",
-        f"{work}/tmp",
+        str(work / SANDBOX_TMP_DIRNAME),
         "--chdir",
         str(work),
         "--",
@@ -140,9 +146,9 @@ def test_macos_profile_exact_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 def test_macos_command_exact_shape(tmp_path: Path) -> None:
     policy = _policy(tmp_path)
-    script = tmp_path / "work" / "bootstrap.py"
+    script = tmp_path / "work" / SANDBOX_BOOTSTRAP_FILENAME
     script.write_text("")
-    profile_path = tmp_path / "profile.sb"
+    profile_path = tmp_path / SANDBOX_PROFILE_FILENAME
     sandbox_exec = tmp_path / "bin" / "sandbox-exec"
     sandbox_exec.parent.mkdir()
     sandbox_exec.write_text("")
@@ -166,7 +172,7 @@ def test_macos_command_exact_shape(tmp_path: Path) -> None:
         "LANG=C.UTF-8",
         "PYTHONDONTWRITEBYTECODE=1",
         "PYTHONUNBUFFERED=1",
-        f"TMPDIR={work}/tmp",
+        f"TMPDIR={work / SANDBOX_TMP_DIRNAME}",
         str(policy.python_executable),
         str(script),
     ]

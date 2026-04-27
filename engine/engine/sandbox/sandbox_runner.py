@@ -12,6 +12,11 @@ from engine.sandbox.runtime_mounts import PythonRuntimeMounts
 from engine.sandbox.sandbox_availability import SandboxBackend, SandboxStatus
 from engine.sandbox.sandbox_bootstrap import render_bootstrap_script
 from engine.sandbox.sandbox_config import CodeExecutionResult, SandboxConfig
+from engine.sandbox.sandbox_paths import (
+    SANDBOX_BOOTSTRAP_FILENAME,
+    SANDBOX_PROFILE_FILENAME,
+    SANDBOX_TMP_DIRNAME,
+)
 from engine.sandbox.sandbox_policy import compose_policy
 from engine.sandbox.sandbox_results import run_process_capped
 
@@ -55,8 +60,8 @@ class SandboxRunner:
 
         with tempfile.TemporaryDirectory(prefix="halo-sbx-") as tmp:
             work_dir = Path(tmp)
-            (work_dir / "tmp").mkdir()
-            script = work_dir / "bootstrap.py"
+            (work_dir / SANDBOX_TMP_DIRNAME).mkdir()
+            script = work_dir / SANDBOX_BOOTSTRAP_FILENAME
 
             script.write_text(
                 render_bootstrap_script(
@@ -81,7 +86,7 @@ class SandboxRunner:
                     script_path=script,
                 )
             elif backend == SandboxBackend.MACOS_SANDBOX_EXEC:
-                profile_path = work_dir / "profile.sb"
+                profile_path = work_dir / SANDBOX_PROFILE_FILENAME
                 profile_path.write_text(render_macos_profile(policy=policy))
                 argv = build_macos_sandbox_exec_command(
                     sandbox_exec_executable=executable,

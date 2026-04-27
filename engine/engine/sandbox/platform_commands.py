@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from engine.sandbox.sandbox_config import SandboxPolicy
+from engine.sandbox.sandbox_paths import SANDBOX_DEV_PATH, SANDBOX_TMP_DIRNAME
 
 
 def build_linux_bubblewrap_command(
@@ -43,7 +44,7 @@ def build_linux_bubblewrap_command(
         "--unshare-net",
         "--clearenv",
         "--dev",
-        "/dev",
+        str(SANDBOX_DEV_PATH),
         "--ro-bind",
         str(trace_path),
         str(trace_path),
@@ -80,7 +81,7 @@ def build_linux_bubblewrap_command(
             "1",
             "--setenv",
             "TMPDIR",
-            f"{work_dir}/tmp",
+            str(work_dir / SANDBOX_TMP_DIRNAME),
             "--chdir",
             str(work_dir),
             "--",
@@ -177,7 +178,7 @@ def build_macos_sandbox_exec_command(
         "LANG=C.UTF-8",
         "PYTHONDONTWRITEBYTECODE=1",
         "PYTHONUNBUFFERED=1",
-        f"TMPDIR={work_dir}/tmp",
+        f"TMPDIR={work_dir / SANDBOX_TMP_DIRNAME}",
         str(policy.python_executable),
         str(script_path),
     ]
