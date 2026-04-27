@@ -89,21 +89,67 @@ def build_linux_bubblewrap_command(
 
 
 def render_macos_profile(*, policy: SandboxPolicy) -> str:
-    """Render a ``sandbox-exec`` Scheme profile that denies by default, allows reads/writes per policy, and blocks network."""
-    allows_read = "\n".join(
+    """Render a ``sandbox-exec`` Scheme profile for the run.
+
+    Security model on macOS:
+      - The default action is ``deny``, but ``file-read*`` is broadly allowed
+        because the macOS dynamic loader and CoreFoundation read from many
+        opaque locations (``/usr/lib``, ``/System``, ``/private/var/db``,
+        framework-specific paths) that are impractical to enumerate and are
+        already SIP-protected on the host. Narrowing reads here would mean
+        Python could not even start.
+      - ``file-write*`` is denied by default and re-allowed only on the
+        explicit ``writable_paths``. This is the actual filesystem boundary —
+        sandboxed code cannot mutate anything outside the workspace.
+      - Network is denied entirely.
+      - ``mach-lookup``/``ipc-posix-shm``/``sysctl-read``/``signal`` are
+        allowed because Python and CoreFoundation rely on them for normal
+        startup; without these, the interpreter aborts before reaching
+        user code.
+
+    Reads of ``$HOME`` (typical user-data location) are denied even though
+    ``file-read*`` is otherwise broad. The trace and index files are
+    re-allowed by literal path so they remain accessible regardless of where
+    they live.
+    """
+    home_dir = _macos_home_dir()
+    re_allows_read = "\n".join(
         f'(allow file-read* (subpath "{p}"))'
         if p.is_dir()
         else f'(allow file-read* (literal "{p}"))'
         for p in policy.readonly_paths
     )
     allows_write = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in policy.writable_paths)
+
+    home_clause = f'(deny file-read* (subpath "{home_dir}"))' if home_dir else ""
     return f"""(version 1)
 (deny default)
 (allow process*)
-(deny network*)
-{allows_read}
+(allow mach-lookup)
+(allow ipc-posix-shm)
+(allow sysctl-read)
+(allow signal)
+(allow file-read*)
+{home_clause}
+{re_allows_read}
 {allows_write}
+(deny network*)
 """
+
+
+def _macos_home_dir() -> str | None:
+    """Resolve the current user's home directory; ``None`` if unavailable.
+
+    Returns the absolute path so the rendered profile can deny reads under
+    ``$HOME`` while still re-allowing the explicit policy paths.
+    """
+    try:
+        from pathlib import Path
+
+        home = Path.home()
+    except (RuntimeError, KeyError):
+        return None
+    return str(home) if home else None
 
 
 def build_macos_sandbox_exec_command(

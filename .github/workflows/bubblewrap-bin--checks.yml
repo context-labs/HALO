@@ -26,7 +26,7 @@ permissions:
 jobs:
   unit-tests:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     defaults:
       run:
         working-directory: bubblewrap-bin

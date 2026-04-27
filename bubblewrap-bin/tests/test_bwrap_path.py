@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import bubblewrap_bin
 from bubblewrap_bin import BubblewrapNotBundledError, bwrap_path
 
 
@@ -13,21 +14,23 @@ def _packaged_binary() -> Path:
     return Path(__file__).resolve().parents[1] / "bubblewrap_bin" / "_bin" / "bwrap"
 
 
-def test_bwrap_path_raises_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_pkg_dir = tmp_path / "bubblewrap_bin"
-    fake_pkg_dir.mkdir()
-    fake_init = fake_pkg_dir / "__init__.py"
+def test_bwrap_path_raises_when_binary_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``bwrap_path`` must raise ``BubblewrapNotBundledError`` when no binary is packaged.
+
+    Simulated by pointing the module's ``__file__`` at a temp dir that has
+    no ``_bin/bwrap``. ``bwrap_path`` derives the candidate from ``__file__``
+    so the override is enough; no reload required.
+    """
+    fake_init = tmp_path / "bubblewrap_bin" / "__init__.py"
+    fake_init.parent.mkdir()
     fake_init.write_text("")
 
-    import importlib
-
-    import bubblewrap_bin
-
     monkeypatch.setattr(bubblewrap_bin, "__file__", str(fake_init))
-    importlib.reload(bubblewrap_bin)
 
     with pytest.raises(BubblewrapNotBundledError):
-        bubblewrap_bin.bwrap_path()
+        bwrap_path()
 
 
 @pytest.mark.skipif(

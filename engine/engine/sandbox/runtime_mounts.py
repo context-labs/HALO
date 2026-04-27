@@ -40,7 +40,12 @@ def discover_python_runtime_mounts(*, python_executable: Path | None = None) -> 
     The bootstrap script depends on both, so ensuring their libraries are in
     the manifest avoids resolution failures inside the sandbox.
     """
-    executable = (python_executable or Path(sys.executable)).resolve()
+    # Do not resolve symlinks here: a venv's ``bin/python`` is a symlink to
+    # the base interpreter, and Python uses the symlink path to detect the
+    # venv (via ``pyvenv.cfg``). Resolving would point us at the base
+    # interpreter and silently skip the venv's site-packages. The venv root
+    # and the resolved base install are both included via runtime_paths.
+    executable = python_executable or Path(sys.executable)
 
     if platform.system() == "Linux":
         _force_load_bootstrap_libraries()
