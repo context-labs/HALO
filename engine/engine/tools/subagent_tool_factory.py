@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agents import Agent, FunctionTool, RunContextWrapper
+from agents.tool_context import ToolContext as SdkToolContext
 from loguru import logger
 
 from engine.agents.agent_context import AgentContext
@@ -37,7 +38,12 @@ def build_root_sdk_agent(
     agent_execution: AgentExecution,
 ) -> Agent[EngineRunState]:
     semaphore = asyncio.Semaphore(engine_config.maximum_parallel_subagents)
-    tools = _child_tools_for_depth(depth=0, run_state=run_state, semaphore=semaphore)
+    tools = _child_tools_for_depth(
+        depth=0,
+        run_state=run_state,
+        semaphore=semaphore,
+        parent_execution=agent_execution,
+    )
 
     return Agent[EngineRunState](
         name=engine_config.root_agent.name,
@@ -51,7 +57,8 @@ def _child_tools_for_depth(
     *,
     depth: int,
     run_state: EngineRunState,
-    semaphore: asyncio.Semaphore | None,
+    semaphore: asyncio.Semaphore,
+    parent_execution: AgentExecution,
 ) -> list[FunctionTool]:
     engine_config = run_state.config
 
@@ -79,11 +86,11 @@ def _child_tools_for_depth(
     if depth >= engine_config.maximum_depth:
         return leaf_tools
 
-    assert semaphore is not None, "semaphore required when sub-depth subagent tool is built"
     subagent_tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=depth + 1,
         semaphore=semaphore,
+        parent_execution=parent_execution,
     )
     return leaf_tools + [subagent_tool]
 
@@ -93,6 +100,7 @@ def _build_subagent_as_tool(
     run_state: EngineRunState,
     child_depth: int,
     semaphore: asyncio.Semaphore,
+    parent_execution: AgentExecution,
 ) -> FunctionTool:
     engine_config = run_state.config
     subagent_system_prompt = render_subagent_system_prompt(
@@ -101,21 +109,30 @@ def _build_subagent_as_tool(
         maximum_depth=engine_config.maximum_depth,
         maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
     )
-    # The system prompt lives in the AgentContext (case 1 of from_input_messages-style
-    # construction below), so the SDK Agent itself uses an empty `instructions`.
-    child_agent = Agent[EngineRunState](
+    # ``as_tool()``'s schema is fixed (``AgentAsToolInput`` shape) and does not
+    # depend on the wrapped agent's tool list, so this stub Agent is enough to
+    # produce the FunctionTool wrapper. The real child Agent is rebuilt per
+    # invocation inside ``guarded_invoke`` so each invocation can pass its own
+    # ``child_execution`` as ``parent_execution`` to grandchildren.
+    stub_child_agent = Agent[EngineRunState](
         name=engine_config.subagent.name,
         instructions="",
         model=engine_config.subagent.model.name,
-        tools=_child_tools_for_depth(depth=child_depth, run_state=run_state, semaphore=semaphore),
+        tools=[],
     )
 
-    sdk_tool = child_agent.as_tool(
+    sdk_tool = stub_child_agent.as_tool(
         tool_name="call_subagent",
         tool_description="Delegate a focused question to a subagent. Returns the subagent's answer.",
     )
 
-    async def guarded_invoke(ctx: RunContextWrapper[Any], raw_arguments: str) -> str:
+    # Annotating ``ctx`` as ``SdkToolContext`` (rather than the SDK's narrower
+    # ``RunContextWrapper``) is load-bearing: the SDK's tool dispatcher inspects
+    # this annotation in ``agents/tool.py:_get_function_tool_invoke_context``
+    # and only passes the rich context (with ``tool_call_id``) when it sees
+    # ``ToolContext``. With ``RunContextWrapper`` the SDK forks down to a bare
+    # wrapper and ``tool_call_id`` is lost.
+    async def guarded_invoke(ctx: SdkToolContext[Any], raw_arguments: str) -> str:
         if child_depth > engine_config.maximum_depth:
             raise EngineMaxDepthExceededError(
                 f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
@@ -126,10 +143,22 @@ def _build_subagent_as_tool(
                 agent_id=f"sub-{uuid.uuid4().hex[:8]}",
                 agent_name=engine_config.subagent.name,
                 depth=child_depth,
-                parent_agent_id=None,
-                parent_tool_call_id=None,
+                parent_agent_id=parent_execution.agent_id,
+                parent_tool_call_id=ctx.tool_call_id,
             )
             run_state.register(child_execution)
+
+            child_agent = Agent[EngineRunState](
+                name=engine_config.subagent.name,
+                instructions="",
+                model=engine_config.subagent.model.name,
+                tools=_child_tools_for_depth(
+                    depth=child_depth,
+                    run_state=run_state,
+                    semaphore=semaphore,
+                    parent_execution=child_execution,
+                ),
+            )
 
             child_context = AgentContext(
                 items=[

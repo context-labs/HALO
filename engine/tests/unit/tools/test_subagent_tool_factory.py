@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from agents.tool_context import ToolContext as SdkToolContext
+
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.tools.subagent_tool_factory import _child_tools_for_depth
+from engine.tools.subagent_result import SubagentToolResult
+from engine.tools.subagent_tool_factory import (
+    _build_subagent_as_tool,
+    _child_tools_for_depth,
+)
+from engine.traces.trace_store import TraceStore
 
 
 def _engine_config(max_depth: int) -> EngineConfig:
@@ -25,13 +35,32 @@ def _engine_config(max_depth: int) -> EngineConfig:
     )
 
 
+def _fake_parent() -> AgentExecution:
+    return AgentExecution(
+        agent_id="parent-x", agent_name="root", depth=0,
+        parent_agent_id=None, parent_tool_call_id=None,
+    )
+
+
+def _fake_tool_ctx(tool_call_id: str = "parent-call-x") -> SdkToolContext:
+    return SdkToolContext(
+        context=None,
+        tool_name="call_subagent",
+        tool_call_id=tool_call_id,
+        tool_arguments="{}",
+    )
+
+
 def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
     cfg = _engine_config(max_depth=2)
     run_state = MagicMock(spec=EngineRunState)
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
-    tools = _child_tools_for_depth(depth=2, run_state=run_state, semaphore=None)
+    sem = asyncio.Semaphore(1)
+    tools = _child_tools_for_depth(
+        depth=2, run_state=run_state, semaphore=sem, parent_execution=_fake_parent(),
+    )
     names = {t.name for t in tools}
     assert "call_subagent" not in names
 
@@ -42,9 +71,10 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
-    import asyncio
     sem = asyncio.Semaphore(4)
-    tools = _child_tools_for_depth(depth=1, run_state=run_state, semaphore=sem)
+    tools = _child_tools_for_depth(
+        depth=1, run_state=run_state, semaphore=sem, parent_execution=_fake_parent(),
+    )
     names = {t.name for t in tools}
     assert "call_subagent" in names
 
@@ -52,7 +82,6 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
 @pytest.mark.asyncio
 async def test_semaphore_wrapper_limits_parallelism() -> None:
     from engine.tools.subagent_tool_factory import _wrap_with_semaphore
-    import asyncio
 
     in_flight = 0
     peak = 0
@@ -74,18 +103,6 @@ async def test_semaphore_wrapper_limits_parallelism() -> None:
 
 @pytest.mark.asyncio
 async def test_guarded_invoke_returns_failure_on_exception() -> None:
-    import asyncio
-    from unittest.mock import MagicMock
-
-    from engine.agents.engine_output_bus import EngineOutputBus
-    from engine.agents.engine_run_state import EngineRunState
-    from engine.agents.agent_config import AgentConfig
-    from engine.engine_config import EngineConfig
-    from engine.model_config import ModelConfig
-    from engine.tools.subagent_result import SubagentToolResult
-    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
-    from engine.traces.trace_store import TraceStore
-
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -104,28 +121,17 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
     run_state.runner = _ExplodingRunner
 
     sem = asyncio.Semaphore(1)
-    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
+    tool = _build_subagent_as_tool(
+        run_state=run_state, child_depth=1, semaphore=sem, parent_execution=_fake_parent(),
+    )
 
-    result_json = await tool.on_invoke_tool(None, "{}")
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
     result = SubagentToolResult.model_validate_json(result_json)
     assert "SDK exploded" in result.answer
 
 
 @pytest.mark.asyncio
 async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
-    import asyncio
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from engine.agents.engine_output_bus import EngineOutputBus
-    from engine.agents.engine_run_state import EngineRunState
-    from engine.agents.agent_config import AgentConfig
-    from engine.engine_config import EngineConfig
-    from engine.model_config import ModelConfig
-    from engine.tools.subagent_result import SubagentToolResult
-    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
-    from engine.traces.trace_store import TraceStore
-
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -167,8 +173,10 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
     run_state.runner = _FakeRunner
 
     sem = asyncio.Semaphore(1)
-    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
-    result_json = await tool.on_invoke_tool(None, "{}")
+    tool = _build_subagent_as_tool(
+        run_state=run_state, child_depth=1, semaphore=sem, parent_execution=_fake_parent(),
+    )
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
     result = SubagentToolResult.model_validate_json(result_json)
     assert result.turns_used == 1
     assert result.tool_calls_made == 1
@@ -176,19 +184,6 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -> None:
-    import asyncio
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from engine.agents.engine_output_bus import EngineOutputBus
-    from engine.agents.engine_run_state import EngineRunState
-    from engine.agents.agent_config import AgentConfig
-    from engine.engine_config import EngineConfig
-    from engine.model_config import ModelConfig
-    from engine.tools.subagent_result import SubagentToolResult
-    from engine.tools.subagent_tool_factory import _build_subagent_as_tool
-    from engine.traces.trace_store import TraceStore
-
     cfg = EngineConfig(
         root_agent=AgentConfig(name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         subagent=AgentConfig(name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
@@ -199,7 +194,6 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
     fake_store = MagicMock(spec=TraceStore)
     run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
 
-    # Fake a child run that produced one completed message whose content is a list of output_text parts.
     message_item = SimpleNamespace(
         type="message_output_item",
         raw_item=SimpleNamespace(
@@ -227,7 +221,9 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
     run_state.runner = _FakeRunner
 
     sem = asyncio.Semaphore(1)
-    tool = _build_subagent_as_tool(run_state=run_state, child_depth=1, semaphore=sem)
-    result_json = await tool.on_invoke_tool(None, "{}")
+    tool = _build_subagent_as_tool(
+        run_state=run_state, child_depth=1, semaphore=sem, parent_execution=_fake_parent(),
+    )
+    result_json = await tool.on_invoke_tool(_fake_tool_ctx(), "{}")
     result = SubagentToolResult.model_validate_json(result_json)
     assert result.answer == "child says 42"
