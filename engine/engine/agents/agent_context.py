@@ -20,12 +20,12 @@ class AgentContext:
         items: list[AgentContextItem],
         compaction_model: ModelConfig,
         text_message_compaction_keep_last_messages: int,
-        tool_call_compaction_keep_last_messages: int,
+        tool_call_compaction_keep_last_turns: int,
     ) -> None:
         self.items = list(items)
         self.compaction_model = compaction_model
         self.text_message_compaction_keep_last_messages = text_message_compaction_keep_last_messages
-        self.tool_call_compaction_keep_last_messages = tool_call_compaction_keep_last_messages
+        self.tool_call_compaction_keep_last_turns = tool_call_compaction_keep_last_turns
         self._index: dict[str, AgentContextItem] = {item.item_id: item for item in items}
 
     @classmethod
@@ -75,7 +75,7 @@ class AgentContext:
             items=items,
             compaction_model=engine_config.compaction_model,
             text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
-            tool_call_compaction_keep_last_messages=engine_config.tool_call_compaction_keep_last_messages,
+            tool_call_compaction_keep_last_turns=engine_config.tool_call_compaction_keep_last_turns,
         )
 
     def append(self, item: AgentContextItem) -> None:
@@ -90,24 +90,24 @@ class AgentContext:
 
     async def compact_old_items(self, compactor: "Compactor") -> None:
         text_positions: list[int] = []
-        tool_positions: list[int] = []
+        tool_groups = _build_tool_groups(self.items)
+
         for idx, item in enumerate(self.items):
             if item.is_compacted or item.role == "system":
                 continue
-            if _is_tool_related(item):
-                tool_positions.append(idx)
-            else:
+            if not _is_tool_related(item):
                 text_positions.append(idx)
 
         eligible: list[int] = []
         if len(text_positions) > self.text_message_compaction_keep_last_messages:
             cutoff = len(text_positions) - self.text_message_compaction_keep_last_messages
             eligible.extend(text_positions[:cutoff])
-        if len(tool_positions) > self.tool_call_compaction_keep_last_messages:
-            cutoff = len(tool_positions) - self.tool_call_compaction_keep_last_messages
-            eligible.extend(tool_positions[:cutoff])
+        if len(tool_groups) > self.tool_call_compaction_keep_last_turns:
+            cutoff = len(tool_groups) - self.tool_call_compaction_keep_last_turns
+            for group in tool_groups[:cutoff]:
+                eligible.extend(group)
 
-        for idx in sorted(eligible):
+        for idx in sorted(set(eligible)):
             item = self.items[idx]
             summary = await compactor(item)
             self.items[idx] = item.model_copy(update={"is_compacted": True, "compaction_summary": summary})
@@ -120,6 +120,37 @@ def _is_tool_related(item: AgentContextItem) -> bool:
     if item.role == "assistant" and item.tool_calls:
         return True
     return False
+
+
+def _build_tool_groups(items: list[AgentContextItem]) -> list[list[int]]:
+    """Group tool-related items into conversational turns.
+
+    A turn = one assistant message that emitted tool_calls, paired with the
+    role=tool result messages whose tool_call_id matches one of those calls.
+
+    The returned list preserves turn order (oldest first) and contains item
+    indices into ``items``. Already-compacted items are skipped so a second
+    pass cannot re-compact them or accidentally pull a still-uncompacted
+    result into a turn whose assistant has already been collapsed.
+
+    A tool result whose matching assistant tool_call is not present in the
+    context (or has already been compacted) is dropped from grouping —
+    standalone, it cannot form a coherent turn for OpenAI's API anyway.
+    """
+    groups: list[list[int]] = []
+    call_id_to_group: dict[str, int] = {}
+    for idx, item in enumerate(items):
+        if item.is_compacted or item.role == "system":
+            continue
+        if item.role == "assistant" and item.tool_calls:
+            groups.append([idx])
+            for tc in item.tool_calls:
+                call_id_to_group[tc.id] = len(groups) - 1
+        elif item.role == "tool" and item.tool_call_id is not None:
+            group_index = call_id_to_group.get(item.tool_call_id)
+            if group_index is not None:
+                groups[group_index].append(idx)
+    return groups
 
 
 def _render_item(item: AgentContextItem) -> AgentMessage:

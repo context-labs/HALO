@@ -18,6 +18,6 @@ class EngineConfig(BaseModel):
     trace_index: TraceIndexConfig = Field(default_factory=TraceIndexConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     text_message_compaction_keep_last_messages: int = Field(default=12, ge=0)
-    tool_call_compaction_keep_last_messages: int = Field(default=6, ge=0)
+    tool_call_compaction_keep_last_turns: int = Field(default=3, ge=0)
     maximum_depth: int = Field(default=2, ge=0)
     maximum_parallel_subagents: int = Field(default=4, gt=0)

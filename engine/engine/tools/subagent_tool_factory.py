@@ -167,7 +167,7 @@ def _build_subagent_as_tool(
                 ],
                 compaction_model=engine_config.compaction_model,
                 text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
-                tool_call_compaction_keep_last_messages=engine_config.tool_call_compaction_keep_last_messages,
+                tool_call_compaction_keep_last_turns=engine_config.tool_call_compaction_keep_last_turns,
             )
 
             async def _run_streamed(*, agent, input, context):

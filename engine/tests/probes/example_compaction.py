@@ -57,7 +57,7 @@ def _make_ctx(items: list[AgentContextItem], *, keep_text: int = 2, keep_tool: i
         items=items,
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         text_message_compaction_keep_last_messages=keep_text,
-        tool_call_compaction_keep_last_messages=keep_tool,
+        tool_call_compaction_keep_last_turns=keep_tool,
     )
 
 
@@ -103,16 +103,22 @@ async def probe_system_never_compacted() -> None:
 
 
 async def probe_text_vs_tool_split() -> None:
-    """Text vs tool eligibility caps are independent. With keep_text=1 and
-    keep_tool=2, given 3 texts and 3 tool-results: 2 texts and 1 tool result
-    should be eligible."""
+    """Text and tool eligibility caps are independent. With keep_text=1 and
+    keep_tool=2 (turns), given 3 text turns and 3 tool turns: 2 oldest texts
+    plus the 1 oldest tool turn (assistant + result, both items) eligible."""
+    tc0 = AgentToolCall(id="c0", function=AgentToolFunction(name="foo", arguments="{}"))
+    tc1 = AgentToolCall(id="c1", function=AgentToolFunction(name="foo", arguments="{}"))
+    tc2 = AgentToolCall(id="c2", function=AgentToolFunction(name="foo", arguments="{}"))
     items = [
         AgentContextItem(item_id="sys-0", role="system", content="sys"),
         AgentContextItem(item_id="u-0", role="user", content="t1"),
         AgentContextItem(item_id="u-1", role="user", content="t2"),
         AgentContextItem(item_id="u-2", role="user", content="t3"),
+        AgentContextItem(item_id="a-0", role="assistant", tool_calls=[tc0]),
         AgentContextItem(item_id="tr-0", role="tool", content="r1", tool_call_id="c0", name="foo"),
+        AgentContextItem(item_id="a-1", role="assistant", tool_calls=[tc1]),
         AgentContextItem(item_id="tr-1", role="tool", content="r2", tool_call_id="c1", name="foo"),
+        AgentContextItem(item_id="a-2", role="assistant", tool_calls=[tc2]),
         AgentContextItem(item_id="tr-2", role="tool", content="r3", tool_call_id="c2", name="foo"),
     ]
     ctx = _make_ctx(items, keep_text=1, keep_tool=2)
@@ -120,8 +126,8 @@ async def probe_text_vs_tool_split() -> None:
     await ctx.compact_old_items(rec)
 
     compacted_ids = {c.item_id for c in rec.calls}
-    _check(compacted_ids == {"u-0", "u-1", "tr-0"},
-           "split: 2 oldest text + 1 oldest tool compacted",
+    _check(compacted_ids == {"u-0", "u-1", "a-0", "tr-0"},
+           "split: 2 oldest texts + the 1 oldest tool turn (asst + result) compacted",
            observed=f"compacted_ids={sorted(compacted_ids)}")
 
 
@@ -188,12 +194,40 @@ async def probe_assistant_with_tool_calls_renders_tool_calls_label() -> None:
            observed=f"a0_content={a0.content!r}")
 
 
+async def probe_parallel_tool_calls_compact_as_a_unit() -> None:
+    """Parallel tool calls land as separate assistant messages each with one
+    tool_call, followed by their tool results: ``[a-0(c0), a-1(c1), t-0, t-1]``.
+    Group-aware eligibility forms two tool turns ({a-0,t-0}, {a-1,t-1}) and
+    compacts them as units — so a-0 and t-0 either both compact together, or
+    neither does. Either way the rendered messages array stays coherent
+    (every role=tool has a preceding assistant.tool_calls match)."""
+    tc0 = AgentToolCall(id="c0", function=AgentToolFunction(name="foo", arguments="{}"))
+    tc1 = AgentToolCall(id="c1", function=AgentToolFunction(name="foo", arguments="{}"))
+    items = [
+        AgentContextItem(item_id="sys-0", role="system", content="sys"),
+        AgentContextItem(item_id="u-0", role="user", content="kick off"),
+        AgentContextItem(item_id="a-0", role="assistant", tool_calls=[tc0]),
+        AgentContextItem(item_id="a-1", role="assistant", tool_calls=[tc1]),
+        AgentContextItem(item_id="t-0", role="tool", content="r0", tool_call_id="c0", name="foo"),
+        AgentContextItem(item_id="t-1", role="tool", content="r1", tool_call_id="c1", name="foo"),
+    ]
+    ctx = _make_ctx(items, keep_text=10, keep_tool=1)
+    rec = _RecordingCompactor()
+    await ctx.compact_old_items(rec)
+
+    compacted_ids = {c.item_id for c in rec.calls}
+    _check(compacted_ids == {"a-0", "t-0"},
+           "parallel: oldest tool turn (a-0 + its result t-0) compacted as a unit",
+           observed=f"compacted_ids={sorted(compacted_ids)}")
+
+
 async def main() -> int:
     await probe_no_op_when_under_thresholds()
     await probe_system_never_compacted()
     await probe_text_vs_tool_split()
     await probe_assistant_text_compacted_label_mismatch()
     await probe_assistant_with_tool_calls_renders_tool_calls_label()
+    await probe_parallel_tool_calls_compact_as_a_unit()
 
     if _FAILURES:
         print(f"\n{len(_FAILURES)} check(s) failed:")

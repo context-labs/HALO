@@ -18,7 +18,7 @@ async def test_get_context_item_returns_full_stored_item() -> None:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=2,
-        tool_call_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
     )
     agent_context.append(AgentContextItem(
         item_id="m1", role="user", content="hi",

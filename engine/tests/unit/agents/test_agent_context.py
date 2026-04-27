@@ -13,7 +13,7 @@ def _ctx() -> AgentContext:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=2,
-        tool_call_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
     )
 
 
@@ -75,7 +75,7 @@ async def test_compact_old_items_only_touches_eligible_text() -> None:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=2,
-        tool_call_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
     )
     for i in range(4):
         ctx.append(AgentContextItem(item_id=f"t{i}", role="user", content=f"msg {i}"))
@@ -96,7 +96,7 @@ async def test_compact_old_items_separate_thresholds_for_tools() -> None:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=10,
-        tool_call_compaction_keep_last_messages=1,
+        tool_call_compaction_keep_last_turns=1,
     )
     for i in range(3):
         ctx.append(AgentContextItem(
@@ -117,7 +117,9 @@ async def test_compact_old_items_separate_thresholds_for_tools() -> None:
     await ctx.compact_old_items(compactor=stub.compact)
 
     ids_compacted = {call.item_id for call in stub.calls}
-    assert ids_compacted == {"a0", "r0", "a1", "r1", "a2"}
+    # 3 tool turns; keep_last_turns=1 → 2 oldest turns (4 items) compacted.
+    # The third turn (a2 + r2) stays uncompacted as a unit.
+    assert ids_compacted == {"a0", "r0", "a1", "r1"}
 
 
 @pytest.mark.asyncio
@@ -126,7 +128,7 @@ async def test_compact_old_items_skips_system_and_already_compacted() -> None:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=0,
-        tool_call_compaction_keep_last_messages=0,
+        tool_call_compaction_keep_last_turns=0,
     )
     ctx.append(AgentContextItem(item_id="s", role="system", content="sys"))
     ctx.append(AgentContextItem(item_id="u1", role="user", content="hi", is_compacted=True, compaction_summary="x"))

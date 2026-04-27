@@ -42,7 +42,7 @@ def _context() -> AgentContext:
         items=[],
         compaction_model=ModelConfig(name="claude-haiku-4-5"),
         text_message_compaction_keep_last_messages=2,
-        tool_call_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
     )
 
 

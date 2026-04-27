@@ -215,7 +215,7 @@ def make_default_config(
     maximum_depth: int = 0,
     maximum_parallel_subagents: int = 2,
     text_message_compaction_keep_last_messages: int = 12,
-    tool_call_compaction_keep_last_messages: int = 6,
+    tool_call_compaction_keep_last_turns: int = 3,
     model: str = "gpt-5.4-mini",
 ) -> EngineConfig:
     """Sensible defaults for an EngineConfig used in probes.
@@ -236,7 +236,7 @@ def make_default_config(
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
         text_message_compaction_keep_last_messages=text_message_compaction_keep_last_messages,
-        tool_call_compaction_keep_last_messages=tool_call_compaction_keep_last_messages,
+        tool_call_compaction_keep_last_turns=tool_call_compaction_keep_last_turns,
     )
 
 
