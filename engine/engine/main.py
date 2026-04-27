@@ -71,23 +71,37 @@ async def stream_engine_async(
         agent_execution=root_execution,
     )
 
+    # The engine deliberately uses only the run_streamed kwargs it needs:
+    # starting_agent, input, context, max_turns. Other SDK params
+    # (hooks, run_config, previous_response_id, conversation_id, session,
+    # error_handlers) are not forwarded — the engine has its own
+    # equivalents (output bus, EngineConfig, AgentContext continuation,
+    # OpenAiAgentRunner retries).
     async def _run_streamed(*, agent, input, context):
-        return run_state.runner.run_streamed(starting_agent=agent, input=input, context=context)
+        return run_state.runner.run_streamed(
+            starting_agent=agent,
+            input=input,
+            context=context,
+            max_turns=engine_config.root_agent.maximum_turns,
+        )
 
     async def _drive() -> None:
         runner = OpenAiAgentRunner(
             run_streamed=_run_streamed,
             compactor_factory=build_openai_compactor_factory(engine_config),
         )
-        await runner.run(
-            sdk_agent=sdk_agent,
-            agent_context=root_context,
-            agent_execution=root_execution,
-            output_bus=output_bus,
-            is_root=True,
-            run_context=run_state,
-        )
-        await output_bus.close()
+        try:
+            await runner.run(
+                sdk_agent=sdk_agent,
+                agent_context=root_context,
+                agent_execution=root_execution,
+                output_bus=output_bus,
+                is_root=True,
+                run_context=run_state,
+            )
+            await output_bus.close()
+        except BaseException as exc:
+            await output_bus.fail(exc)
 
     task = asyncio.create_task(_drive())
 
