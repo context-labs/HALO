@@ -7,10 +7,10 @@ from pathlib import Path
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
+from engine.agents.compactor import build_compactor_factory
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
-from engine.agents.openai_agent_runner import OpenAiAgentRunner
-from engine.agents.openai_compactor import build_openai_compactor_factory
+from engine.agents.openai_agent_runner import OpenAiAgentRunner, configure_default_sdk_client
 from engine.agents.runner_protocol import RunnerProtocol
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
@@ -38,6 +38,8 @@ async def stream_engine_async(
     the engine with a scripted event stream instead of calling the OpenAI
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
     """
+    configure_default_sdk_client(engine_config.model_provider)
+
     # TODO: ensure_index_exists could return the trace itself so we dont need to re load it from file in TraceStore.load
     index_path = await TraceIndexBuilder.ensure_index_exists(
         trace_path=trace_path,
@@ -86,7 +88,7 @@ async def stream_engine_async(
     async def _drive() -> None:
         runner = OpenAiAgentRunner(
             run_streamed=_run_streamed,
-            compactor_factory=build_openai_compactor_factory(engine_config),
+            compactor_factory=build_compactor_factory(engine_config),
         )
         try:
             await runner.run(

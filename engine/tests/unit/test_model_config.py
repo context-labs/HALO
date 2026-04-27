@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
-
-from engine.model_config import AvailableModelName, ModelConfig
+from engine.model_config import ModelConfig
 
 
 def test_defaults() -> None:
@@ -13,18 +10,7 @@ def test_defaults() -> None:
     assert cfg.parallel_tool_calls is True
 
 
-def test_model_name_literal_enforced() -> None:
-    with pytest.raises(ValidationError):
-        ModelConfig(name="not-a-real-model")  # type: ignore[arg-type]
-
-
-def test_all_names_listed() -> None:
-    expected = {
-        "claude-opus-4-7",
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
-        "gpt-5.4",
-        "gpt-5.4-mini",
-    }
-    actual = set(AvailableModelName.__args__)  # type: ignore[attr-defined]
-    assert actual == expected
+def test_arbitrary_model_name_accepted() -> None:
+    """Any string is valid — the configured OpenAI-compatible endpoint decides."""
+    cfg = ModelConfig(name="meta-llama/Llama-3.1-70B-Instruct")
+    assert cfg.name == "meta-llama/Llama-3.1-70B-Instruct"

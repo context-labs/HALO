@@ -86,7 +86,7 @@ async def test_engine_compaction_uses_configured_compactor(
 
         return factory
 
-    monkeypatch.setattr(engine_main, "build_openai_compactor_factory", fake_compactor_factory)
+    monkeypatch.setattr(engine_main, "build_compactor_factory", fake_compactor_factory)
 
     runner = _FakeRunner([_assistant_text("Final answer.\n<final/>")])
     results = await engine_main.run_engine_async(

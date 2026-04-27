@@ -104,7 +104,7 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
 
         return factory
 
-    monkeypatch.setattr(subagent_factory, "build_openai_compactor_factory", fake_compactor_factory)
+    monkeypatch.setattr(subagent_factory, "build_compactor_factory", fake_compactor_factory)
 
     cfg = _config()
     output_bus = EngineOutputBus()

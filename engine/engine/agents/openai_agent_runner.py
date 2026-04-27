@@ -4,13 +4,34 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
+from agents import set_default_openai_client
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    RateLimitError,
+)
 
 from engine.agents.agent_context import AgentContext, Compactor
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.openai_event_mapper import OpenAiEventMapper
 from engine.errors import EngineAgentExhaustedError
+from engine.model_provider_config import ModelProviderConfig
+
+
+def configure_default_sdk_client(provider: ModelProviderConfig) -> None:
+    """Bind the OpenAI Agents SDK's default client to the configured endpoint.
+
+    The SDK uses a process-global client, so this is best-effort for callers
+    running multiple engines in one process. We only override when at least
+    one of ``base_url`` / ``api_key`` is set; otherwise the SDK keeps using
+    its env-driven default.
+    """
+    if provider.base_url is None and provider.api_key is None:
+        return
+    set_default_openai_client(AsyncOpenAI(base_url=provider.base_url, api_key=provider.api_key))
 
 
 def _is_retriable_llm_error(exc: BaseException) -> bool:
