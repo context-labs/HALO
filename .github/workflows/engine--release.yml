@@ -3,8 +3,17 @@ name: "[Engine] Release"
 on:
   workflow_dispatch:
     inputs:
+      semver_action:
+        description: "Semantic version bump"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
       dry_run:
-        description: "Dry run (build and validate but skip PyPI publish)"
+        description: "Dry run (build only; skip commit, push, and PyPI publish)"
         required: true
         default: true
         type: boolean
@@ -42,17 +51,22 @@ jobs:
     uses: ./.github/workflows/engine--e2e-tests.yml
     secrets: inherit
 
-  build:
-    name: Build
+  bump-version:
+    name: Bump Version
     needs: [e2e-tests]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
     defaults:
       run:
         working-directory: engine
-    outputs:
-      package_version: ${{ steps.read-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -65,12 +79,61 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "engine/uv.lock"
 
-      - name: Read package version
-        id: read-version
+      - name: Bump engine version
+        id: bump
         run: |
-          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "halo-engine version: $VERSION"
+          NEW_VERSION=$(uv version --bump "${{ inputs.semver_action }}" --short --no-sync)
+          echo "Bumped engine version to ${NEW_VERSION}"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and push version bump
+        if: ${{ inputs.dry_run == false }}
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add pyproject.toml uv.lock
+          git commit -m "Release engine v${NEW_VERSION}"
+          git tag "engine-v${NEW_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "engine-v${NEW_VERSION}"
+
+      - name: Upload bumped manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-release-manifests
+          path: |
+            engine/pyproject.toml
+            engine/uv.lock
+          retention-days: 1
+
+  build:
+    name: Build
+    needs: [bump-version]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bumped manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-release-manifests
+          path: engine/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
 
       - name: Build distributions
         run: uv build
@@ -84,12 +147,12 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [build]
+    needs: [bump-version, build]
     if: ${{ inputs.dry_run == false }}
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/halo-engine/${{ needs.build.outputs.package_version }}/
+      url: https://pypi.org/project/halo-engine/${{ needs.bump-version.outputs.new_version }}/
     defaults:
       run:
         working-directory: engine
@@ -120,31 +183,35 @@ jobs:
 
   summary:
     name: Release Summary
-    needs: [checks, unit-tests, integration-tests, e2e-tests, build, publish]
+    needs: [checks, unit-tests, integration-tests, e2e-tests, bump-version, build, publish]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Generate summary
         env:
           DRY_RUN: ${{ inputs.dry_run }}
-          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          SEMVER_ACTION: ${{ inputs.semver_action }}
+          NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
           CHECKS_RESULT: ${{ needs.checks.result }}
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           E2E_RESULT: ${{ needs.e2e-tests.result }}
+          BUMP_RESULT: ${{ needs.bump-version.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           {
             echo "## Engine Release Summary"
             echo ""
-            echo "**Version:** ${PACKAGE_VERSION:-unknown}"
+            echo "**Semver action:** ${SEMVER_ACTION}"
+            echo "**New version:** ${NEW_VERSION:-unknown}"
             echo "**Dry run:** ${DRY_RUN}"
             echo ""
             echo "**Checks:**          ${CHECKS_RESULT}"
             echo "**Unit Tests:**      ${UNIT_RESULT}"
             echo "**Integration:**     ${INTEGRATION_RESULT}"
             echo "**E2E:**             ${E2E_RESULT}"
+            echo "**Version Bump:**    ${BUMP_RESULT}"
             echo "**Build:**           ${BUILD_RESULT}"
             echo "**Publish:**         ${PUBLISH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
