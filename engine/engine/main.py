@@ -71,12 +71,6 @@ async def stream_engine_async(
         agent_execution=root_execution,
     )
 
-    # The engine deliberately uses only the run_streamed kwargs it needs:
-    # starting_agent, input, context, max_turns. Other SDK params
-    # (hooks, run_config, previous_response_id, conversation_id, session,
-    # error_handlers) are not forwarded — the engine has its own
-    # equivalents (output bus, EngineConfig, AgentContext continuation,
-    # OpenAiAgentRunner retries).
     async def _run_streamed(*, agent, input, context):
         return run_state.runner.run_streamed(
             starting_agent=agent,
