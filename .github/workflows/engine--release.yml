@@ -1,0 +1,150 @@
+name: "[Engine] Release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (build and validate but skip PyPI publish)"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: engine-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/engine--checks.yml
+    secrets: inherit
+
+  unit-tests:
+    name: Unit Tests
+    uses: ./.github/workflows/engine--unit-tests.yml
+    secrets: inherit
+
+  integration-tests:
+    name: Integration Tests
+    needs: [checks, unit-tests]
+    uses: ./.github/workflows/engine--integration-tests.yml
+    secrets: inherit
+
+  e2e-tests:
+    name: E2E Tests
+    needs: [integration-tests]
+    uses: ./.github/workflows/engine--e2e-tests.yml
+    secrets: inherit
+
+  build:
+    name: Build
+    needs: [e2e-tests]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    outputs:
+      package_version: ${{ steps.read-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Read package version
+        id: read-version
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "halo-engine version: $VERSION"
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Upload distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-engine-dist
+          path: engine/dist/*
+          retention-days: 14
+
+  publish:
+    name: Publish to PyPI
+    needs: [build]
+    if: ${{ inputs.dry_run == false }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/halo-engine/${{ needs.build.outputs.package_version }}/
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Download distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: halo-engine-dist
+          path: engine/dist
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish
+
+  summary:
+    name: Release Summary
+    needs: [checks, unit-tests, integration-tests, e2e-tests, build, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summary
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          UNIT_RESULT: ${{ needs.unit-tests.result }}
+          INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          E2E_RESULT: ${{ needs.e2e-tests.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          {
+            echo "## Engine Release Summary"
+            echo ""
+            echo "**Version:** ${PACKAGE_VERSION:-unknown}"
+            echo "**Dry run:** ${DRY_RUN}"
+            echo ""
+            echo "**Checks:**          ${CHECKS_RESULT}"
+            echo "**Unit Tests:**      ${UNIT_RESULT}"
+            echo "**Integration:**     ${INTEGRATION_RESULT}"
+            echo "**E2E:**             ${E2E_RESULT}"
+            echo "**Build:**           ${BUILD_RESULT}"
+            echo "**Publish:**         ${PUBLISH_RESULT}"
+          } >> "$GITHUB_STEP_SUMMARY"

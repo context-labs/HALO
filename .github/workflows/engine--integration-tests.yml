@@ -1,0 +1,88 @@
+name: "[Engine] Integration Tests"
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      INFISICAL_CLIENT_ID:
+        required: true
+      INFISICAL_CLIENT_SECRET:
+        required: true
+
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Install go-task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Install Infisical CLI
+        run: |
+          curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo -E bash
+          sudo apt-get update && sudo apt-get install -y infisical
+
+      - name: Install engine dependencies
+        run: task ci:setup
+
+      - name: Authenticate Infisical
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        run: |
+          TOKEN=$(infisical login --method=universal-auth \
+            --client-id="$INFISICAL_CLIENT_ID" \
+            --client-secret="$INFISICAL_CLIENT_SECRET" \
+            --silent --plain)
+          echo "::add-mask::$TOKEN"
+          echo "INFISICAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Run integration tests
+        run: task test:integration
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: "engine/test-results/integration.xml"
+          update_check: true
+          detailed_summary: true
+          include_passed: true
+          include_time_in_summary: true
+          fail_on_failure: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-integration-test-results
+          path: engine/test-results/
+          retention-days: 14
