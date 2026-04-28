@@ -44,7 +44,7 @@ include = [
 
 [dependency-groups]
 dev = [
-    "pytest==9.0.3",
+    "pytest==8.4.2",
 ]
 
 [tool.pytest.ini_options]
