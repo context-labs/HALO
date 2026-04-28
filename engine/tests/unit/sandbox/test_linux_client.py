@@ -17,19 +17,6 @@ _PROBE_EXEC_FAIL_STDERR = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _fake_unshare(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Pretend util-linux ``unshare`` exists so resolve() doesn't fail at module-level guard."""
-    unshare = tmp_path_factory.mktemp("unshare-bin") / "unshare"
-    unshare.write_text("")
-    return unshare
-
-
-@pytest.fixture(autouse=True)
-def _patch_unshare(monkeypatch: pytest.MonkeyPatch, _fake_unshare: Path) -> None:
-    monkeypatch.setattr(linux_client, "_UNSHARE", _fake_unshare)
-
-
 def _install_fake_bwrap(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -110,10 +97,7 @@ def test_resolve_tries_packaged_when_system_probe_fails(
         proc = MagicMock(spec=["wait", "kill", "returncode", "stderr"])
         proc.returncode = 1
         proc.wait.return_value = 1
-        # ``argv`` is ``[unshare, ..., --, bwrap, ...]``; locate the bwrap
-        # binary by skipping the leading unshare flags.
-        bwrap_path = Path(argv[argv.index("--") + 1])
-        if bwrap_path == system:
+        if Path(argv[0]) == system:
             proc.stderr.read.return_value = b"bwrap: setting up uid map: Operation not permitted\n"
         else:
             os.write(info_fd, b'{"child-pid":42}')
@@ -126,17 +110,6 @@ def test_resolve_tries_packaged_when_system_probe_fails(
 
     assert client is not None
     assert client.executable == packaged
-
-
-def test_resolve_returns_none_when_unshare_missing(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(linux_client, "_UNSHARE", None)
-
-    assert LinuxClient.resolve() is None
-    err = capsys.readouterr().err
-    assert "unshare" in err
-    assert "install" in err.lower()
 
 
 def test_resolve_returns_none_with_install_remediation_when_no_candidates(
@@ -171,10 +144,41 @@ def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
     assert LinuxClient.resolve() is None
     err = capsys.readouterr().err
     assert "Operation not permitted" in err
+    assert "apparmor_restrict_unprivileged_userns" in err
 
 
-def test_probe_argv_wraps_bwrap_with_outer_unshare(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _fake_unshare: Path
+def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """bwrap can write child-pid to --info-fd and *then* die during loopback
+    setup (Ubuntu 24.04 AppArmor blocks ``RTM_NEWADDR`` in unprivileged
+    user namespaces). The probe must reject this case — actual
+    ``run_python`` calls would fail the same way and the model would see
+    a confusing error. Detection rule: success requires ``child-pid`` in
+    info-fd *and* ``bwrap: execvp`` in stderr (proof bwrap reached the
+    final exec phase, after every prior setup step succeeded)."""
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text("")
+
+    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(bwrap))
+    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
+    _install_fake_bwrap(
+        monkeypatch,
+        info_fd_payload=b'{"child-pid":42}',
+        stderr=b"bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n",
+    )
+
+    assert LinuxClient.resolve() is None
+    err = capsys.readouterr().err
+    assert "loopback" in err
+    assert "Operation not permitted" in err
+    assert "apparmor_restrict_unprivileged_userns" in err
+
+
+def test_probe_argv_is_explicit_and_uses_empty_rootfs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
@@ -190,16 +194,12 @@ def test_probe_argv_wraps_bwrap_with_outer_unshare(
 
     LinuxClient.resolve()
 
-    info_fd = captured_argv[captured_argv.index("--info-fd") + 1]
+    info_fd = captured_argv[8]
     assert captured_argv == [
-        str(_fake_unshare),
-        "--user",
-        "--map-current-user",
-        "--net",
-        "--",
         str(bwrap),
         "--unshare-user",
         "--unshare-pid",
+        "--unshare-net",
         "--die-with-parent",
         "--new-session",
         "--clearenv",
@@ -210,7 +210,7 @@ def test_probe_argv_wraps_bwrap_with_outer_unshare(
     ]
 
 
-def test_build_argv_exact_shape(tmp_path: Path, _fake_unshare: Path) -> None:
+def test_build_argv_exact_shape(tmp_path: Path) -> None:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
     python = tmp_path / "runtime" / "bin" / "python"
@@ -239,16 +239,12 @@ def test_build_argv_exact_shape(tmp_path: Path, _fake_unshare: Path) -> None:
     )
 
     assert argv == [
-        str(_fake_unshare),
-        "--user",
-        "--map-current-user",
-        "--net",
-        "--",
         str(bwrap),
         "--die-with-parent",
         "--new-session",
         "--unshare-user",
         "--unshare-pid",
+        "--unshare-net",
         "--clearenv",
         "--dev",
         "/dev",
@@ -291,4 +287,3 @@ def test_build_argv_exact_shape(tmp_path: Path, _fake_unshare: Path) -> None:
         str(python),
         str(script),
     ]
-    assert "--unshare-net" not in argv

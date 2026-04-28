@@ -121,6 +121,19 @@ jobs:
       - name: Install engine dependencies
         run: task ci:setup
 
+      - name: Allow unprivileged user namespaces
+        # Ubuntu 24.04+ ships with kernel.apparmor_restrict_unprivileged_userns=1,
+        # which AppArmor uses to deny several operations to unconfined processes
+        # inside an unprivileged user namespace (capability-bound netlink ops
+        # like loopback RTM_NEWADDR, uid_map writes, etc.). Both bwrap's own
+        # network setup and util-linux unshare(1) trip this. CI is the
+        # canonical "trusted" environment, so relax the restriction here; we
+        # still get full namespace isolation, AppArmor just stops second-
+        # guessing it. End users who hit this on Ubuntu 24.04+ get the same
+        # remediation in the LinuxClient.resolve() warning.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Run Linux sandbox integration tests with packaged bubblewrap
         run: |
           mkdir -p test-results .cache/pytest-integration-linux-packaged
