@@ -155,6 +155,8 @@ async def test_get_context_item_resolves_through_wired_agent_context() -> None:
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
+    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
+    run_state.runtime_mounts = None
 
     parent_context = _fake_parent_context()
     parent_context.append(AgentContextItem(item_id="ctx-42", role="user", content="stored content"))
