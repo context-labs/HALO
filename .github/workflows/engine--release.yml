@@ -44,14 +44,9 @@ jobs:
     uses: ./.github/workflows/engine--unit-tests.yml
     secrets: inherit
 
-  bubblewrap-bin-checks:
-    name: bubblewrap-bin Checks
-    uses: ./.github/workflows/bubblewrap-bin--checks.yml
-    secrets: inherit
-
   integration-tests:
     name: Integration Tests
-    needs: [lint-format-typecheck, unit-tests, bubblewrap-bin-checks]
+    needs: [lint-format-typecheck, unit-tests]
     uses: ./.github/workflows/engine--integration-tests.yml
     secrets: inherit
 
@@ -236,7 +231,6 @@ jobs:
     needs:
       - lint-format-typecheck
       - unit-tests
-      - bubblewrap-bin-checks
       - integration-tests
       - e2e-tests
       - bump-version
@@ -253,7 +247,6 @@ jobs:
           NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
           LINT_RESULT: ${{ needs.lint-format-typecheck.result }}
           UNIT_RESULT: ${{ needs.unit-tests.result }}
-          BUBBLEWRAP_BIN_CHECKS_RESULT: ${{ needs.bubblewrap-bin-checks.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           E2E_RESULT: ${{ needs.e2e-tests.result }}
           BUMP_RESULT: ${{ needs.bump-version.result }}
@@ -270,7 +263,6 @@ jobs:
             echo ""
             echo "**Lint/Format/Typecheck:**  ${LINT_RESULT}"
             echo "**Unit Tests:**             ${UNIT_RESULT}"
-            echo "**bubblewrap-bin Checks:**  ${BUBBLEWRAP_BIN_CHECKS_RESULT}"
             echo "**Integration:**            ${INTEGRATION_RESULT}"
             echo "**E2E:**                    ${E2E_RESULT}"
             echo "**Version Bump:**           ${BUMP_RESULT}"
