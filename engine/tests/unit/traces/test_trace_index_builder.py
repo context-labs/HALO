@@ -430,3 +430,106 @@ async def test_byte_offsets_within_trace_are_in_file_order(
         assert row.byte_offsets == sorted(row.byte_offsets), (
             f"byte_offsets out of file order for trace {row.trace_id}: {row.byte_offsets}"
         )
+
+
+@pytest.mark.asyncio
+async def test_merge_rollups_across_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Trace ``t-split`` has 4 spans deliberately scattered across the file.
+
+    With ``SMALL_FILE_THRESHOLD = 0`` and 4 cpus, the four lines belonging to
+    ``t-split`` end up in different chunks; the merge step must union models and
+    services and OR has_errors across them.
+    """
+    monkeypatch.setattr(TraceIndexBuilder, "SMALL_FILE_THRESHOLD", 0)
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+
+    spans: list[str] = []
+
+    def _line(
+        *,
+        trace_id: str,
+        span_idx: int,
+        svc: str,
+        model: str | None,
+        in_tok: int,
+        out_tok: int,
+        error: bool,
+    ) -> str:
+        attrs: dict = {
+            "openinference.span.kind": "AGENT" if model is None else "LLM",
+            "inference.export.schema_version": 1,
+            "inference.project_id": "prj_split",
+            "inference.observation_kind": "AGENT" if model is None else "LLM",
+            "inference.agent_name": svc,
+        }
+        if model is not None:
+            attrs["inference.llm.model_name"] = model
+            attrs["inference.llm.input_tokens"] = in_tok
+            attrs["inference.llm.output_tokens"] = out_tok
+        line = {
+            "trace_id": trace_id,
+            "span_id": f"s-{trace_id}-{span_idx}",
+            "parent_span_id": "" if span_idx == 0 else f"s-{trace_id}-{span_idx - 1}",
+            "trace_state": "",
+            "name": "step",
+            "kind": "SPAN_KIND_INTERNAL",
+            "start_time": f"2026-04-23T05:00:{span_idx:02d}.000000000Z",
+            "end_time": f"2026-04-23T05:00:{span_idx + 1:02d}.000000000Z",
+            "status": {
+                "code": "STATUS_CODE_ERROR" if error else "STATUS_CODE_OK",
+                "message": "",
+            },
+            "resource": {"attributes": {"service.name": svc}},
+            "scope": {"name": "@test/scope", "version": "0.0.1"},
+            "attributes": attrs,
+        }
+        return json.dumps(line, separators=(",", ":"))
+
+    for i in range(16):
+        if i % 4 == 0:
+            spans.append(
+                _line(
+                    trace_id="t-split",
+                    span_idx=i // 4,
+                    svc=f"svc-{i // 4}",
+                    model=f"model-{i // 4}" if i > 0 else None,
+                    in_tok=10 * (i // 4),
+                    out_tok=5 * (i // 4),
+                    error=(i // 4 == 2),
+                )
+            )
+        else:
+            spans.append(
+                _line(
+                    trace_id=f"t-other-{i}",
+                    span_idx=0,
+                    svc="svc-other",
+                    model=None,
+                    in_tok=0,
+                    out_tok=0,
+                    error=False,
+                )
+            )
+
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text("\n".join(spans) + "\n")
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    rows = {
+        TraceIndexRow.model_validate_json(line).trace_id: TraceIndexRow.model_validate_json(line)
+        for line in index_path.read_text().splitlines()
+    }
+
+    split = rows["t-split"]
+    assert split.span_count == 4
+    assert split.has_errors is True
+    assert set(split.service_names) == {"svc-0", "svc-1", "svc-2", "svc-3"}
+    assert set(split.model_names) == {"model-1", "model-2", "model-3"}
+    assert split.total_input_tokens == 10 + 20 + 30
+    assert split.total_output_tokens == 5 + 10 + 15
+    assert split.byte_offsets == sorted(split.byte_offsets)
