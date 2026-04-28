@@ -6,6 +6,8 @@ import signal
 
 from engine.sandbox.sandbox_config import CodeExecutionResult, SandboxConfig
 
+_TRUNCATION_MARKER = b"\n[... output truncated ...]\n"
+
 
 async def run_process_capped(
     *,
@@ -28,15 +30,24 @@ async def run_process_capped(
         if stream is None:
             return b""
         buf = bytearray()
+        reached_eof = False
         while len(buf) < cap:
             chunk = await stream.read(min(4096, cap - len(buf)))
             if not chunk:
+                reached_eof = True
                 break
             buf.extend(chunk)
-        while True:
-            chunk = await stream.read(65536)
-            if not chunk:
-                break
+        truncated = False
+        if not reached_eof:
+            while True:
+                chunk = await stream.read(65536)
+                if not chunk:
+                    break
+                truncated = True
+        if truncated:
+            marker_len = min(len(_TRUNCATION_MARKER), cap)
+            del buf[cap - marker_len :]
+            buf.extend(_TRUNCATION_MARKER[:marker_len])
         return bytes(buf)
 
     try:
