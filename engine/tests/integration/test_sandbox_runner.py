@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from engine.sandbox.pyodide_client import PyodideClient
-from engine.sandbox.sandbox import Sandbox, resolve_sandbox
+from engine.sandbox import sandbox as sandbox_module
+from engine.sandbox.sandbox import Sandbox
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
 async def _ready(tmp_path: Path, fixtures_dir: Path) -> tuple[Sandbox, Path, Path]:
-    sandbox = resolve_sandbox(timeout_seconds=60.0)
+    sandbox = Sandbox.resolve()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 
@@ -30,7 +30,6 @@ async def test_sandbox_runs_real_python_against_trace_store(
 ) -> None:
     """The Pyodide-backed sandbox executes user code with a working ``trace_store``."""
     sandbox, trace_path, index_path = await _ready(tmp_path, fixtures_dir)
-    assert isinstance(sandbox.client, PyodideClient)
 
     result = await sandbox.run_python(
         code="print('count=', trace_store.trace_count)",
@@ -150,19 +149,20 @@ async def test_sandbox_handles_multibyte_utf8_across_chunk_boundary(
 
 
 @pytest.mark.asyncio
-async def test_sandbox_timeout_kills_process(tmp_path: Path, fixtures_dir: Path) -> None:
-    """Long-running user code must trip the timeout and report ``timed_out=True``."""
-    sandbox = resolve_sandbox(timeout_seconds=1.0)
-    if sandbox is None:
-        pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
+async def test_sandbox_timeout_kills_process(
+    tmp_path: Path,
+    fixtures_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long-running user code must trip the timeout and report ``timed_out=True``.
 
-    trace_path = tmp_path / "traces.jsonl"
-    trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
+    The wall-clock budget is a module constant rather than a config knob;
+    we monkeypatch it down to 1 second for this test so the runner kills
+    a deliberately infinite loop quickly. Production never tunes this.
+    """
+    monkeypatch.setattr(sandbox_module, "_TIMEOUT_SECONDS", 1.0)
 
-    index_path = tmp_path / "traces.jsonl.engine-index.jsonl"
-    await TraceIndexBuilder.ensure_index_exists(
-        trace_path=trace_path, config=TraceIndexConfig(index_path=index_path)
-    )
+    sandbox, trace_path, index_path = await _ready(tmp_path, fixtures_dir)
 
     result = await sandbox.run_python(
         code="while True: pass",

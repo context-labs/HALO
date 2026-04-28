@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from agents.tool_context import ToolContext as SdkToolContext
 
-from engine.sandbox.sandbox import resolve_sandbox
+from engine.sandbox.sandbox import Sandbox
 from tests.integration.tool_isolation_kit import (
     engine_config,
     load_store,
@@ -29,7 +29,7 @@ from tests.integration.tool_isolation_kit import (
 
 @pytest.mark.asyncio
 async def test_run_code_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
-    sandbox = resolve_sandbox(timeout_seconds=60.0)
+    sandbox = Sandbox.resolve()
     if sandbox is None:
         pytest.skip(
             "Deno binary not available on this host (install the `deno` extra or place deno on PATH)"

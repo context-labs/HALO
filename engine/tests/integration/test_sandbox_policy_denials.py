@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from engine.sandbox.sandbox import Sandbox, resolve_sandbox
+from engine.sandbox.sandbox import Sandbox
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
 async def _ready(tmp_path: Path, fixtures_dir: Path) -> tuple[Sandbox, Path, Path]:
-    sandbox = resolve_sandbox(timeout_seconds=60.0)
+    sandbox = Sandbox.resolve()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 
