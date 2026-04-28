@@ -79,7 +79,7 @@ jobs:
         with:
           method: "oidc"
           identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
-          project-slug: "monorepo"
+          project-slug: "halo"
           env-slug: "dev"
           secret-path: "/ci"
           include-imports: true
