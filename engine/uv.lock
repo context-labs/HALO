@@ -46,6 +46,16 @@ wheels = [
 ]
 
 [[package]]
+name = "bubblewrap-bin"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/1a/d8d64dd1bfaa52c757c9ac5ba976e82be5850bf8bae34514b8a2705cbfc6/bubblewrap_bin-0.1.1.tar.gz", hash = "sha256:4359ee7dac5f5cb57889a232659eff107fe53f07aea745dc33534ac47af9899f", size = 4557, upload-time = "2026-04-28T06:23:12.915Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/12/af674a667af8068f392ed7736cdf421e932624404f3d26348eafaeb2ccb7/bubblewrap_bin-0.1.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:8af696f21fd276e74463ee52adda42aaaa29d413ba18d59eaee85916f5d9558e", size = 58180, upload-time = "2026-04-28T06:23:13.727Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/d3/8a7a70afca508bca13f27132312561cdcce6fd87b17a44899f409d284cab/bubblewrap_bin-0.1.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:9656beafaa9c8be82aa6e1f4fdd82b2db465e1f762f3417e32d2f2afadfea7b5", size = 57325, upload-time = "2026-04-28T06:23:11.689Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.4.22"
 source = { registry = "https://pypi.org/simple" }
@@ -194,6 +204,7 @@ name = "halo-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "bubblewrap-bin", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy" },
     { name = "openai" },
     { name = "openai-agents" },
@@ -211,6 +222,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bubblewrap-bin", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')", specifier = "==0.1.1" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "openai", specifier = "==2.32.0" },
     { name = "openai-agents", specifier = "==0.14.5" },
