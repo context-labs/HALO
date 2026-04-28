@@ -197,13 +197,13 @@ def test_from_input_messages_no_system_prepends() -> None:
     assert ctx.items[1].content == "Find errors"
 
 
-def test_from_input_messages_omits_run_code_clause_when_unavailable() -> None:
+def test_from_input_messages_omits_run_code_when_unavailable() -> None:
     cfg = _engine_config()
     messages = [AgentMessage(role="user", content="hi")]
     ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=False)
     rendered = ctx.items[0].content
     assert isinstance(rendered, str)
-    assert " run_code," not in rendered
+    assert "run_code" not in rendered
     assert "call_subagent" in rendered
 
 

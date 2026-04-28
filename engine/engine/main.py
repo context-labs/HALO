@@ -69,6 +69,7 @@ async def stream_engine_async(
     if runner is not None:
         run_state_kwargs["runner"] = runner
     run_state = EngineRunState(**run_state_kwargs)
+    run_code_available = sandbox_status.available and runtime_mounts is not None
 
     root_execution = AgentExecution(
         agent_id=f"root-{uuid.uuid4().hex[:8]}",
@@ -82,7 +83,7 @@ async def stream_engine_async(
     root_context = AgentContext.from_input_messages(
         messages,
         engine_config,
-        run_code_available=sandbox_status.available,
+        run_code_available=run_code_available,
     )
 
     sdk_agent = build_root_sdk_agent(

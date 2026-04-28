@@ -161,6 +161,9 @@ jobs:
     needs: [bump-version, build]
     if: ${{ inputs.dry_run == false }}
     runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/project/halo-engine/${{ needs.bump-version.outputs.new_version }}/
@@ -188,9 +191,7 @@ jobs:
           path: engine/dist
 
       - name: Publish to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish
+        run: uv publish --trusted-publishing always
 
   summary:
     name: Release Summary
