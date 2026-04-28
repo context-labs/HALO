@@ -1,0 +1,52 @@
+[project]
+name = "bubblewrap-bin"
+version = "0.1.0"
+description = "Bundled bubblewrap (bwrap) binary for use as a Python dependency on Linux."
+requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "LGPL-2.0-or-later" }
+authors = [{ name = "HALO maintainers" }]
+keywords = ["bubblewrap", "bwrap", "sandbox", "linux", "namespaces"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Operating System Kernels :: Linux",
+]
+
+[project.urls]
+Homepage = "https://github.com/anomalyco/HALO"
+Source = "https://github.com/anomalyco/HALO/tree/main/bubblewrap-bin"
+Upstream = "https://github.com/containers/bubblewrap"
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bubblewrap_bin"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/bubblewrap_bin/_bin/bwrap" = "bubblewrap_bin/_bin/bwrap"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/**",
+    "scripts/**",
+    "tests/**",
+    "README.md",
+    "LICENSE",
+    "VENDORED_BWRAP_VERSION",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

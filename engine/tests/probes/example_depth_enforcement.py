@@ -60,6 +60,7 @@ async def _build_run_state(cfg) -> EngineRunState:
         trace_store=trace_store,
         output_bus=EngineOutputBus(),
         config=cfg,
+        sandbox=None,
         runner=FakeRunner(),
     )
 

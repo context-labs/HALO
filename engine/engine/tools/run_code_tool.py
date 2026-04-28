@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from engine.sandbox.sandbox_config import (
-    CodeExecutionResult,
-    RunCodeArguments,
-    SandboxConfig,
-)
-from engine.sandbox.sandbox_runner import SandboxRunner
+from engine.sandbox.models import CodeExecutionResult, RunCodeArguments
 from engine.tools.tool_protocol import ToolContext
 
 
@@ -18,6 +11,11 @@ class RunCodeTool:
     a writable temp dir, and a wall-clock timeout. The tool result is a typed
     ``CodeExecutionResult`` regardless of pass/fail/timeout, so the calling model
     can keep reasoning even when user code crashed.
+
+    The tool itself is stateless: the live ``Sandbox`` comes through
+    ``tool_context.sandbox`` (wired by the per-run ``make_ctx`` factory).
+    Registration is gated upstream so ``tool_context.sandbox`` is always
+    populated when this tool runs.
     """
 
     name = "run_code"
@@ -28,24 +26,14 @@ class RunCodeTool:
     arguments_model = RunCodeArguments
     result_model = CodeExecutionResult
 
-    def __init__(
-        self,
-        sandbox_config: SandboxConfig,
-        sandbox_venv: Path | None = None,
-    ) -> None:
-        """Default ``sandbox_venv`` resolves to ``.sandbox-venv`` next to the engine package."""
-        self._sandbox_config = sandbox_config
-        self._default_venv = sandbox_venv or Path(__file__).resolve().parents[2] / ".sandbox-venv"
-
     async def run(
         self, tool_context: ToolContext, arguments: RunCodeArguments
     ) -> CodeExecutionResult:
-        """Run user code through ``SandboxRunner`` with the active TraceStore's trace/index paths."""
-        runner = tool_context.sandbox_runner or SandboxRunner(sandbox_venv=self._default_venv)
+        """Run user code through the run's ``Sandbox`` against the active TraceStore's paths."""
+        sandbox = tool_context.require_sandbox()
         store = tool_context.require_trace_store()
-        return await runner.run_python(
+        return await sandbox.run_python(
             code=arguments.code,
             trace_path=store.trace_path,
             index_path=store.index_path,
-            config=self._sandbox_config,
         )

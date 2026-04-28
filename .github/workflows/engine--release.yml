@@ -40,9 +40,14 @@ jobs:
     uses: ./.github/workflows/engine--unit-tests.yml
     secrets: inherit
 
+  bubblewrap-bin-checks:
+    name: bubblewrap-bin Checks
+    uses: ./.github/workflows/bubblewrap-bin--checks.yml
+    secrets: inherit
+
   integration-tests:
     name: Integration Tests
-    needs: [lint-format-typecheck, unit-tests]
+    needs: [lint-format-typecheck, unit-tests, bubblewrap-bin-checks]
     uses: ./.github/workflows/engine--integration-tests.yml
     secrets: inherit
 
@@ -156,6 +161,9 @@ jobs:
     needs: [bump-version, build]
     if: ${{ inputs.dry_run == false }}
     runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/project/halo-engine/${{ needs.bump-version.outputs.new_version }}/
@@ -183,13 +191,19 @@ jobs:
           path: engine/dist
 
       - name: Publish to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish
+        run: uv publish --trusted-publishing always
 
   summary:
     name: Release Summary
-    needs: [lint-format-typecheck, unit-tests, integration-tests, e2e-tests, bump-version, build, publish]
+    needs:
+      - lint-format-typecheck
+      - unit-tests
+      - bubblewrap-bin-checks
+      - integration-tests
+      - e2e-tests
+      - bump-version
+      - build
+      - publish
     if: always()
     runs-on: depot-ubuntu-latest
     steps:
@@ -200,6 +214,7 @@ jobs:
           NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
           LINT_RESULT: ${{ needs.lint-format-typecheck.result }}
           UNIT_RESULT: ${{ needs.unit-tests.result }}
+          BUBBLEWRAP_BIN_CHECKS_RESULT: ${{ needs.bubblewrap-bin-checks.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           E2E_RESULT: ${{ needs.e2e-tests.result }}
           BUMP_RESULT: ${{ needs.bump-version.result }}
@@ -213,11 +228,12 @@ jobs:
             echo "**New version:** ${NEW_VERSION:-unknown}"
             echo "**Dry run:** ${DRY_RUN}"
             echo ""
-            echo "**Lint/Format/Typecheck:** ${LINT_RESULT}"
-            echo "**Unit Tests:**            ${UNIT_RESULT}"
-            echo "**Integration:**           ${INTEGRATION_RESULT}"
-            echo "**E2E:**                   ${E2E_RESULT}"
-            echo "**Version Bump:**          ${BUMP_RESULT}"
-            echo "**Build:**                 ${BUILD_RESULT}"
-            echo "**Publish:**               ${PUBLISH_RESULT}"
+            echo "**Lint/Format/Typecheck:**  ${LINT_RESULT}"
+            echo "**Unit Tests:**             ${UNIT_RESULT}"
+            echo "**bubblewrap-bin Checks:**  ${BUBBLEWRAP_BIN_CHECKS_RESULT}"
+            echo "**Integration:**            ${INTEGRATION_RESULT}"
+            echo "**E2E:**                    ${E2E_RESULT}"
+            echo "**Version Bump:**           ${BUMP_RESULT}"
+            echo "**Build:**                  ${BUILD_RESULT}"
+            echo "**Publish:**                ${PUBLISH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
