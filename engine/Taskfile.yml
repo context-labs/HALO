@@ -152,7 +152,7 @@ tasks:
           --junitxml=test-results/unit.xml {{.CLI_ARGS}}
 
   test:integration:
-    desc: "Run engine integration tests (cross-platform; secrets via Infisical; pass pytest target after --)"
+    desc: "Run cross-platform integration tests (excludes ``-m live``; no secrets needed; pass pytest target after --)"
     deps: [_require-python]
     cmds:
       - mkdir -p test-results .cache/pytest-integration
@@ -163,10 +163,28 @@ tasks:
         else
           TARGETS="$CLI_ARGS"
         fi
+        {{.PYTHON_BIN}} -m pytest $TARGETS \
+          -m "not live" \
+          -o "cache_dir=.cache/pytest-integration" \
+          --junitxml=test-results/integration.xml
+
+  test:integration:live:
+    desc: "Run live integration tests (``-m live``; secrets via Infisical; pass pytest target after --)"
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results .cache/pytest-integration-live
+      - |
+        CLI_ARGS="{{.CLI_ARGS}}"
+        if [ -z "$CLI_ARGS" ]; then
+          TARGETS="tests/integration"
+        else
+          TARGETS="$CLI_ARGS"
+        fi
         infisical run --env=dev --path=/engine-tests ${INFISICAL_PROJECT_ID:+--projectId="$INFISICAL_PROJECT_ID"} -- \
           {{.PYTHON_BIN}} -m pytest $TARGETS \
-            -o "cache_dir=.cache/pytest-integration" \
-            --junitxml=test-results/integration.xml
+            -m live \
+            -o "cache_dir=.cache/pytest-integration-live" \
+            --junitxml=test-results/integration-live.xml
 
   test:integration-linux:
     desc: "Run Linux sandbox integration tests (real bubblewrap; runs only on Linux)"

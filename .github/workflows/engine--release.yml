@@ -50,9 +50,15 @@ jobs:
     uses: ./.github/workflows/engine--integration-tests.yml
     secrets: inherit
 
+  integration-tests-live:
+    name: Integration Tests (Live)
+    needs: [lint-format-typecheck, unit-tests]
+    uses: ./.github/workflows/engine--integration-tests-live.yml
+    secrets: inherit
+
   e2e-tests:
     name: E2E Tests
-    needs: [integration-tests]
+    needs: [integration-tests, integration-tests-live]
     uses: ./.github/workflows/engine--e2e-tests.yml
     secrets: inherit
 
@@ -232,6 +238,7 @@ jobs:
       - lint-format-typecheck
       - unit-tests
       - integration-tests
+      - integration-tests-live
       - e2e-tests
       - bump-version
       - build
@@ -248,6 +255,7 @@ jobs:
           LINT_RESULT: ${{ needs.lint-format-typecheck.result }}
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          INTEGRATION_LIVE_RESULT: ${{ needs.integration-tests-live.result }}
           E2E_RESULT: ${{ needs.e2e-tests.result }}
           BUMP_RESULT: ${{ needs.bump-version.result }}
           BUILD_RESULT: ${{ needs.build.result }}
@@ -264,6 +272,7 @@ jobs:
             echo "**Lint/Format/Typecheck:**  ${LINT_RESULT}"
             echo "**Unit Tests:**             ${UNIT_RESULT}"
             echo "**Integration:**            ${INTEGRATION_RESULT}"
+            echo "**Integration (Live):**     ${INTEGRATION_LIVE_RESULT}"
             echo "**E2E:**                    ${E2E_RESULT}"
             echo "**Version Bump:**           ${BUMP_RESULT}"
             echo "**Build:**                  ${BUILD_RESULT}"
