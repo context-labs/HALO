@@ -4,11 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.sandbox.runtime_mounts import discover_python_runtime_mounts
-from engine.sandbox.sandbox_availability import (
-    render_unavailable_warning,
-    resolve_sandbox_status,
-)
+from engine.sandbox.sandbox_availability import resolve_sandbox_runtime
 from engine.sandbox.sandbox_config import SandboxConfig
 from engine.sandbox.sandbox_runner import SandboxRunner
 from engine.traces.models.trace_index_config import TraceIndexConfig
@@ -16,15 +12,11 @@ from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
 async def _ready(tmp_path: Path, fixtures_dir: Path) -> tuple[SandboxRunner, Path, Path]:
-    status = resolve_sandbox_status()
-    if not status.available:
-        pytest.fail(
-            "Linux sandbox unavailable in CI; this must work for release.\n"
-            + render_unavailable_warning(status)
-        )
+    sandbox = resolve_sandbox_runtime()
+    if sandbox is None:
+        pytest.fail("Linux sandbox unavailable in CI; this must work for release.")
 
-    runtime_mounts = discover_python_runtime_mounts()
-    runner = SandboxRunner(sandbox_status=status, runtime_mounts=runtime_mounts)
+    runner = SandboxRunner(sandbox=sandbox)
 
     trace_path = tmp_path / "t.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())

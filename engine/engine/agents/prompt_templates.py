@@ -4,7 +4,7 @@ FINAL_SENTINEL = "<final/>"
 
 ROOT_SYSTEM_PROMPT_TEMPLATE = """\
 You are the root agent in the HALO engine. You explore OTel trace data
-using the provided tools: {tool_list}.
+using the tools the runtime provides.
 
 Depth rules:
 - You are at depth=0.
@@ -22,7 +22,8 @@ Instructions:
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are a HALO subagent at depth={depth} of maximum_depth={maximum_depth}. You answer a
-question delegated to you by a parent agent. You have these tools: {tool_list}.
+question delegated to you by a parent agent using the tools the runtime
+provides.
 
 If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
 concurrently — this cap is shared across the whole run.
@@ -52,19 +53,12 @@ def render_root_system_prompt(
     instructions: str,
     maximum_depth: int,
     maximum_parallel_subagents: int,
-    run_code_available: bool,
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
-
-    ``run_code_available`` controls whether the tool list mentions ``run_code``;
-    when sandboxing is unavailable we omit the clause so the model does not try
-    to call a tool that is not registered.
-    """
+    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract."""
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         instructions=instructions,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-        tool_list=_root_tool_list(run_code_available=run_code_available),
     )
 
 
@@ -74,7 +68,6 @@ def render_subagent_system_prompt(
     depth: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
-    run_code_available: bool,
 ) -> str:
     """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root."""
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
@@ -82,30 +75,4 @@ def render_subagent_system_prompt(
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-        tool_list=_subagent_tool_list(run_code_available=run_code_available),
     )
-
-
-def _root_tool_list(*, run_code_available: bool) -> str:
-    tools = [
-        "dataset overview",
-        "query/count/view/search traces",
-        "get_context_item",
-        "synthesize_traces",
-    ]
-    if run_code_available:
-        tools.append("run_code")
-    tools.append("call_subagent")
-    return ", ".join(tools)
-
-
-def _subagent_tool_list(*, run_code_available: bool) -> str:
-    tools = [
-        "trace tools",
-        "get_context_item",
-        "synthesize_traces",
-    ]
-    if run_code_available:
-        tools.append("run_code")
-    tools.append("call_subagent, if your depth permits")
-    return ", ".join(tools)

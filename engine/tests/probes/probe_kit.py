@@ -42,16 +42,9 @@ from engine.models.engine_output import (
     EngineStreamEvent,
 )
 from engine.models.messages import AgentMessage
-from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.tools.tool_protocol import ToolContext
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
-
-_PROBE_DISABLED_SANDBOX_STATUS = SandboxStatus.unavailable(
-    reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
-    diagnostic="probes never exercise the real sandbox",
-    remediation="not applicable in probes",
-)
 
 # --- Fixture paths -----------------------------------------------------------
 
@@ -308,8 +301,7 @@ async def make_run_state(
         trace_store=store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_PROBE_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
     if runner is not None:
         state.runner = runner

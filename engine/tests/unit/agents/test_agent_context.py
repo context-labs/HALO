@@ -177,34 +177,23 @@ def _engine_config(instructions: str = "Be brief.") -> EngineConfig:
     )
 
 
-def _expected_system(cfg: EngineConfig, *, run_code_available: bool = True) -> str:
+def _expected_system(cfg: EngineConfig) -> str:
     return render_root_system_prompt(
         instructions=cfg.root_agent.instructions,
         maximum_depth=cfg.maximum_depth,
         maximum_parallel_subagents=cfg.maximum_parallel_subagents,
-        run_code_available=run_code_available,
     )
 
 
 def test_from_input_messages_no_system_prepends() -> None:
     cfg = _engine_config()
     messages = [AgentMessage(role="user", content="Find errors")]
-    ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=True)
+    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
     assert ctx.items[0].role == "system"
     assert ctx.items[0].content == _expected_system(cfg)
     assert ctx.items[0].item_id == "sys-0"
     assert ctx.items[1].role == "user"
     assert ctx.items[1].content == "Find errors"
-
-
-def test_from_input_messages_omits_run_code_when_unavailable() -> None:
-    cfg = _engine_config()
-    messages = [AgentMessage(role="user", content="hi")]
-    ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=False)
-    rendered = ctx.items[0].content
-    assert isinstance(rendered, str)
-    assert "run_code" not in rendered
-    assert "call_subagent" in rendered
 
 
 def test_from_input_messages_continuation_passes_through() -> None:
@@ -216,7 +205,7 @@ def test_from_input_messages_continuation_passes_through() -> None:
         AgentMessage(role="assistant", content="Original A"),
         AgentMessage(role="user", content="Follow-up Q"),
     ]
-    ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=True)
+    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
     systems = [i for i in ctx.items if i.role == "system"]
     assert len(systems) == 1
     assert systems[0].content == sys_text
@@ -234,7 +223,7 @@ def test_from_input_messages_caller_system_left_alone() -> None:
         AgentMessage(role="system", content=custom_system),
         AgentMessage(role="user", content="Hi"),
     ]
-    ctx = AgentContext.from_input_messages(messages, cfg, run_code_available=True)
+    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
     # Caller's system preserved verbatim, engine does NOT replace it
     assert ctx.items[0].role == "system"
     assert ctx.items[0].content == custom_system

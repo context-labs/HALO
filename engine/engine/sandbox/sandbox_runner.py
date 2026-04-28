@@ -8,8 +8,7 @@ from engine.sandbox.platform_commands import (
     build_macos_sandbox_exec_command,
     render_macos_profile,
 )
-from engine.sandbox.runtime_mounts import PythonRuntimeMounts
-from engine.sandbox.sandbox_availability import SandboxBackend, SandboxStatus
+from engine.sandbox.sandbox_availability import SandboxBackend, SandboxRuntime
 from engine.sandbox.sandbox_bootstrap import render_bootstrap_script
 from engine.sandbox.sandbox_config import CodeExecutionResult, SandboxConfig
 from engine.sandbox.sandbox_paths import (
@@ -30,19 +29,8 @@ class SandboxRunner:
     output via ``run_process_capped``.
     """
 
-    def __init__(
-        self,
-        *,
-        sandbox_status: SandboxStatus,
-        runtime_mounts: PythonRuntimeMounts,
-    ) -> None:
-        if not sandbox_status.available or sandbox_status.executable is None:
-            raise RuntimeError(
-                "SandboxRunner constructed with unavailable SandboxStatus; "
-                "callers must gate on status.available."
-            )
-        self._sandbox_status = sandbox_status
-        self._runtime_mounts = runtime_mounts
+    def __init__(self, *, sandbox: SandboxRuntime) -> None:
+        self._sandbox = sandbox
 
     async def run_python(
         self,
@@ -53,10 +41,8 @@ class SandboxRunner:
         config: SandboxConfig,
     ) -> CodeExecutionResult:
         """Run user-supplied Python in the sandbox; returns a typed result regardless of pass/fail/timeout."""
-        backend = self._sandbox_status.backend
-        executable = self._sandbox_status.executable
-        if backend is None or executable is None:
-            raise RuntimeError("SandboxRunner has no resolved backend; this is a bug.")
+        backend = self._sandbox.backend
+        executable = self._sandbox.executable
 
         with tempfile.TemporaryDirectory(prefix="halo-sbx-") as tmp:
             work_dir = Path(tmp)
@@ -74,7 +60,7 @@ class SandboxRunner:
             policy = compose_policy(
                 trace_path=trace_path,
                 index_path=index_path,
-                runtime_mounts=self._runtime_mounts,
+                runtime_mounts=self._sandbox.runtime_mounts,
                 work_dir=work_dir,
                 sandbox_config=config,
             )

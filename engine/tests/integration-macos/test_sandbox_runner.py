@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.sandbox.runtime_mounts import discover_python_runtime_mounts
-from engine.sandbox.sandbox_availability import (
-    SandboxBackend,
-    render_unavailable_warning,
-    resolve_sandbox_status,
-)
+from engine.sandbox.sandbox_availability import SandboxBackend, resolve_sandbox_runtime
 from engine.sandbox.sandbox_config import SandboxConfig
 from engine.sandbox.sandbox_runner import SandboxRunner
 from engine.traces.models.trace_index_config import TraceIndexConfig
@@ -21,13 +16,10 @@ async def test_sandbox_runs_real_python_against_trace_store(
     tmp_path: Path, fixtures_dir: Path
 ) -> None:
     """``sandbox-exec``-backed sandbox executes user code with a working ``trace_store``."""
-    status = resolve_sandbox_status()
-    if not status.available:
-        pytest.fail(
-            "macOS sandbox unavailable in CI; this must work for release.\n"
-            + render_unavailable_warning(status)
-        )
-    assert status.backend == SandboxBackend.MACOS_SANDBOX_EXEC
+    sandbox = resolve_sandbox_runtime()
+    if sandbox is None:
+        pytest.fail("macOS sandbox unavailable in CI; this must work for release.")
+    assert sandbox.backend == SandboxBackend.MACOS_SANDBOX_EXEC
 
     trace_path = tmp_path / "traces.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
@@ -36,8 +28,7 @@ async def test_sandbox_runs_real_python_against_trace_store(
         trace_path=trace_path, config=TraceIndexConfig(index_path=index_path)
     )
 
-    runtime_mounts = discover_python_runtime_mounts()
-    runner = SandboxRunner(sandbox_status=status, runtime_mounts=runtime_mounts)
+    runner = SandboxRunner(sandbox=sandbox)
 
     result = await runner.run_python(
         code="print('count=', trace_store.trace_count)",

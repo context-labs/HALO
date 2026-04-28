@@ -22,7 +22,6 @@ import sys
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
-from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.tools.subagent_tool_factory import (
     _child_tools_for_depth,
     build_root_sdk_agent,
@@ -61,12 +60,7 @@ async def _build_run_state(cfg) -> EngineRunState:
         trace_store=trace_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=SandboxStatus.unavailable(
-            reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
-            diagnostic="probe never exercises the real sandbox",
-            remediation="not applicable in probes",
-        ),
-        runtime_mounts=None,
+        sandbox=None,
         runner=FakeRunner(),
     )
 

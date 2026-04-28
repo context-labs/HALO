@@ -10,9 +10,7 @@ from engine.sandbox import sandbox_availability
 from engine.sandbox.sandbox_availability import (
     HALO_BWRAP_ENV_VAR,
     SandboxBackend,
-    SandboxUnavailableReason,
-    render_unavailable_warning,
-    resolve_sandbox_status,
+    resolve_sandbox_runtime,
 )
 
 
@@ -56,9 +54,9 @@ def test_linux_probe_argv_is_explicit_and_empty_rootfs(
         captured_argv=captured_argv,
     )
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is True
+    assert runtime is not None
     info_fd = captured_argv[7]
     assert captured_argv == [
         str(bwrap),
@@ -84,11 +82,11 @@ def test_linux_resolves_env_bwrap_first(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(sandbox_availability, "_packaged_bwrap", lambda: None)
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is True
-    assert status.backend == SandboxBackend.LINUX_BWRAP_SYSTEM
-    assert status.executable == env_bwrap
+    assert runtime is not None
+    assert runtime.backend == SandboxBackend.LINUX_BWRAP_SYSTEM
+    assert runtime.executable == env_bwrap
 
 
 def test_linux_resolves_packaged_bwrap_when_system_missing(
@@ -103,27 +101,33 @@ def test_linux_resolves_packaged_bwrap_when_system_missing(
     monkeypatch.setattr(sandbox_availability, "_packaged_bwrap", lambda: packaged)
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is True
-    assert status.backend == SandboxBackend.LINUX_BWRAP_PACKAGED
-    assert status.executable == packaged
+    assert runtime is not None
+    assert runtime.backend == SandboxBackend.LINUX_BWRAP_PACKAGED
+    assert runtime.executable == packaged
 
 
-def test_linux_missing_bwrap_reports_missing_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_linux_missing_bwrap_returns_none(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(sandbox_availability.platform, "system", lambda: "Linux")
     monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(sandbox_availability.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(sandbox_availability, "_packaged_bwrap", lambda: None)
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is False
-    assert status.reason == SandboxUnavailableReason.MISSING_BACKEND
+    assert runtime is None
+    err = capsys.readouterr().err
+    assert "Reason (missing-backend):" in err
+    assert "bubblewrap" in err.lower()
 
 
-def test_linux_missing_env_path_reports_missing_backend(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_linux_missing_env_path_returns_none_with_path_in_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nonexistent = tmp_path / "does-not-exist"
 
@@ -132,18 +136,18 @@ def test_linux_missing_env_path_reports_missing_backend(
     monkeypatch.setattr(sandbox_availability.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(sandbox_availability, "_packaged_bwrap", lambda: None)
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is False
-    assert status.reason == SandboxUnavailableReason.MISSING_BACKEND
-    assert (
-        status.diagnostic
-        == f"bwrap candidate from {HALO_BWRAP_ENV_VAR} override does not exist: {nonexistent}"
-    )
+    assert runtime is None
+    err = capsys.readouterr().err
+    assert "Reason (missing-backend):" in err
+    assert str(nonexistent) in err
 
 
-def test_linux_probe_failure_reports_namespace_denied(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_linux_probe_failure_returns_none_with_namespace_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
@@ -158,11 +162,12 @@ def test_linux_probe_failure_reports_namespace_denied(
         stderr=b"bwrap: setting up uid map: Operation not permitted\n",
     )
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is False
-    assert status.reason == SandboxUnavailableReason.NAMESPACE_DENIED
-    assert "Operation not permitted" in status.diagnostic
+    assert runtime is None
+    err = capsys.readouterr().err
+    assert "Reason (namespace-denied):" in err
+    assert "Operation not permitted" in err
 
 
 def test_macos_resolves_sandbox_exec(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,42 +178,31 @@ def test_macos_resolves_sandbox_exec(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda name: "/usr/bin/sandbox-exec" if name == "sandbox-exec" else None,
     )
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is True
-    assert status.backend == SandboxBackend.MACOS_SANDBOX_EXEC
-    assert status.executable == Path("/usr/bin/sandbox-exec")
+    assert runtime is not None
+    assert runtime.backend == SandboxBackend.MACOS_SANDBOX_EXEC
+    assert runtime.executable == Path("/usr/bin/sandbox-exec")
 
 
-def test_macos_missing_sandbox_exec_reports_missing_backend(
-    monkeypatch: pytest.MonkeyPatch,
+def test_macos_missing_sandbox_exec_returns_none(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(sandbox_availability.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sandbox_availability.shutil, "which", lambda *_a, **_kw: None)
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is False
-    assert status.reason == SandboxUnavailableReason.MISSING_BACKEND
+    assert runtime is None
+    assert "Reason (missing-backend):" in capsys.readouterr().err
 
 
-def test_unsupported_platform_reports_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsupported_platform_returns_none(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(sandbox_availability.platform, "system", lambda: "Windows")
 
-    status = resolve_sandbox_status()
+    runtime = resolve_sandbox_runtime()
 
-    assert status.available is False
-    assert status.reason == SandboxUnavailableReason.UNSUPPORTED_PLATFORM
-
-
-def test_unavailable_warning_includes_reason_and_remediation() -> None:
-    status = sandbox_availability.SandboxStatus.unavailable(
-        reason=SandboxUnavailableReason.NAMESPACE_DENIED,
-        diagnostic="user namespaces disabled",
-        remediation="enable user namespaces",
-    )
-
-    rendered = render_unavailable_warning(status)
-
-    assert "Reason (namespace-denied):\n  user namespaces disabled" in rendered
-    assert "  enable user namespaces" in rendered
+    assert runtime is None
+    assert "Reason (unsupported-platform):" in capsys.readouterr().err

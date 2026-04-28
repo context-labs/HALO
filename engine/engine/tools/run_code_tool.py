@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from engine.sandbox.runtime_mounts import PythonRuntimeMounts
-from engine.sandbox.sandbox_availability import SandboxStatus
+from engine.sandbox.sandbox_availability import SandboxRuntime
 from engine.sandbox.sandbox_config import (
     CodeExecutionResult,
     RunCodeArguments,
@@ -18,6 +17,10 @@ class RunCodeTool:
     a writable temp dir, and a wall-clock timeout. The tool result is a typed
     ``CodeExecutionResult`` regardless of pass/fail/timeout, so the calling model
     can keep reasoning even when user code crashed.
+
+    The constructor takes a ``SandboxRuntime`` directly: by the time the tool
+    factory builds this tool, the sandbox is known to be ready. There is no
+    representable "available but missing mounts" state to defend against.
     """
 
     name = "run_code"
@@ -28,30 +31,15 @@ class RunCodeTool:
     arguments_model = RunCodeArguments
     result_model = CodeExecutionResult
 
-    def __init__(
-        self,
-        *,
-        sandbox_config: SandboxConfig,
-        sandbox_status: SandboxStatus,
-        runtime_mounts: PythonRuntimeMounts,
-    ) -> None:
-        if not sandbox_status.available:
-            raise RuntimeError(
-                "RunCodeTool constructed with unavailable SandboxStatus; "
-                "the tool factory must gate on status.available."
-            )
+    def __init__(self, *, sandbox_config: SandboxConfig, sandbox: SandboxRuntime) -> None:
         self._sandbox_config = sandbox_config
-        self._sandbox_status = sandbox_status
-        self._runtime_mounts = runtime_mounts
+        self._sandbox = sandbox
 
     async def run(
         self, tool_context: ToolContext, arguments: RunCodeArguments
     ) -> CodeExecutionResult:
         """Run user code through ``SandboxRunner`` with the active TraceStore's trace/index paths."""
-        runner = tool_context.sandbox_runner or SandboxRunner(
-            sandbox_status=self._sandbox_status,
-            runtime_mounts=self._runtime_mounts,
-        )
+        runner = tool_context.sandbox_runner or SandboxRunner(sandbox=self._sandbox)
         store = tool_context.require_trace_store()
         return await runner.run_python(
             code=arguments.code,
