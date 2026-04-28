@@ -17,15 +17,20 @@ _LINUX_MISSING_REMEDIATION = (
 
 _LINUX_NAMESPACE_REMEDIATION = (
     "bubblewrap is on the host but the kernel/runtime denied a sandbox operation.\n"
-    "Easiest fix: install bubblewrap from your distro's package manager — the\n"
-    "system package ships with the right policy hooks (e.g. AppArmor profile\n"
-    "on Ubuntu 24.04+) that the bundled binary doesn't have:\n"
-    "  Debian/Ubuntu: sudo apt install bubblewrap\n"
-    "  Fedora/RHEL:   sudo dnf install bubblewrap\n"
-    "If you're already using the system bwrap and still hitting this, the\n"
-    "host or container is restricting user namespaces:\n"
+    "If you're running in Docker/Kubernetes, the host or container is restricting\n"
+    "user namespaces:\n"
     "  Docker:     run with --privileged or relax seccomp/userns restrictions.\n"
     "  Kubernetes: use securityContext.privileged: true."
+)
+
+# util-linux ``unshare`` always wraps bwrap so the network namespace is created
+# by util-linux, not by bwrap. Bypassing bwrap's loopback configuration avoids
+# AppArmor's ``RTM_NEWADDR`` denial on Ubuntu 24.04+ and is fully isolating:
+# the new netns has no interfaces, so the sandboxed process cannot reach the
+# host network. util-linux is part of every supported distro's base install.
+_UNSHARE = next(
+    (p for p in (Path("/usr/bin/unshare"), Path("/bin/unshare")) if p.is_file()),
+    None,
 )
 
 
@@ -48,10 +53,17 @@ class LinuxClient:
         Resolution order: system ``bwrap`` on ``PATH`` (which is
         ``/usr/bin/bwrap`` on distros that ship the package) → packaged
         ``bwrap`` from the optional ``bubblewrap-bin`` dependency. If the
-        system probe fails (e.g. AppArmor on Ubuntu 24.04+ blocking an
-        unprivileged user namespace), we fall through to the packaged copy
-        rather than give up. On failure, logs a warning and returns ``None``.
+        system probe fails (e.g. AppArmor on Ubuntu 24.04+), we fall through
+        to the packaged copy rather than give up. On failure, logs a warning
+        and returns ``None``.
         """
+        if _UNSHARE is None:
+            log_unavailable(
+                diagnostic="util-linux unshare not found at /usr/bin/unshare or /bin/unshare",
+                remediation=_LINUX_MISSING_REMEDIATION,
+            )
+            return None
+
         failures: list[str] = []
 
         system = shutil.which("bwrap")
@@ -90,13 +102,14 @@ class LinuxClient:
         readonly_paths: list[Path],
         library_paths: list[Path],
     ) -> list[str]:
-        """Build the ``bwrap`` argv that runs ``script_path`` under namespace isolation.
+        """Build the argv that runs ``script_path`` under namespace isolation.
 
         Hardening:
-          - Explicit user, PID, and network namespaces. This matches Codex's
-            current bwrap shape more closely than ``--unshare-all`` and avoids
-            asking the host for cgroup/IPC/UTS namespaces this sandbox does not
-            need.
+          - Outer ``unshare --user --map-current-user --net`` creates the user
+            and network namespaces. The new netns has no interfaces, so the
+            sandboxed process has no host network access.
+          - Inner ``bwrap --unshare-user --unshare-pid`` creates the mount
+            and pid namespaces and constructs the filesystem view.
           - ``--clearenv`` then a small explicit env set; no host env leaks.
           - ``--die-with-parent`` and ``--new-session`` to bound process lifetime.
           - ``--dev /dev`` mounts a fresh tmpfs containing only
@@ -115,13 +128,19 @@ class LinuxClient:
           - ``work_dir`` is the writable workspace, replacing ``$HOME``/
             ``$TMPDIR`` for the sandboxed process.
         """
+        assert _UNSHARE is not None, "resolve() must succeed before build_argv()"
+
         argv: list[str] = [
+            str(_UNSHARE),
+            "--user",
+            "--map-current-user",
+            "--net",
+            "--",
             str(self.executable),
             "--die-with-parent",
             "--new-session",
             "--unshare-user",
             "--unshare-pid",
-            "--unshare-net",
             "--clearenv",
             "--dev",
             "/dev",
@@ -179,15 +198,13 @@ def _packaged_bwrap() -> Path | None:
 
 
 def _probe(executable: Path) -> str | None:
-    """Run ``bwrap`` with hardening flags and verify the sandbox is fully usable.
+    """Run ``bwrap`` under outer ``unshare`` and verify the sandbox is fully usable.
 
     bwrap writes a JSON status object containing ``"child-pid"`` to the FD
     passed via ``--info-fd`` after the core namespaces are created. To know
-    that network namespace setup succeeded too, we rely on the
-    in-sandbox ``execvp`` reaching the kernel and writing the ENOENT
-    diagnostic ``"bwrap: execvp <path>: No such file or directory"`` to
-    stderr — bwrap only reaches that point if every preceding setup step
-    (namespaces, mounts, loopback) succeeded.
+    that setup completed all the way to exec, we rely on the in-sandbox
+    ``execvp`` reaching the kernel and writing the ENOENT diagnostic
+    ``"bwrap: execvp <path>: No such file or directory"`` to stderr.
 
     Probe success requires both signals:
       1. ``"child-pid"`` in ``--info-fd`` output (namespaces created), and
@@ -200,6 +217,7 @@ def _probe(executable: Path) -> str | None:
 
     Returns ``None`` on success, or a diagnostic string on failure.
     """
+    assert _UNSHARE is not None, "resolve() guards on _UNSHARE before calling _probe()"
     if not executable.is_file():
         return "missing executable"
 
@@ -208,10 +226,14 @@ def _probe(executable: Path) -> str | None:
     proc: subprocess.Popen[bytes] | None = None
 
     argv = [
+        str(_UNSHARE),
+        "--user",
+        "--map-current-user",
+        "--net",
+        "--",
         str(executable),
         "--unshare-user",
         "--unshare-pid",
-        "--unshare-net",
         "--die-with-parent",
         "--new-session",
         "--clearenv",
