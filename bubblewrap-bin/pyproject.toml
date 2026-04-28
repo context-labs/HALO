@@ -27,14 +27,14 @@ requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bubblewrap_bin"]
+packages = ["src/bubblewrap_bin"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"bubblewrap_bin/_bin/bwrap" = "bubblewrap_bin/_bin/bwrap"
+"src/bubblewrap_bin/_bin/bwrap" = "bubblewrap_bin/_bin/bwrap"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "bubblewrap_bin/**",
+    "src/**",
     "scripts/**",
     "tests/**",
     "README.md",
@@ -48,5 +48,5 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src"]
 testpaths = ["tests"]
