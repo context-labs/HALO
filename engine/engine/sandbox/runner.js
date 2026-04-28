@@ -72,26 +72,48 @@ globalThis.addEventListener("unhandledrejection", (event) => {
 
 const pyodide = await pyodideModule.loadPyodide();
 
-// Resolve sibling Python files via ``import.meta.url``. ``Deno.readTextFileSync``
-// requires --allow-read, scoped by the parent process to exactly these
-// files (see ``PyodideAssets`` on the host side).
+// Resolve sibling files via ``import.meta.url``. ``Deno.readTextFileSync``
+// and ``Deno.readDirSync`` are gated by ``--allow-read``, which the parent
+// process scopes to exactly these paths (see ``Sandbox._build_argv``).
 const runtimePath = new URL("./pyodide_runtime.py", import.meta.url).pathname;
-const compatPath = new URL("./pyodide_trace_compat.py", import.meta.url).pathname;
+const engineInitPath = new URL("../__init__.py", import.meta.url).pathname;
+const tracesPkgPath = new URL("../traces", import.meta.url).pathname;
 
-// Stage the trace compat shim into Pyodide's FS at ``/halo/`` so the
-// runtime's bootstrap can ``import pyodide_trace_compat`` after it adds
-// ``/halo`` to ``sys.path``. Mirror layout: one shared dir for HALO's
-// stdlib-only modules.
-pyodide.FS.mkdir("/halo");
+// Stage the host's ``engine`` package into Pyodide's WASM filesystem at
+// ``/halo/engine/`` so the in-Pyodide bootstrap can simply
+// ``import engine.traces.trace_store``. The runtime adds ``/halo`` to
+// ``sys.path`` once its module loads. Only ``engine/__init__.py`` plus
+// the ``engine/traces/`` subtree are staged — that's the entire import
+// graph the WASM-side TraceStore needs, and there's no point copying
+// host-only modules (sandbox itself, agents, tools, etc.).
+pyodide.FS.mkdirTree("/halo/engine");
 pyodide.FS.writeFile(
-  "/halo/pyodide_trace_compat.py",
-  Deno.readTextFileSync(compatPath),
+  "/halo/engine/__init__.py",
+  Deno.readTextFileSync(engineInitPath),
 );
+copyDirToPyodide(tracesPkgPath, "/halo/engine/traces");
 
 // Define ``halo_bootstrap`` and ``halo_execute`` in the Pyodide globals.
 // Single ``runPython`` at boot — every per-call request from the host
 // just invokes the live functions, no Python codegen at request time.
 pyodide.runPython(Deno.readTextFileSync(runtimePath));
+
+function copyDirToPyodide(srcAbs, destVirtual) {
+  // Recursively copy ``.py`` files under ``srcAbs`` into the Pyodide
+  // virtual FS at ``destVirtual``. Skips ``__pycache__`` because nothing
+  // inside it is import-relevant and the bytecode would be host-arch.
+  pyodide.FS.mkdirTree(destVirtual);
+  for (const entry of Deno.readDirSync(srcAbs)) {
+    if (entry.name === "__pycache__") continue;
+    const srcChild = `${srcAbs}/${entry.name}`;
+    const destChild = `${destVirtual}/${entry.name}`;
+    if (entry.isFile && entry.name.endsWith(".py")) {
+      pyodide.FS.writeFile(destChild, Deno.readTextFileSync(srcChild));
+    } else if (entry.isDirectory) {
+      copyDirToPyodide(srcChild, destChild);
+    }
+  }
+}
 
 // =============================================================================
 // Method handlers
@@ -151,7 +173,13 @@ function executeCode(params) {
 
 // Preload numpy + pandas so user code can rely on them without a per-execute
 // load delay. These are the only data libraries HALO supports.
-await pyodide.loadPackage(["numpy", "pandas"]);
+// Preload numpy + pandas (user analysis surface) and pydantic (which
+// the staged ``engine.traces`` package imports). Pyodide resolves
+// transitive dependencies from its lockfile, so listing ``pydantic`` is
+// enough to pull pydantic_core + typing_extensions + annotated_types +
+// typing_inspection. All required wheels are pre-cached by
+// ``Sandbox._ensure_pyodide_wheels``; this call is offline.
+await pyodide.loadPackage(["numpy", "pandas", "pydantic"]);
 
 // Tell the host we're ready. The host parses the first line as a sentinel.
 console.log(jsonrpcResult({ ready: true }, 0));
