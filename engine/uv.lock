@@ -46,16 +46,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bubblewrap-bin"
-version = "0.1.0"
-source = { editable = "../bubblewrap-bin" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = "==9.0.3" }]
-
-[[package]]
 name = "certifi"
 version = "2026.4.22"
 source = { registry = "https://pypi.org/simple" }
@@ -204,7 +194,6 @@ name = "halo-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "bubblewrap-bin", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy" },
     { name = "openai" },
     { name = "openai-agents" },
@@ -222,7 +211,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bubblewrap-bin", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')", editable = "../bubblewrap-bin" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "openai", specifier = "==2.32.0" },
     { name = "openai-agents", specifier = "==0.14.5" },
