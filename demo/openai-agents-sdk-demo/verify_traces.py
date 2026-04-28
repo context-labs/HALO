@@ -1,5 +1,4 @@
 """Verification script from openai-agents-sdk-span-conversion.md → 'Verifying the output'."""
-import gzip
 import json
 import re
 import sys
@@ -7,12 +6,7 @@ import sys
 
 def verify(path: str) -> int:
     count = 0
-    if path.endswith(".gz") or path.endswith(".gzip"):
-        open_func = lambda p: gzip.open(p, "rt")
-    else:
-        open_func = lambda p: open(p, "rt")
-
-    with open_func(path) as fh:
+    with open(path, "rt") as fh:
         for raw in fh:
             line = json.loads(raw)
             assert set(line) >= {
@@ -35,6 +29,6 @@ def verify(path: str) -> int:
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "traces.jsonl.gz"
+    path = sys.argv[1] if len(sys.argv) > 1 else "traces.jsonl"
     n = verify(path)
     print(f"OK: {n} spans passed all spec assertions")
