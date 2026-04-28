@@ -27,6 +27,7 @@ from tests.integration.tool_isolation_kit import (
 )
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_synthesize_traces_through_sdk_adapter_live(
     tmp_path: Path, fixtures_dir: Path
