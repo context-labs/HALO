@@ -46,6 +46,29 @@ def _split_into_chunks(
     return chunks
 
 
+def _process_chunk(
+    trace_path: Path, chunk: list[tuple[int, int]]
+) -> dict[str, _RowAccumulator]:
+    """Stage 2 worker: read each (offset, length) from the file, parse, and accumulate locally.
+
+    Top-level so it pickles cleanly for ``multiprocessing.Pool.map``. Each worker
+    opens the file independently and seeks to its tuples — the OS page cache makes
+    repeated reads of nearby bytes essentially free after the stage-1 scan.
+    """
+    rows: dict[str, _RowAccumulator] = {}
+    with trace_path.open("rb") as fh:
+        for byte_offset, byte_length in chunk:
+            fh.seek(byte_offset)
+            raw = fh.read(byte_length)
+            stripped = raw.rstrip(b"\n")
+            if not stripped:
+                continue
+            span = SpanRecord.model_validate_json(stripped)
+            acc = rows.setdefault(span.trace_id, _RowAccumulator(trace_id=span.trace_id))
+            acc.absorb(span=span, byte_offset=byte_offset, byte_length=len(stripped))
+    return rows
+
+
 # TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
