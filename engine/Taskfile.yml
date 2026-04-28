@@ -1,0 +1,219 @@
+version: "3"
+output: prefixed
+
+vars:
+  PYTHON_BIN: '{{.PYTHON_BIN | default ".venv/bin/python"}}'
+  RUFF_CACHE_DIR: '{{.RUFF_CACHE_DIR | default ".cache/ruff"}}'
+  UV_BIN: '{{.UV_BIN | default "uv"}}'
+  UV_VERSION: "0.11.7"
+  VENV: "{{.TASKFILE_DIR}}/.venv"
+
+tasks:
+  env:setup:
+    desc: "Install engine dependencies and git hooks (pass -- -y to skip confirmations)"
+    cmds:
+      - task: install-uv
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
+      - |
+        echo "[setup] Syncing engine venv from lockfile..."
+        UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
+        echo "[setup] Engine venv ready at {{.VENV}}"
+      - task: setup-git-hooks
+
+  ci:setup:
+    desc: "Install engine dependencies for CI (no git hooks)"
+    cmds:
+      - task: install-uv
+        vars:
+          CLI_ARGS: "-y"
+      - |
+        echo "[ci-setup] Syncing engine venv from lockfile..."
+        UV_PROJECT_ENVIRONMENT="{{.VENV}}" {{.UV_BIN}} sync --frozen --group dev
+        echo "[ci-setup] Engine venv ready at {{.VENV}}"
+
+  setup-git-hooks:
+    desc: Install engine git hooks
+    cmds:
+      - ./scripts/setup-git-hooks.sh
+
+  install-uv:
+    desc: "Ensure uv is installed and pinned to {{.UV_VERSION}} (pass -- -y to skip confirmation)"
+    run: once
+    interactive: true
+    vars:
+      SKIP_CONFIRM:
+        sh: case "{{.CLI_ARGS}}" in *-y*) echo "true" ;; *) echo "false" ;; esac
+    cmds:
+      - |
+        echo "Checking if uv is installed"
+        need_install=0
+        if ! command -v {{.UV_BIN}} >/dev/null 2>&1; then
+          echo "uv is not installed"
+          need_install=1
+        else
+          CURRENT_UV_VERSION="$({{.UV_BIN}} --version 2>/dev/null | awk '{print $2}')"
+          if [[ "$CURRENT_UV_VERSION" != "{{.UV_VERSION}}" ]]; then
+            echo "uv version is not {{.UV_VERSION}} (installed version: $CURRENT_UV_VERSION)"
+            need_install=1
+          fi
+        fi
+
+        if [[ "$need_install" == "1" ]]; then
+          if [[ "{{.SKIP_CONFIRM}}" != "true" ]]; then
+            echo "Press enter to install uv {{.UV_VERSION}}"
+            read
+          else
+            echo "Installing uv {{.UV_VERSION}}"
+          fi
+
+          curl -LsSf "https://astral.sh/uv/{{.UV_VERSION}}/install.sh" | sh
+          export PATH="$HOME/.local/bin:$PATH"
+
+          if ! command -v {{.UV_BIN}} >/dev/null 2>&1; then
+            echo "Failed to install uv. Please install manually from https://docs.astral.sh/uv/"
+            exit 1
+          fi
+
+          INSTALLED_UV_VERSION="$({{.UV_BIN}} --version 2>/dev/null | awk '{print $2}')"
+          if [[ "$INSTALLED_UV_VERSION" != "{{.UV_VERSION}}" ]]; then
+            echo "Expected uv {{.UV_VERSION}}, got '$INSTALLED_UV_VERSION'. Ensure $HOME/.local/bin is on PATH."
+            exit 1
+          fi
+        fi
+
+        echo "uv $({{.UV_BIN}} --version | awk '{print $2}') is correctly installed"
+
+  _require-python:
+    internal: true
+    cmds:
+      - |
+        if [ ! -x "{{.PYTHON_BIN}}" ]; then
+          echo "Python interpreter not found at {{.PYTHON_BIN}}" >&2
+          echo "Run 'task env:setup' first." >&2
+          exit 1
+        fi
+
+  pinned-versions:
+    desc: Validate pinned Python package versions
+    deps: [_require-python]
+    cmds:
+      - "{{.PYTHON_BIN}} ./scripts/validate_pinned_versions.py"
+
+  lint:
+    desc: Run Ruff lint checks
+    deps: [_require-python]
+    cmds:
+      - '{{.PYTHON_BIN}} -m ruff check --cache-dir "{{.RUFF_CACHE_DIR}}" .'
+
+  lint:fix:
+    desc: Auto-fix Ruff lint issues
+    deps: [_require-python]
+    cmds:
+      - '{{.PYTHON_BIN}} -m ruff check --fix --cache-dir "{{.RUFF_CACHE_DIR}}" .'
+
+  format:
+    desc: Check Ruff formatting
+    deps: [_require-python]
+    cmds:
+      - "{{.PYTHON_BIN}} -m ruff format --check ."
+
+  format:fix:
+    desc: Auto-fix Ruff formatting
+    deps: [_require-python]
+    cmds:
+      - "{{.PYTHON_BIN}} -m ruff format ."
+
+  format:files:
+    desc: Auto-fix Ruff formatting for specific files
+    deps: [_require-python]
+    cmds:
+      - |
+        if [ -z "{{.CLI_ARGS}}" ]; then
+          exit 0
+        fi
+        set -- {{.CLI_ARGS}}
+        {{.PYTHON_BIN}} -m ruff format "$@"
+
+  typecheck:
+    desc: Run basedpyright type checks
+    deps: [_require-python]
+    cmds:
+      - "{{.PYTHON_BIN}} -m basedpyright"
+
+  test:unit:
+    desc: Run engine unit tests
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results .cache/pytest-unit
+      - |
+        {{.PYTHON_BIN}} -m pytest tests/unit \
+          -o "cache_dir=.cache/pytest-unit" \
+          --junitxml=test-results/unit.xml {{.CLI_ARGS}}
+
+  test:integration:
+    desc: "Run engine integration tests (secrets via Infisical; pass pytest target after --)"
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results .cache/pytest-integration
+      - |
+        CLI_ARGS="{{.CLI_ARGS}}"
+        if [ -z "$CLI_ARGS" ]; then
+          TARGETS="tests/integration"
+        else
+          TARGETS="$CLI_ARGS"
+        fi
+        infisical run --env=dev --path=/engine-tests -- \
+          {{.PYTHON_BIN}} -m pytest $TARGETS \
+            -o "cache_dir=.cache/pytest-integration" \
+            --junitxml=test-results/integration.xml
+
+  test:e2e:
+    desc: "Run engine E2E tests (secrets via Infisical; pass pytest target after --)"
+    deps: [_require-python]
+    cmds:
+      - mkdir -p test-results/e2e .cache/pytest-e2e
+      - |
+        CLI_ARGS="{{.CLI_ARGS}}"
+        if [ -z "$CLI_ARGS" ]; then
+          TARGETS="tests/e2e/test_*.py"
+        else
+          TARGETS="$CLI_ARGS"
+        fi
+        infisical run --env=dev --path=/engine-tests -- \
+          {{.PYTHON_BIN}} -m pytest $TARGETS \
+            -o "cache_dir=.cache/pytest-e2e" \
+            --junitxml=test-results/e2e/junit.xml \
+            --durations=10 \
+            -vv -s -rA
+
+  check:
+    desc: Run pinned-version, lint, format, type, and unit checks
+    cmds:
+      - task: pinned-versions
+      - task: lint
+      - task: format
+      - task: typecheck
+      - task: test:unit
+
+  check-fix:
+    desc: Run checks with auto-fix enabled
+    cmds:
+      - task: pinned-versions
+      - task: lint:fix
+      - task: format:fix
+      - task: typecheck
+      - task: test:unit
+
+  check:pre-push:
+    desc: Run engine pre-push checks in parallel
+    deps:
+      - task: pinned-versions
+      - task: lint
+      - task: typecheck
+      - task: test:unit
+
+  relock:
+    desc: Regenerate uv.lock
+    cmds:
+      - "{{.UV_BIN}} lock"

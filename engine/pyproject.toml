@@ -1,0 +1,57 @@
+[project]
+name = "halo-engine"
+version = "0.1.0"
+description = "HALO engine: LLM agent runtime over OTel trace data."
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+dependencies = [
+    "pydantic==2.13.3",
+    "openai==2.32.0",
+    "openai-agents==0.14.5",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright==1.38.3",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.3.0",
+    "ruff==0.15.12",
+]
+
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["engine"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests/unit"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Enabled rule families:
+# E/W: pycodestyle errors and warnings
+# F: Pyflakes correctness checks
+# I: import sorting
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E402",  # module-import-not-at-top: allowed where setup code must run before imports
+    "E501",  # line-too-long: handled by the formatter where it can safely wrap
+    "E741",  # ambiguous-variable-name: allow short names like l/O/I in local contexts
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]      # imported-but-unused: tests sometimes import fixtures/types for clarity
+"**/__init__.py" = ["F401"] # imported-but-unused: package init files can re-export names
+
+[tool.ruff.format]
+quote-style = "double"

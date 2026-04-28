@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export GIT_WORK_TREE="$REPO_ROOT"
+
+REFS_FILE="$(mktemp)"
+
+cleanup() {
+  rm -f "$REFS_FILE"
+}
+
+trap cleanup EXIT
+cat > "$REFS_FILE"
+
+REMOTE="${1:-}"
+URL="${2:-}"
+ENGINE_HOOK="$REPO_ROOT/engine/scripts/git-hooks/pre-push"
+
+if [[ -x "$ENGINE_HOOK" ]]; then
+  "$ENGINE_HOOK" "$REMOTE" "$URL" < "$REFS_FILE"
+fi
