@@ -138,3 +138,36 @@ def test_raw_text_delta_produces_delta_only() -> None:
     assert mapped.output_item is None
     assert mapped.delta is not None
     assert mapped.delta.text_delta == "par"
+
+
+def test_tool_call_and_output_have_distinct_item_ids_when_raw_id_missing() -> None:
+    """Regression: when the SDK's raw item lacks an ``id``, both the
+    tool_call and tool_output events used to fall back to the same
+    ``call_id`` for ``item_id``, so ``AgentContext._index`` overwrote the
+    first entry and ``get_context_item`` returned the wrong item.
+    """
+    mapper = OpenAiEventMapper()
+    call_event = _wrap_item(
+        SimpleNamespace(
+            type="tool_call_item",
+            raw_item=SimpleNamespace(
+                # No ``id`` attribute — exercises the fallback.
+                call_id="call_xyz",
+                name="query_traces",
+                arguments="{}",
+            ),
+        )
+    )
+    output_event = _wrap_item(
+        SimpleNamespace(
+            type="tool_call_output_item",
+            raw_item=SimpleNamespace(call_id="call_xyz", name="query_traces"),
+            output="ok",
+        )
+    )
+
+    call_mapped = mapper.to_mapped_event(call_event, execution=_exec(), is_root=True)
+    output_mapped = mapper.to_mapped_event(output_event, execution=_exec(), is_root=True)
+    assert call_mapped.context_item is not None
+    assert output_mapped.context_item is not None
+    assert call_mapped.context_item.item_id != output_mapped.context_item.item_id
