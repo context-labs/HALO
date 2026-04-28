@@ -25,6 +25,27 @@ def _index_line_offsets(trace_path: Path) -> list[tuple[int, int]]:
     return offsets
 
 
+def _split_into_chunks(
+    line_offsets: list[tuple[int, int]], n_workers: int
+) -> list[list[tuple[int, int]]]:
+    """Stage 2 prep: split into ``n_workers`` contiguous, order-preserving slices.
+
+    Caps ``n_workers`` at ``len(line_offsets)`` so no empty chunks are dispatched.
+    Returns ``[]`` for an empty input.
+    """
+    if not line_offsets:
+        return []
+    n = min(n_workers, len(line_offsets))
+    base, remainder = divmod(len(line_offsets), n)
+    chunks: list[list[tuple[int, int]]] = []
+    start = 0
+    for i in range(n):
+        size = base + (1 if i < remainder else 0)
+        chunks.append(line_offsets[start : start + size])
+        start += size
+    return chunks
+
+
 # TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
