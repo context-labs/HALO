@@ -407,3 +407,26 @@ async def test_parallel_matches_inline_byte_for_byte(
     )
 
     assert parallel_index.read_bytes() == inline_index.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_byte_offsets_within_trace_are_in_file_order(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
+    src = fixtures_dir / "medium_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+
+    rows = [
+        TraceIndexRow.model_validate_json(line)
+        for line in index_path.read_text().splitlines()
+    ]
+    for row in rows:
+        assert row.byte_offsets == sorted(row.byte_offsets), (
+            f"byte_offsets out of file order for trace {row.trace_id}: {row.byte_offsets}"
+        )
