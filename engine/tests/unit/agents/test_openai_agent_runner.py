@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import httpx
 import pytest
 from openai import APIConnectionError, BadRequestError
@@ -14,20 +12,12 @@ from engine.agents.openai_agent_runner import OpenAiAgentRunner, configure_defau
 from engine.errors import EngineAgentExhaustedError
 from engine.model_config import ModelConfig
 from engine.model_provider_config import ModelProviderConfig
+from tests.unit.agents._sdk_events import assistant_message_event
 
 
-def _assistant_event(text: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="m1",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text=text)],
-            ),
-        ),
-    )
+def _assistant_event(text: str):
+    """Local alias keeping the test bodies short."""
+    return assistant_message_event(item_id="m1", text=text)
 
 
 class _FakeStream:
