@@ -44,15 +44,21 @@ def build_root_sdk_agent(
 ) -> Agent[EngineRunState]:
     """Construct the root SDK Agent wired with all leaf tools plus a depth-aware ``call_subagent``.
 
-    Subagent spawning is gated by a single shared ``asyncio.Semaphore`` sized to
-    ``maximum_parallel_subagents`` — every subagent invocation across the run
-    contends on the same semaphore.
+    Subagent spawning is gated by a *per-depth* ``asyncio.Semaphore`` sized to
+    ``maximum_parallel_subagents``. Each depth has its own pool, so a parent
+    holding a depth-N slot while it waits for a depth-(N+1) grandchild
+    cannot block that grandchild — they contend on different semaphores.
+
+    A single shared semaphore would deadlock at default config: with
+    ``maximum_parallel_subagents`` parents holding every depth-N slot,
+    every depth-(N+1) grandchild would block forever waiting for a slot
+    its parent is holding.
     """
-    semaphore = asyncio.Semaphore(engine_config.maximum_parallel_subagents)
+    semaphores_by_depth = build_subagent_semaphores(engine_config)
     tools = _child_tools_for_depth(
         depth=0,
         run_state=run_state,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphores_by_depth,
         parent_execution=agent_execution,
         parent_context=agent_context,
     )
@@ -65,11 +71,24 @@ def build_root_sdk_agent(
     )
 
 
+def build_subagent_semaphores(engine_config) -> dict[int, asyncio.Semaphore]:
+    """Build one ``asyncio.Semaphore`` per spawnable depth.
+
+    Keys are depths ``1..maximum_depth`` (the depths a subagent can be spawned
+    at — depth 0 is the root and is never gated). Each semaphore is sized to
+    ``maximum_parallel_subagents``.
+    """
+    return {
+        d: asyncio.Semaphore(engine_config.maximum_parallel_subagents)
+        for d in range(1, engine_config.maximum_depth + 1)
+    }
+
+
 def _child_tools_for_depth(
     *,
     depth: int,
     run_state: EngineRunState,
-    semaphore: asyncio.Semaphore,
+    semaphores_by_depth: dict[int, asyncio.Semaphore],
     parent_execution: AgentExecution,
     parent_context: AgentContext,
 ) -> list[Tool]:
@@ -119,7 +138,7 @@ def _child_tools_for_depth(
     subagent_tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=depth + 1,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphores_by_depth,
         parent_execution=parent_execution,
     )
     return leaf_tools + [subagent_tool]
@@ -129,7 +148,7 @@ def _build_subagent_as_tool(
     *,
     run_state: EngineRunState,
     child_depth: int,
-    semaphore: asyncio.Semaphore,
+    semaphores_by_depth: dict[int, asyncio.Semaphore],
     parent_execution: AgentExecution,
 ) -> FunctionTool:
     """Wrap a fresh subagent as an SDK FunctionTool with depth gating, bus streaming, and a typed result.
@@ -189,7 +208,7 @@ def _build_subagent_as_tool(
         # would see the raw JSON wrapper instead of the delegated question.
         delegated_input = AgentAsToolInput.model_validate_json(raw_arguments).input
 
-        async with semaphore:
+        async with semaphores_by_depth[child_depth]:
             child_execution = AgentExecution(
                 agent_id=f"sub-{uuid.uuid4().hex[:8]}",
                 agent_name=engine_config.subagent.name,
@@ -218,7 +237,7 @@ def _build_subagent_as_tool(
                 tools=_child_tools_for_depth(
                     depth=child_depth,
                     run_state=run_state,
-                    semaphore=semaphore,
+                    semaphores_by_depth=semaphores_by_depth,
                     parent_execution=child_execution,
                     parent_context=child_context,
                 ),

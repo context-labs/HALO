@@ -121,7 +121,10 @@ async def probe_depth_one_subagent_has_no_subagent_tool() -> None:
     should NOT include another call_subagent (no nested delegation)."""
     cfg = make_default_config(maximum_depth=1)
     run_state = await _build_run_state(cfg)
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     parent = AgentExecution(
         agent_id="parent-x",
         agent_name="root",
@@ -132,7 +135,7 @@ async def probe_depth_one_subagent_has_no_subagent_tool() -> None:
     depth1_tools = _child_tools_for_depth(
         depth=1,
         run_state=run_state,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphore,
         parent_execution=parent,
     )
     names = _tool_names(depth1_tools)
@@ -148,7 +151,10 @@ async def probe_depth_two_intermediate_has_subagent_tool() -> None:
     (it can spawn depth-2), but depth-2 should not."""
     cfg = make_default_config(maximum_depth=2)
     run_state = await _build_run_state(cfg)
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     parent = AgentExecution(
         agent_id="parent-x",
         agent_name="root",
@@ -158,12 +164,12 @@ async def probe_depth_two_intermediate_has_subagent_tool() -> None:
     )
     d1 = _tool_names(
         _child_tools_for_depth(
-            depth=1, run_state=run_state, semaphore=semaphore, parent_execution=parent
+            depth=1, run_state=run_state, semaphores_by_depth=semaphore, parent_execution=parent
         )
     )
     d2 = _tool_names(
         _child_tools_for_depth(
-            depth=2, run_state=run_state, semaphore=semaphore, parent_execution=parent
+            depth=2, run_state=run_state, semaphores_by_depth=semaphore, parent_execution=parent
         )
     )
     _check(
