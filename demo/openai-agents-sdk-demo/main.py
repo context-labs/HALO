@@ -17,11 +17,13 @@ def main(
 ) -> None:
     load_dotenv()
     processor = setup_tracing()
-    agent = build_agent(model)
-    ctx = AgentContext(root=root.resolve())
-    result = Runner.run_sync(agent, question, context=ctx)
-    rprint(result.final_output)
-    processor.shutdown()
+    try:
+        agent = build_agent(model)
+        ctx = AgentContext(root=root.resolve())
+        result = Runner.run_sync(agent, question, context=ctx)
+        rprint(result.final_output)
+    finally:
+        processor.shutdown()
 
 
 if __name__ == "__main__":

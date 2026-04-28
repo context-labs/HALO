@@ -53,9 +53,11 @@ from my_app import build_agent  # your existing factory
 def main():
     load_dotenv()
     processor = setup_tracing(service_name="my-agent", project_id="my-project")
-    agent = build_agent()
-    # ... Runner.run_sync(agent, question) etc.
-    processor.shutdown()
+    try:
+        agent = build_agent()
+        # ... Runner.run_sync(agent, question) etc.
+    finally:
+        processor.shutdown()
 ```
 
 Order matters: `setup_tracing()` must run before the first `Agent(...)` so the processor is in place when the SDK starts emitting trace lifecycle events.

@@ -388,7 +388,9 @@ def _expand_messages(prefix: str, messages: Iterable[Mapping[str, Any]]) -> dict
             out[f"{prefix}.{i}.message.content"] = _json(content)
         # tool call fan-out
         for j, tc in enumerate(msg.get("tool_calls") or []):
-            fn = (tc or {}).get("function") or {}
+            if not tc:
+                continue
+            fn = tc.get("function") or {}
             out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.id"] = tc.get("id")
             out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.name"] = fn.get("name")
             out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.arguments"] = fn.get("arguments")
