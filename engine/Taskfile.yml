@@ -163,7 +163,7 @@ tasks:
         else
           TARGETS="$CLI_ARGS"
         fi
-        infisical run --env=dev --path=/engine-tests -- \
+        infisical run --env=dev --path=/engine-tests ${INFISICAL_PROJECT_ID:+--projectId="$INFISICAL_PROJECT_ID"} -- \
           {{.PYTHON_BIN}} -m pytest $TARGETS \
             -o "cache_dir=.cache/pytest-integration" \
             --junitxml=test-results/integration.xml
@@ -202,7 +202,7 @@ tasks:
         else
           TARGETS="$CLI_ARGS"
         fi
-        infisical run --env=dev --path=/engine-tests -- \
+        infisical run --env=dev --path=/engine-tests ${INFISICAL_PROJECT_ID:+--projectId="$INFISICAL_PROJECT_ID"} -- \
           {{.PYTHON_BIN}} -m pytest $TARGETS \
             -o "cache_dir=.cache/pytest-e2e" \
             --junitxml=test-results/e2e/junit.xml \
