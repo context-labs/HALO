@@ -158,11 +158,7 @@ jobs:
 
   macos-sandbox-tests:
     name: macOS Sandbox Tests
-    # TODO: confirm the exact label set provisioned for the team's self-hosted
-    # macOS runners. The placeholder below uses the standard GitHub Actions
-    # self-hosted label tuple; replace once the runner pool publishes its
-    # canonical labels (e.g. ["self-hosted", "macOS", "ARM64", "halo"]).
-    runs-on: [self-hosted, macOS]
+    runs-on: depot-macos-latest
     timeout-minutes: 15
     defaults:
       run:
