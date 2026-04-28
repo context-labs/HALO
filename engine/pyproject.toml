@@ -7,7 +7,7 @@ readme = "README.md"
 dependencies = [
     "pydantic==2.13.3",
     "openai==2.32.0",
-    "openai-agents==0.14.5",
+    "openai-agents==0.14.7",
     "numpy==2.2.6",
     "pandas==2.2.3",
     # Ships the deno binary as a platform wheel so the WASM sandbox runs

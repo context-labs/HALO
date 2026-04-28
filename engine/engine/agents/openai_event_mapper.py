@@ -10,6 +10,25 @@ from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage, AgentToolCall, AgentToolFunction
 
 
+def _raw_to_dict(raw: Any) -> dict[str, Any]:
+    """Normalize an SDK raw item to a plain dict so the mapper uses one access pattern.
+
+    The Agents SDK's ``ToolCallItem`` / ``ToolCallOutputItem`` carry a
+    ``raw_item`` whose shape varies by adapter: Responses-API streaming
+    yields a Pydantic model (e.g. ``ResponseFunctionToolCall``), while
+    Chat-Completions adapters and replay-from-input yield plain ``dict``.
+    Funneling everything through one ``model_dump``/``vars`` step at the
+    entry lets every downstream read use ``.get()`` — no per-field
+    object-vs-dict branching, no silent ``None`` from a getattr that
+    can't see dict keys.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if hasattr(raw, "model_dump"):
+        return raw.model_dump()
+    return vars(raw)
+
+
 @dataclass
 class MappedEvent:
     """One normalized SDK event, split by what the runner should do with each piece.
@@ -142,21 +161,21 @@ class OpenAiEventMapper:
         )
 
     def _map_tool_call(self, item: Any, *, execution: AgentExecution) -> MappedEvent:
-        # item.raw_item is a ResponseFunctionToolCall
-        raw = getattr(item, "raw_item", item)
-        call_id = str(getattr(raw, "call_id", "") or getattr(raw, "id", "") or "")
+        # ``item`` is a ToolCallItem; normalize raw_item to a dict so the
+        # rest of this method is plain ``.get()`` calls.
+        raw = _raw_to_dict(getattr(item, "raw_item", item))
+        call_id = str(raw.get("call_id") or raw.get("id") or "")
+        name = str(raw.get("name") or "")
+        arguments = str(raw.get("arguments") or "")
         tc = AgentToolCall(
             id=call_id,
-            function=AgentToolFunction(
-                name=str(getattr(raw, "name", "") or ""),
-                arguments=str(getattr(raw, "arguments", "") or ""),
-            ),
+            function=AgentToolFunction(name=name, arguments=arguments),
         )
         # Namespace the fallback so a tool_call and its tool_output don't
         # collide on the same call_id when the SDK doesn't populate raw.id
         # — AgentContext._index keys by item_id and the second append would
         # silently overwrite the first, breaking get_context_item.
-        item_id = str(getattr(raw, "id", "") or f"tool-call-{call_id}")
+        item_id = str(raw.get("id") or f"tool-call-{call_id}")
         context_item = AgentContextItem(
             item_id=item_id,
             role="assistant",
@@ -178,16 +197,21 @@ class OpenAiEventMapper:
         return MappedEvent(context_item=context_item, output_item=output_item)
 
     def _map_tool_output(self, item: Any, *, execution: AgentExecution) -> MappedEvent:
-        raw = getattr(item, "raw_item", item)
-        call_id = str(getattr(raw, "call_id", "") or "")
+        # Same normalize-then-dict-get pattern as ``_map_tool_call``.
+        raw = _raw_to_dict(getattr(item, "raw_item", item))
+        call_id = str(raw.get("call_id") or raw.get("id") or "")
         output = getattr(item, "output", None)
         if output is None:
-            output = getattr(raw, "output", "")
+            output = raw.get("output") or ""
         content = str(output)
-        name = getattr(raw, "name", None) or getattr(item, "name", None)
+        # ``name`` isn't always populated on tool result items — the
+        # function name lives on the preceding ``ToolCallItem``. ``None``
+        # is fine; the assistant's tool_calls block carries the canonical
+        # name when downstream code needs it.
+        name = raw.get("name")
         # See ``_map_tool_call``: namespaced fallback prevents the tool_call
         # and tool_output for the same call_id from sharing an item_id.
-        item_id = str(getattr(raw, "id", "") or f"tool-result-{call_id}")
+        item_id = str(raw.get("id") or f"tool-result-{call_id}")
         context_item = AgentContextItem(
             item_id=item_id,
             role="tool",
