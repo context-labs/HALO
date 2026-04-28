@@ -119,6 +119,13 @@ async def stream_engine_async(
         await task
     except BaseException:
         task.cancel()
+        # Drain the inner task before re-raising. Without this, asyncio
+        # warns "Task was destroyed but it is pending" and any exception
+        # _drive raises during cancellation cleanup is silently dropped.
+        try:
+            await task
+        except BaseException:
+            pass
         raise
 
 

@@ -86,6 +86,11 @@ jobs:
           NEW_VERSION=$(uv version --bump "${{ inputs.semver_action }}" --short --no-sync)
           echo "Bumped engine version to ${NEW_VERSION}"
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          # Refresh uv.lock so the version inside it matches the bumped
+          # pyproject.toml. ``--no-sync`` above skips reinstall but also
+          # skips the lock refresh — without this, the release commit
+          # would push a uv.lock that lags pyproject.toml.
+          uv lock
 
       - name: Commit, tag, and push version bump
         if: ${{ inputs.dry_run == false }}
