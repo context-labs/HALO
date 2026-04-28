@@ -1,18 +1,19 @@
-"""Minimal OpenInference + OTEL wiring. Copy-paste into any OpenAI Agents SDK app."""
+"""Wire the openai-agents SDK to write inference.net-format JSONL traces."""
 import os
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from openinference.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 
-DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
+from agents import add_trace_processor
+
+from inference_otlp_exporter import ExportContext, InferenceOtlpFileProcessor
+
+DEFAULT_OUTPUT_PATH = "traces.jsonl.gz"
 
 
-def setup_tracing(service_name: str = "halo-openai-agents-demo") -> TracerProvider:
-    resource = Resource.create({"service.name": service_name})
-    provider = TracerProvider(resource=resource)
-    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT).rstrip("/")
-    provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=f"{base}/v1/traces")))
-    OpenAIAgentsInstrumentor().instrument(tracer_provider=provider)
-    return provider
+def setup_tracing(
+    service_name: str = "halo-openai-agents-demo",
+    project_id: str = "halo-demo",
+) -> InferenceOtlpFileProcessor:
+    path = os.getenv("HALO_TRACES_PATH", DEFAULT_OUTPUT_PATH)
+    ctx = ExportContext(project_id=project_id, service_name=service_name)
+    processor = InferenceOtlpFileProcessor(path, ctx=ctx)
+    add_trace_processor(processor)
+    return processor
