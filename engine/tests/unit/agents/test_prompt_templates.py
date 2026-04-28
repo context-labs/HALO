@@ -27,14 +27,14 @@ def test_root_prompt_includes_sentinel_instruction() -> None:
     assert "run_code" in text
 
 
-def test_root_prompt_omits_run_code_clause_when_unavailable() -> None:
+def test_root_prompt_omits_run_code_when_unavailable() -> None:
     text = render_root_system_prompt(
         instructions="x",
         maximum_depth=1,
         maximum_parallel_subagents=2,
         run_code_available=False,
     )
-    assert " run_code," not in text
+    assert "run_code" not in text
     assert "call_subagent" in text
 
 
@@ -54,7 +54,7 @@ def test_subagent_prompt_reports_depth() -> None:
     assert "run_code" in text
 
 
-def test_subagent_prompt_omits_run_code_clause_when_unavailable() -> None:
+def test_subagent_prompt_omits_run_code_when_unavailable() -> None:
     text = render_subagent_system_prompt(
         instructions="x",
         depth=1,
@@ -62,7 +62,7 @@ def test_subagent_prompt_omits_run_code_clause_when_unavailable() -> None:
         maximum_parallel_subagents=4,
         run_code_available=False,
     )
-    assert ", run_code," not in text
+    assert "run_code" not in text
 
 
 def test_compaction_and_synthesis_prompts_are_strings() -> None:

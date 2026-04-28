@@ -220,6 +220,9 @@ jobs:
     needs: [bump-version, build-linux-wheel, build-sdist]
     if: ${{ inputs.dry_run == false }}
     runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: pypi-bubblewrap-bin
       url: https://pypi.org/project/bubblewrap-bin/${{ needs.bump-version.outputs.new_version }}/
@@ -247,9 +250,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish to PyPI
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN_BUBBLEWRAP_BIN }}
-        run: uv publish
+        run: uv publish --trusted-publishing always
 
   summary:
     name: Release Summary

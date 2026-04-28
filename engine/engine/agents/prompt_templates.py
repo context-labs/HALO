@@ -4,8 +4,7 @@ FINAL_SENTINEL = "<final/>"
 
 ROOT_SYSTEM_PROMPT_TEMPLATE = """\
 You are the root agent in the HALO engine. You explore OTel trace data
-using the provided tools: dataset overview, query/count/view/search traces,
-get_context_item, synthesize_traces,{run_code_clause} and call_subagent.
+using the provided tools: {tool_list}.
 
 Depth rules:
 - You are at depth=0.
@@ -23,8 +22,7 @@ Instructions:
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are a HALO subagent at depth={depth} of maximum_depth={maximum_depth}. You answer a
-question delegated to you by a parent agent. You have trace tools{run_code_clause} and, if
-your depth permits, a call_subagent tool.
+question delegated to you by a parent agent. You have these tools: {tool_list}.
 
 If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
 concurrently — this cap is shared across the whole run.
@@ -66,7 +64,7 @@ def render_root_system_prompt(
         instructions=instructions,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-        run_code_clause=" run_code," if run_code_available else "",
+        tool_list=_root_tool_list(run_code_available=run_code_available),
     )
 
 
@@ -84,5 +82,30 @@ def render_subagent_system_prompt(
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-        run_code_clause=", run_code," if run_code_available else "",
+        tool_list=_subagent_tool_list(run_code_available=run_code_available),
     )
+
+
+def _root_tool_list(*, run_code_available: bool) -> str:
+    tools = [
+        "dataset overview",
+        "query/count/view/search traces",
+        "get_context_item",
+        "synthesize_traces",
+    ]
+    if run_code_available:
+        tools.append("run_code")
+    tools.append("call_subagent")
+    return ", ".join(tools)
+
+
+def _subagent_tool_list(*, run_code_available: bool) -> str:
+    tools = [
+        "trace tools",
+        "get_context_item",
+        "synthesize_traces",
+    ]
+    if run_code_available:
+        tools.append("run_code")
+    tools.append("call_subagent, if your depth permits")
+    return ", ".join(tools)
