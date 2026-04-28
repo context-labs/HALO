@@ -5,25 +5,34 @@ from pathlib import Path
 
 from engine.sandbox.log import log_unavailable
 
-# Subdirectories under ``$HOME`` that we explicitly deny reads on. These are
-# the common locations of secrets/credentials/private user data. We do NOT
-# wholesale-deny ``$HOME`` itself because that would block path traversal to
-# allowed deeper paths (e.g. a venv living under ``$HOME/work/...``):
-# the macOS sandbox checks read permission on directory traversal, not just
-# on the final target, so denying a parent of an allowed path makes the
-# allowed path unreachable.
-_MACOS_HOME_DENY_SUBDIRS = (
-    ".ssh",
-    ".aws",
-    ".gnupg",
-    ".config",
-    ".docker",
-    ".kube",
-    ".gcloud",
-    "Documents",
-    "Desktop",
-    "Downloads",
+# SIP-protected system roots Python's dynamic loader, CoreFoundation, and
+# stdlib load executables/data from. These are read-only on the host and
+# not user-controlled. Modeled after Apple's own ``system.sb``.
+_MACOS_SYSTEM_ROOT_SUBPATHS = (
+    "/usr/lib",
+    "/usr/share",
+    "/System",
+    "/Library/Apple",
+    "/private/var/db/timezone",
 )
+
+# Specific files Python and CoreFoundation read at startup. ``system.sb``
+# enumerates these explicitly because they live in directories where we
+# don't want to grant the entire subtree.
+_MACOS_SYSTEM_ROOT_LITERALS = (
+    "/",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/null",
+    "/private/etc/passwd",
+    "/private/etc/protocols",
+    "/private/etc/services",
+    "/private/etc/localtime",
+)
+
+# Cache directory used by CoreFoundation, dyld, and Python ``tempfile``
+# fallbacks. Per-user but does not contain credentials/secrets.
+_MACOS_FOLDERS_CACHE = "/private/var/folders"
 
 
 class MacosClient:
@@ -57,31 +66,34 @@ class MacosClient:
         readonly_paths: list[Path],
         writable_paths: list[Path],
     ) -> str:
-        """Render the Scheme profile for one ``sandbox-exec`` invocation.
+        """Render a default-deny ``sandbox-exec`` Scheme profile for one run.
 
-        Security model on macOS:
-          - ``deny default`` is the floor. ``file-read*`` is then broadly
-            allowed because the macOS dynamic loader and CoreFoundation read
-            from many opaque locations (``/usr/lib``, ``/System``,
-            ``/private/var/db``, framework-specific paths) that are
-            impractical to enumerate and are SIP-protected on the host.
-            Narrowing reads here would prevent Python from starting.
-          - ``file-write*`` is denied by default and re-allowed only on the
-            explicit ``writable_paths``. This is the actual filesystem
-            boundary — sandboxed code cannot mutate anything outside the
-            workspace.
-          - Network is denied entirely.
-          - ``mach-lookup``/``ipc-posix-shm``/``sysctl-read``/``signal`` are
-            allowed because Python and CoreFoundation rely on them for
-            normal startup; without these, the interpreter aborts before
-            reaching user code.
+        Security model (mirrors Apple's own ``system.sb`` baseline):
 
-        Reads of common credential/secret directories under ``$HOME`` are
-        denied (``.ssh``, ``.aws``, etc.). We deliberately do NOT
-        wholesale-deny ``$HOME``: macOS sandbox-exec checks read permission
-        on every component of a path during traversal, so denying the home
-        directory itself blocks reach-through to allowed deeper paths
-        (e.g. a venv living at ``$HOME/work/.../.venv``).
+          - ``(deny default)`` is the floor — nothing is reachable unless
+            we explicitly allow it.
+          - ``(allow file-read-metadata)`` is granted everywhere. This is
+            what lets the kernel traverse a path during ``open()`` /
+            ``stat()``: the lookup of each directory component requires
+            metadata access. It does NOT allow reading file contents and
+            does NOT allow listing directory entries — those need
+            ``file-read-data`` (a subset of ``file-read*``), which we only
+            grant on the explicit allow list below. Net effect: the model
+            can resolve ``/Users/x/.../venv/bin/python`` without us having
+            to enumerate every ancestor, but ``os.listdir('/Users/x')``
+            and ``open('/Users/x/secrets.txt')`` are both denied.
+          - Full read on SIP-protected system roots (``/usr/lib``,
+            ``/System``, etc.) and a small set of system literal files
+            (``/dev/urandom``, ``/private/etc/passwd``, ...) — same set
+            ``system.sb`` allows for system daemons. These contain no
+            user data.
+          - Full read on each ``readonly_paths`` entry (interpreter,
+            site-packages, trace, index).
+          - Full read+write on each ``writable_paths`` entry.
+          - ``mach-lookup``/``ipc-posix-shm``/``sysctl-read``/``signal``/
+            ``process*`` are allowed because Python and CoreFoundation
+            depend on them for startup.
+          - Network is denied wholesale.
         """
         lines: list[str] = [
             "(version 1)",
@@ -91,19 +103,21 @@ class MacosClient:
             "(allow ipc-posix-shm)",
             "(allow sysctl-read)",
             "(allow signal)",
-            "(allow file-read*)",
+            "(allow file-read-metadata)",
         ]
 
-        home_dir = _home_dir()
-        if home_dir is not None:
-            for subdir in _MACOS_HOME_DENY_SUBDIRS:
-                lines.append(f'(deny file-read* (subpath "{home_dir}/{subdir}"))')
+        for system_root in _MACOS_SYSTEM_ROOT_SUBPATHS:
+            lines.append(f'(allow file-read* file-map-executable (subpath "{system_root}"))')
+        for system_literal in _MACOS_SYSTEM_ROOT_LITERALS:
+            lines.append(f'(allow file-read* (literal "{system_literal}"))')
+        lines.append(f'(allow file-read* (subpath "{_MACOS_FOLDERS_CACHE}"))')
 
         for path in readonly_paths:
             kind = "subpath" if path.is_dir() else "literal"
             lines.append(f'(allow file-read* ({kind} "{path}"))')
 
         for path in writable_paths:
+            lines.append(f'(allow file-read* (subpath "{path}"))')
             lines.append(f'(allow file-write* (subpath "{path}"))')
 
         lines.append("(deny network*)")
@@ -133,12 +147,3 @@ class MacosClient:
             str(python_executable),
             str(script_path),
         ]
-
-
-def _home_dir() -> str | None:
-    """Resolve the current user's home directory; ``None`` if unavailable."""
-    try:
-        home = Path.home()
-    except (RuntimeError, KeyError):
-        return None
-    return str(home) if home else None
