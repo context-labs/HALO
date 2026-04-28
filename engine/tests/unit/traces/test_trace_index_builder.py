@@ -336,3 +336,46 @@ def test_process_chunk_partial_chunk_only_sees_its_lines(
 
     assert set(first_two.keys()) == {"t-aaaa"}
     assert first_two["t-aaaa"].span_count == 2
+
+
+def test_merge_accumulators_preserves_chunk_order_for_byte_offsets() -> None:
+    from engine.traces.trace_index_builder import _RowAccumulator, _merge_accumulators
+
+    chunk0_a = _RowAccumulator(trace_id="t-1")
+    chunk0_a.byte_offsets = [0]
+    chunk0_a.byte_lengths = [50]
+    chunk0_a.span_count = 1
+    chunk0_a.start_time = "2026-04-23T05:00:00.000000000Z"
+    chunk0_a.end_time = "2026-04-23T05:00:00.500000000Z"
+
+    chunk1_a = _RowAccumulator(trace_id="t-1")
+    chunk1_a.byte_offsets = [200]
+    chunk1_a.byte_lengths = [60]
+    chunk1_a.span_count = 1
+    chunk1_a.start_time = "2026-04-23T05:00:01.000000000Z"
+    chunk1_a.end_time = "2026-04-23T05:00:01.500000000Z"
+
+    chunk1_b = _RowAccumulator(trace_id="t-2")
+    chunk1_b.byte_offsets = [300]
+    chunk1_b.byte_lengths = [40]
+    chunk1_b.span_count = 1
+    chunk1_b.start_time = "2026-04-23T05:00:02.000000000Z"
+    chunk1_b.end_time = "2026-04-23T05:00:02.500000000Z"
+
+    per_worker = [
+        {"t-1": chunk0_a},
+        {"t-1": chunk1_a, "t-2": chunk1_b},
+    ]
+    merged = _merge_accumulators(per_worker)
+
+    assert set(merged.keys()) == {"t-1", "t-2"}
+    assert merged["t-1"].byte_offsets == [0, 200]
+    assert merged["t-1"].span_count == 2
+    assert merged["t-2"].byte_offsets == [300]
+
+
+def test_merge_accumulators_empty_input_returns_empty_dict() -> None:
+    from engine.traces.trace_index_builder import _merge_accumulators
+
+    assert _merge_accumulators([]) == {}
+    assert _merge_accumulators([{}, {}]) == {}
