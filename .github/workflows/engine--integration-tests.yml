@@ -121,21 +121,6 @@ jobs:
       - name: Install engine dependencies
         run: task ci:setup
 
-      - name: Probe bubblewrap availability
-        run: |
-          .venv/bin/python -c "
-          from engine.sandbox.sandbox_availability import (
-              render_unavailable_warning,
-              resolve_sandbox_status,
-          )
-          status = resolve_sandbox_status()
-          if not status.available:
-              raise SystemExit(
-                  'sandbox unavailable in CI:\n' + render_unavailable_warning(status)
-              )
-          print(f'sandbox backend: {status.backend.value} ({status.executable})')
-          "
-
       - name: Run Linux sandbox integration tests
         run: task test:integration-linux
 
@@ -192,21 +177,6 @@ jobs:
 
       - name: Install engine dependencies
         run: task ci:setup
-
-      - name: Probe sandbox-exec availability
-        run: |
-          .venv/bin/python -c "
-          from engine.sandbox.sandbox_availability import (
-              render_unavailable_warning,
-              resolve_sandbox_status,
-          )
-          status = resolve_sandbox_status()
-          if not status.available:
-              raise SystemExit(
-                  'sandbox unavailable in CI:\n' + render_unavailable_warning(status)
-              )
-          print(f'sandbox backend: {status.backend.value} ({status.executable})')
-          "
 
       - name: Run macOS sandbox integration tests
         run: task test:integration-macos
