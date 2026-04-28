@@ -22,4 +22,5 @@ def test_sandbox_resolve_returns_working_sandbox() -> None:
     assert sandbox.deno_executable.is_file()
     assert sandbox.runner_path.is_file()
     assert sandbox.runtime_path.is_file()
-    assert sandbox.trace_compat_path.is_file()
+    assert sandbox.engine_init_path.is_file()
+    assert sandbox.traces_pkg_dir.is_dir()

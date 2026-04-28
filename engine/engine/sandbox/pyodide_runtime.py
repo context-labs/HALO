@@ -8,19 +8,21 @@ through them — no JS-side string templates, no per-call Python code
 generation on the host.
 
 * :func:`halo_bootstrap` runs once after mounts: imports numpy/pandas plus
-  the stdlib-only trace store shim, loads the index, and stashes the
-  resulting user-facing globals (``trace_store``, ``numpy``, ``pandas``,
-  ``np``, ``pd``) in module state for later execs.
+  the real ``engine.traces.trace_store`` (the runner stages the host's
+  ``engine`` package source into ``/halo/`` at boot, so the same module
+  the host runs is what user code sees — no parallel shim), loads the
+  index, and stashes the resulting user-facing globals (``trace_store``,
+  ``numpy``, ``pandas``, ``np``, ``pd``) in module state for later execs.
 * :func:`halo_execute` runs every user-code request: exec's the source
   against the prebuilt globals with stdout/stderr captured into
   ``StringIO`` so the host gets clean text back regardless of whether the
   code crashed.
 
-Splitting them lets the host distinguish setup failures (trace compat
-missing, malformed index) from user-code failures (assertion errors,
+Splitting them lets the host distinguish setup failures (malformed
+index, missing dependency) from user-code failures (assertion errors,
 imports the agent shouldn't have tried) — both surface through the same
-``{exit_code, stdout, stderr}`` shape but the host knows which phase they
-came from.
+``{exit_code, stdout, stderr}`` shape but the host knows which phase
+they came from.
 """
 
 from __future__ import annotations
@@ -42,12 +44,13 @@ def halo_bootstrap(trace_path: str, index_path: str) -> dict[str, Any]:
     """Build the user-facing globals dict from mounted trace + index files.
 
     Runs once per sandbox session, before the first ``halo_execute``.
-    Imports numpy/pandas and the trace compat shim, loads the index from
-    the WASM-virtual path the host mounted at, and stashes the resulting
-    ``trace_store`` plus convenience aliases. Returns the standard
-    capture envelope so a setup failure (e.g., the compat shim not
-    injected, a malformed index) surfaces with a real traceback rather
-    than a blank ``halo_execute`` failure later.
+    Imports numpy/pandas plus the real ``engine.traces.trace_store`` (the
+    runner stages the host's ``engine`` package source into ``/halo/`` at
+    boot, which is why the import works in WASM), loads the index from
+    the mounted virtual paths, and stashes the resulting ``trace_store``
+    plus convenience aliases. Returns the standard capture envelope so a
+    setup failure (malformed index, missing dependency) surfaces with a
+    real traceback rather than a blank ``halo_execute`` failure later.
     """
     global _bootstrapped
     buf_stdout = io.StringIO()
@@ -57,15 +60,16 @@ def halo_bootstrap(trace_path: str, index_path: str) -> dict[str, Any]:
 
     exit_code = 0
     try:
-        # ``/halo`` is where the runner injects the trace compat shim;
-        # putting it on sys.path lets us import it as a normal module
-        # without the host having to thread that detail through.
+        # ``/halo`` is where the runner stages the engine package; putting
+        # it on sys.path lets ``import engine.traces.trace_store`` resolve
+        # the same module the host runs against — no parallel shim.
         if "/halo" not in sys.path:
             sys.path.insert(0, "/halo")
 
         import numpy
         import pandas
-        from pyodide_trace_compat import TraceStore
+
+        from engine.traces.trace_store import TraceStore
 
         trace_store = TraceStore.load(
             trace_path=Path(trace_path),

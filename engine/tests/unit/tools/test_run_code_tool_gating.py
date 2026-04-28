@@ -62,15 +62,18 @@ def _sandbox(tmp_path: Path) -> Sandbox:
     runner.write_text("")
     runtime = tmp_path / "pyodide_runtime.py"
     runtime.write_text("")
-    trace_compat = tmp_path / "pyodide_trace_compat.py"
-    trace_compat.write_text("")
+    engine_init = tmp_path / "engine_init.py"
+    engine_init.write_text("")
+    traces_pkg = tmp_path / "traces"
+    traces_pkg.mkdir()
     deno_dir = tmp_path / "deno-cache"
     deno_dir.mkdir()
     return Sandbox(
         deno_executable=deno,
         runner_path=runner,
         runtime_path=runtime,
-        trace_compat_path=trace_compat,
+        engine_init_path=engine_init,
+        traces_pkg_dir=traces_pkg,
         deno_dir=deno_dir,
     )
 

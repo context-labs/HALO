@@ -34,7 +34,6 @@ from engine.sandbox.models import CodeExecutionResult
 
 _RUNNER_FILENAME = "runner.js"
 _RUNTIME_FILENAME = "pyodide_runtime.py"
-_TRACE_COMPAT_FILENAME = "pyodide_trace_compat.py"
 
 # ``_PYODIDE_VERSION`` is the npm version this sandbox expects; the matching
 # pin lives in ``runner.js`` (``npm:pyodide@<version>/pyodide.js``). Both
@@ -43,11 +42,23 @@ _TRACE_COMPAT_FILENAME = "pyodide_trace_compat.py"
 # filenames are ABI-tied to that release.
 _PYODIDE_VERSION = "0.29.3"
 _REQUIRED_WHEELS = (
+    # numpy + pandas + their transitive deps — preloaded for user analysis code.
     "numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
     "pandas-2.3.3-cp313-cp313-pyodide_2025_0_wasm32.whl",
     "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
     "pytz-2025.2-py2.py3-none-any.whl",
     "six-1.17.0-py2.py3-none-any.whl",
+    # pydantic + transitive deps. Required so the in-Pyodide bootstrap can
+    # import the real ``engine.traces.trace_store`` (and its models) rather
+    # than maintain a duplicate stdlib-only shim. Versions are whatever
+    # Pyodide 0.29.3's lockfile ships; the host pins a slightly newer
+    # pydantic but the API surface ``TraceStore`` uses (``BaseModel``,
+    # ``ConfigDict``, ``Field``, ``model_validate_json``) is stable.
+    "pydantic-2.12.5-py3-none-any.whl",
+    "pydantic_core-2.41.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
+    "typing_extensions-4.15.0-py3-none-any.whl",
+    "annotated_types-0.7.0-py3-none-any.whl",
+    "typing_inspection-0.4.2-py3-none-any.whl",
 )
 _WHEEL_BASE_URL = f"https://cdn.jsdelivr.net/pyodide/v{_PYODIDE_VERSION}/full/"
 
@@ -125,7 +136,13 @@ class Sandbox:
     deno_executable: Path
     runner_path: Path
     runtime_path: Path
-    trace_compat_path: Path
+    # The host's ``engine`` package root and ``engine/traces`` subtree.
+    # Both are added to ``--allow-read`` so the runner can stage them
+    # into Pyodide's WASM filesystem, where the real
+    # ``engine.traces.trace_store`` becomes importable. This is how we
+    # avoid maintaining a parallel stdlib-only TraceStore.
+    engine_init_path: Path
+    traces_pkg_dir: Path
     deno_dir: Path
 
     @classmethod
@@ -165,10 +182,14 @@ class Sandbox:
             here = Path(__file__).parent
             runner_path = (here / _RUNNER_FILENAME).resolve()
             runtime_path = (here / _RUNTIME_FILENAME).resolve()
-            trace_compat_path = (here / _TRACE_COMPAT_FILENAME).resolve()
-            for required in (runner_path, runtime_path, trace_compat_path):
-                if not required.is_file():
-                    raise _ResolutionError(f"required sandbox file missing at {required}")
+            engine_pkg_root = here.parent  # engine/sandbox/.. == engine/
+            engine_init_path = (engine_pkg_root / "__init__.py").resolve()
+            traces_pkg_dir = (engine_pkg_root / "traces").resolve()
+            for required_file in (runner_path, runtime_path, engine_init_path):
+                if not required_file.is_file():
+                    raise _ResolutionError(f"required sandbox file missing at {required_file}")
+            if not traces_pkg_dir.is_dir():
+                raise _ResolutionError(f"engine.traces package missing at {traces_pkg_dir}")
             deno_dir = _query_deno_dir(deno)
             pyodide_dir = _ensure_pyodide_npm_cache(deno, deno_dir)
             _ensure_pyodide_wheels(pyodide_dir)
@@ -179,7 +200,8 @@ class Sandbox:
             deno_executable=deno,
             runner_path=runner_path,
             runtime_path=runtime_path,
-            trace_compat_path=trace_compat_path,
+            engine_init_path=engine_init_path,
+            traces_pkg_dir=traces_pkg_dir,
             deno_dir=deno_dir,
         )
         _RESOLVED_SANDBOX = sandbox
@@ -226,8 +248,10 @@ class Sandbox:
         """Build the ``deno run`` argv with HALO's locked-down permission set.
 
         ``--allow-read`` is enumerated explicitly (no wildcards) and covers:
-          - the runner script + its two sibling .py files (runtime, trace
-            compat) which the runner loads at boot via ``import.meta.url``
+          - the runner script + its sibling runtime .py
+          - the host's ``engine/__init__.py`` and the ``engine/traces/``
+            subtree, which the runner stages into Pyodide's FS so the
+            real ``engine.traces.trace_store`` is importable
           - the Deno cache directory (where ``npm:pyodide`` resolves and
             the pre-cached ``*.whl`` wheels live next to ``pyodide.asm.wasm``)
           - any additional per-run paths the caller mounts (trace, index)
@@ -241,7 +265,8 @@ class Sandbox:
         read_paths = [
             self.runner_path,
             self.runtime_path,
-            self.trace_compat_path,
+            self.engine_init_path,
+            self.traces_pkg_dir,
             self.deno_dir,
             *extra_read_paths,
         ]
