@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from engine.sandbox import linux_client
-from engine.sandbox.linux_client import HALO_BWRAP_ENV_VAR, LinuxClient
+from engine.sandbox.linux_client import LinuxClient
 
 # Stderr line bwrap writes when execvp fails with ENOENT. The probe relies
 # on this string as the "namespace setup completed all the way to exec"
@@ -49,18 +49,21 @@ def _install_fake_bwrap(
     monkeypatch.setattr(linux_client.subprocess, "Popen", _fake_popen)
 
 
-def test_resolve_uses_env_override_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    env_bwrap = tmp_path / "env-bwrap"
-    env_bwrap.write_text("")
+def test_resolve_prefers_system_path_when_probe_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = tmp_path / "system-bwrap"
+    packaged = tmp_path / "packaged-bwrap"
+    system.write_text("")
+    packaged.write_text("")
 
-    monkeypatch.setenv(HALO_BWRAP_ENV_VAR, str(env_bwrap))
-    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: "/host/bwrap")
-    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
+    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(system))
+    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: packaged)
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
 
     client = LinuxClient.resolve()
     assert client is not None
-    assert client.executable == env_bwrap
+    assert client.executable == system
 
 
 def test_resolve_falls_back_to_packaged_when_system_missing(
@@ -69,7 +72,6 @@ def test_resolve_falls_back_to_packaged_when_system_missing(
     packaged = tmp_path / "packaged-bwrap"
     packaged.write_text("")
 
-    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: packaged)
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
@@ -79,33 +81,46 @@ def test_resolve_falls_back_to_packaged_when_system_missing(
     assert client.executable == packaged
 
 
+def test_resolve_tries_packaged_when_system_probe_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = tmp_path / "system-bwrap"
+    packaged = tmp_path / "packaged-bwrap"
+    system.write_text("")
+    packaged.write_text("")
+
+    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(system))
+    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: packaged)
+
+    def _fake_popen(argv, *args, **kwargs):
+        info_fd = int(argv[argv.index("--info-fd") + 1])
+        proc = MagicMock(spec=["wait", "kill", "returncode", "stderr"])
+        proc.returncode = 1
+        proc.wait.return_value = 1
+        if Path(argv[0]) == system:
+            proc.stderr.read.return_value = b"bwrap: setting up uid map: Operation not permitted\n"
+        else:
+            os.write(info_fd, b'{"child-pid":42}')
+            proc.stderr.read.return_value = _PROBE_EXEC_FAIL_STDERR
+        return proc
+
+    monkeypatch.setattr(linux_client.subprocess, "Popen", _fake_popen)
+
+    client = LinuxClient.resolve()
+
+    assert client is not None
+    assert client.executable == packaged
+
+
 def test_resolve_returns_none_with_install_remediation_when_no_candidates(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
 
     assert LinuxClient.resolve() is None
     err = capsys.readouterr().err
     assert "not found" in err
-    assert "install" in err.lower()
-
-
-def test_resolve_returns_none_with_install_remediation_when_only_candidate_is_nonexistent(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    nonexistent = tmp_path / "does-not-exist"
-
-    monkeypatch.setenv(HALO_BWRAP_ENV_VAR, str(nonexistent))
-    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: None)
-    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
-
-    assert LinuxClient.resolve() is None
-    err = capsys.readouterr().err
-    assert str(nonexistent) in err
     assert "install" in err.lower()
 
 
@@ -118,7 +133,6 @@ def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
 
-    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(bwrap))
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
     _install_fake_bwrap(
@@ -148,7 +162,6 @@ def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
 
-    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(bwrap))
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
     _install_fake_bwrap(
@@ -171,7 +184,6 @@ def test_probe_argv_is_explicit_and_uses_empty_rootfs(
     bwrap.write_text("")
     captured_argv: list[str] = []
 
-    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(bwrap))
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
     _install_fake_bwrap(
@@ -182,10 +194,11 @@ def test_probe_argv_is_explicit_and_uses_empty_rootfs(
 
     LinuxClient.resolve()
 
-    info_fd = captured_argv[7]
+    info_fd = captured_argv[8]
     assert captured_argv == [
         str(bwrap),
-        "--unshare-all",
+        "--unshare-user",
+        "--unshare-pid",
         "--unshare-net",
         "--die-with-parent",
         "--new-session",
@@ -229,7 +242,8 @@ def test_build_argv_exact_shape(tmp_path: Path) -> None:
         str(bwrap),
         "--die-with-parent",
         "--new-session",
-        "--unshare-all",
+        "--unshare-user",
+        "--unshare-pid",
         "--unshare-net",
         "--clearenv",
         "--dev",
