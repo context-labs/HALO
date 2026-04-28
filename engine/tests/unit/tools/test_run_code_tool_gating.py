@@ -11,8 +11,9 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.sandbox.runtime_mounts import PythonRuntimeMounts
-from engine.sandbox.sandbox_availability import SandboxBackend, SandboxRuntime
+from engine.sandbox.linux_client import LinuxClient
+from engine.sandbox.models import PythonRuntimeMounts, SandboxConfig
+from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
 
 
@@ -55,24 +56,24 @@ def _semaphores() -> dict[int, asyncio.Semaphore]:
     return {depth: asyncio.Semaphore(1) for depth in range(1, 4)}
 
 
-def _sandbox(tmp_path: Path) -> SandboxRuntime:
+def _sandbox(tmp_path: Path) -> Sandbox:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
     python = tmp_path / "bin" / "python"
     python.parent.mkdir()
     python.write_text("")
-    return SandboxRuntime(
-        backend=SandboxBackend.LINUX_BWRAP_SYSTEM,
-        executable=bwrap,
+    return Sandbox(
+        client=LinuxClient(executable=bwrap),
         runtime_mounts=PythonRuntimeMounts(
             python_executable=python,
             runtime_paths=(),
             library_paths=(),
         ),
+        config=SandboxConfig(),
     )
 
 
-def _run_state(*, sandbox: SandboxRuntime | None) -> EngineRunState:
+def _run_state(*, sandbox: Sandbox | None) -> EngineRunState:
     run_state = MagicMock(spec=EngineRunState)
     run_state.config = _engine_config()
     run_state.output_bus = EngineOutputBus()

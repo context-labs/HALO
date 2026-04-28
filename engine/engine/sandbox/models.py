@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class SandboxConfig(BaseModel):
-    """Caller-tunable knobs for ``run_code``: wall-clock timeout and stdout/stderr caps.
+    """Caller-tunable knobs for ``run_code``: timeout, output caps, optional Python override.
 
-    ``python_executable`` overrides the Python interpreter used inside the
-    sandbox. When ``None`` (the default) the runtime falls back to
+    ``python_executable`` overrides the interpreter used inside the sandbox.
+    When ``None`` (the default), ``resolve_sandbox()`` falls back to
     ``sys.executable``. The chosen interpreter, its stdlib, and its
     site-packages are bound read-only into the sandbox via the runtime mount
     manifest computed at probe time.
@@ -24,25 +23,21 @@ class SandboxConfig(BaseModel):
     python_executable: Path | None = None
 
 
-class SandboxPolicy(BaseModel):
-    """Path lists the platform-specific command builders consume.
+class PythonRuntimeMounts(BaseModel):
+    """The narrow set of host paths needed to execute Python inside the sandbox.
 
-    Path order is positional and meaningful. ``readonly_paths`` is structured as:
-    ``[trace_path, index_path, *runtime_paths]``. ``library_paths`` carries
-    individual shared library files (Linux only) bound at their original
-    locations so the dynamic loader can resolve them without binding broad
-    system directories. ``network_enabled`` is pinned to False at the type
-    level — sandboxed code never gets network access.
+    Computed from the running interpreter (``sys`` / ``sysconfig`` / ``site``)
+    plus ``/proc/self/maps`` on Linux, so the sandbox only sees the specific
+    interpreter binary, stdlib, site-packages, and shared libraries that are
+    already loaded by the host process. We deliberately avoid binding broad
+    system roots like ``/usr`` or ``/lib``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     python_executable: Path
-    readonly_paths: list[Path]
-    library_paths: list[Path]
-    writable_paths: list[Path]
-    network_enabled: Literal[False] = False
-    timeout_seconds: float = Field(gt=0)
+    runtime_paths: tuple[Path, ...]
+    library_paths: tuple[Path, ...]
 
 
 class CodeExecutionResult(BaseModel):

@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from engine.agents.agent_config import AgentConfig
 from engine.model_config import ModelConfig
 from engine.model_provider_config import ModelProviderConfig
-from engine.sandbox.sandbox_config import SandboxConfig
+from engine.sandbox.models import SandboxConfig
 from engine.traces.models.trace_index_config import TraceIndexConfig
 
 
