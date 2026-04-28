@@ -1,17 +1,6 @@
 from __future__ import annotations
 
-from engine.sandbox.models import (
-    CodeExecutionResult,
-    RunCodeArguments,
-    SandboxConfig,
-)
-
-
-def test_sandbox_config_defaults() -> None:
-    cfg = SandboxConfig()
-    assert cfg.timeout_seconds == 10.0
-    assert cfg.maximum_stdout_bytes == 64_000
-    assert cfg.maximum_stderr_bytes == 64_000
+from engine.sandbox.models import CodeExecutionResult, RunCodeArguments
 
 
 def test_run_code_arguments() -> None:

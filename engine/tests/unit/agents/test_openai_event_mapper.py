@@ -90,6 +90,48 @@ def test_tool_output_item_uses_call_id_and_output() -> None:
     assert mapped.context_item.content == "ok"
 
 
+def test_tool_output_inherits_name_from_preceding_tool_call() -> None:
+    """The function name follows from the call to its result.
+
+    Compactor output and Chat-Completions replay both read
+    ``AgentContextItem.name`` on tool messages. The SDK's
+    ``ToolCallOutputItem`` doesn't carry it (Responses-API
+    ``FunctionCallOutput`` has no ``name`` field), so the mapper
+    correlates by ``call_id`` from the preceding ``ToolCallItem``.
+    """
+    mapper = OpenAiEventMapper()
+    mapper.to_mapped_event(
+        tool_call_event(call_id="call_42", name="search_trace"),
+        execution=_exec(),
+        is_root=True,
+    )
+    output_mapped = mapper.to_mapped_event(
+        tool_output_event(call_id="call_42", output="ok"),
+        execution=_exec(),
+        is_root=True,
+    )
+    assert output_mapped.context_item is not None
+    assert output_mapped.context_item.name == "search_trace"
+    assert output_mapped.output_item is not None
+    assert output_mapped.output_item.item.name == "search_trace"
+
+
+def test_tool_output_name_is_none_when_call_unseen() -> None:
+    """Defensive: an orphan tool_output (call we never saw) keeps ``name=None``.
+
+    Replay code already handles ``name`` being missing — the engine should
+    not fabricate a name when it has no record of the matching call.
+    """
+    mapper = OpenAiEventMapper()
+    mapped = mapper.to_mapped_event(
+        tool_output_event(call_id="call_unseen", output="ok"),
+        execution=_exec(),
+        is_root=True,
+    )
+    assert mapped.context_item is not None
+    assert mapped.context_item.name is None
+
+
 def test_raw_text_delta_produces_delta_only() -> None:
     mapper = OpenAiEventMapper()
     mapped = mapper.to_mapped_event(

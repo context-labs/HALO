@@ -31,7 +31,18 @@ class OpenAiEventMapper:
     Owns the boundary between the SDK's internal event shapes and the Engine's typed
     AgentContextItem / AgentOutputItem / AgentTextDelta. Detects the ``<final/>``
     sentinel on root-agent assistant text and marks the corresponding output item.
+
+    Stateful only across one agent's stream: holds the call_id→tool_name
+    map so a ``ToolCallOutputItem`` can carry the function name through to
+    ``AgentMessage.name``. The SDK does not expose ``tool_name`` on the
+    output item (the canonical Responses-API ``FunctionCallOutput`` shape
+    has no ``name`` field), but the preceding ``ToolCallItem`` does, so we
+    remember it from there. Compaction summaries and Chat-Completions
+    replay both read ``item.name`` and would otherwise see ``None``.
     """
+
+    def __init__(self) -> None:
+        self._tool_names_by_call_id: dict[str, str] = {}
 
     def to_mapped_event(
         self,
@@ -124,6 +135,12 @@ class OpenAiEventMapper:
         """
         call_id = item.call_id or ""
         name = item.tool_name or ""
+        # Remember the name so the matching ``_map_tool_output`` can fill
+        # in ``AgentContextItem.name``. Compactor and Chat-Completions
+        # replay both read that field; the SDK doesn't surface it on the
+        # output item, so the call → output correlation has to live here.
+        if call_id and name:
+            self._tool_names_by_call_id[call_id] = name
         arguments = _read_arguments(item)
         tc = AgentToolCall(
             id=call_id,
@@ -159,20 +176,22 @@ class OpenAiEventMapper:
     ) -> MappedEvent:
         """Project a ``ToolCallOutputItem`` into the engine's tool-role message shape.
 
-        Reads only SDK-exposed surfaces: ``item.call_id`` (0.14.6+) and
-        ``item.output``. The function name is intentionally not propagated
-        — it lives on the preceding ``ToolCallItem``'s ``tool_calls`` block,
-        which is the canonical source any consumer (or replay) reads from.
+        Reads SDK-exposed surfaces (``item.call_id``, ``item.output``) plus
+        the call_id→name map populated by the preceding ``_map_tool_call``.
+        The OpenAI Responses-API ``FunctionCallOutput`` shape has no
+        ``name`` field, so without that correlation the compaction summary
+        and Chat-Completions replay both lose the function name.
         """
         call_id = item.call_id or ""
         content = "" if item.output is None else str(item.output)
+        name = self._tool_names_by_call_id.pop(call_id, None) if call_id else None
         item_id = f"tool-result-{call_id}"
         context_item = AgentContextItem(
             item_id=item_id,
             role="tool",
             content=content,
             tool_call_id=call_id,
-            name=None,
+            name=name,
             agent_id=execution.agent_id,
             parent_agent_id=execution.parent_agent_id,
             parent_tool_call_id=execution.parent_tool_call_id,
@@ -188,7 +207,7 @@ class OpenAiEventMapper:
                 role="tool",
                 content=content,
                 tool_call_id=call_id,
-                name=None,
+                name=name,
             ),
         )
         return MappedEvent(context_item=context_item, output_item=output_item)

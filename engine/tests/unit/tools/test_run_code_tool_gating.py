@@ -11,7 +11,6 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.sandbox.models import SandboxConfig
 from engine.sandbox.pyodide_client import PyodideAssets, PyodideClient
 from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
@@ -61,14 +60,24 @@ def _sandbox(tmp_path: Path) -> Sandbox:
     deno.write_text("")
     runner = tmp_path / "runner.js"
     runner.write_text("")
+    runtime = tmp_path / "pyodide_runtime.py"
+    runtime.write_text("")
+    trace_compat = tmp_path / "pyodide_trace_compat.py"
+    trace_compat.write_text("")
     deno_dir = tmp_path / "deno-cache"
     deno_dir.mkdir()
     pyodide_dir = tmp_path / "pyodide"
     pyodide_dir.mkdir()
-    assets = PyodideAssets(runner_path=runner, deno_dir=deno_dir, pyodide_npm_dir=pyodide_dir)
+    assets = PyodideAssets(
+        runner_path=runner,
+        runtime_path=runtime,
+        trace_compat_path=trace_compat,
+        deno_dir=deno_dir,
+        pyodide_npm_dir=pyodide_dir,
+    )
     return Sandbox(
         client=PyodideClient(deno_executable=deno, assets=assets),
-        config=SandboxConfig(),
+        timeout_seconds=10.0,
     )
 
 

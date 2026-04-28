@@ -6,14 +6,21 @@
 // Wire protocol: JSON-RPC 2.0 over stdin/stdout, one message per line.
 //
 // Methods (host → runner):
-//   mount_file   {host_path, virtual_path}   read host file, write to pyodide FS
-//   inject_text  {virtual_path, text}        write inline text into pyodide FS
-//   bootstrap    {code}                      run setup Python once; build globals
-//   execute      {code}                      run user Python; return {exit_code, stdout, stderr}
-//   shutdown                                 notification, exits the loop
+//   mount_file   {host_path, virtual_path}            read host file, write to pyodide FS
+//   bootstrap    {trace_path, index_path}             load trace_store, build user globals
+//   execute      {code}                               run user Python; return {exit_code, stdout, stderr}
+//   shutdown                                          notification, exits the loop
 //
-// Permissions are hardcoded by the parent (--allow-read=<runner>,<deno cache>,<trace>,<index>).
-// We never request --allow-net, --allow-write, --allow-env, --allow-run.
+// All embedded Python lives in sibling ``pyodide_runtime.py`` (capture +
+// exec helpers) and ``pyodide_trace_compat.py`` (stdlib trace store).
+// runner.js reads both at startup and runs them inside Pyodide; per-call
+// requests just invoke the resulting ``halo_bootstrap`` /
+// ``halo_execute`` Python functions over JSON-RPC.
+//
+// Permissions are hardcoded by the parent (``--allow-read`` covering the
+// runner script, its sibling .py files, the Deno cache, and the per-run
+// trace + index). We never request --allow-net, --allow-write,
+// --allow-env, --allow-run.
 
 // Version pin must match ``_PYODIDE_VERSION`` in ``pyodide_client.py``:
 // the client looks up cached wheels and the npm package directory by that
@@ -65,78 +72,26 @@ globalThis.addEventListener("unhandledrejection", (event) => {
 
 const pyodide = await pyodideModule.loadPyodide();
 
-// Initialize the host module that holds the per-run globals dict. The
-// bootstrap method populates `_halo_runtime.user_globals` once with
-// trace_store + numpy/pandas; execute reuses it across calls.
-pyodide.runPython(`
-import sys, types
-_halo_runtime = types.ModuleType("_halo_runtime")
-_halo_runtime.user_globals = None
-sys.modules["_halo_runtime"] = _halo_runtime
-`);
+// Resolve sibling Python files via ``import.meta.url``. ``Deno.readTextFileSync``
+// requires --allow-read, scoped by the parent process to exactly these
+// files (see ``PyodideAssets`` on the host side).
+const runtimePath = new URL("./pyodide_runtime.py", import.meta.url).pathname;
+const compatPath = new URL("./pyodide_trace_compat.py", import.meta.url).pathname;
 
-// Per-execute Python wrapper: redirects stdout/stderr to StringIO buffers so
-// we can capture both, plus surface the traceback in stderr on failure.
-const PYTHON_RUN_TEMPLATE = `
-import sys, io, traceback
-import _halo_runtime
+// Stage the trace compat shim into Pyodide's FS at ``/halo/`` so the
+// runtime's bootstrap can ``import pyodide_trace_compat`` after it adds
+// ``/halo`` to ``sys.path``. Mirror layout: one shared dir for HALO's
+// stdlib-only modules.
+pyodide.FS.mkdir("/halo");
+pyodide.FS.writeFile(
+  "/halo/pyodide_trace_compat.py",
+  Deno.readTextFileSync(compatPath),
+);
 
-_halo_buf_stdout = io.StringIO()
-_halo_buf_stderr = io.StringIO()
-_halo_old_stdout, _halo_old_stderr = sys.stdout, sys.stderr
-sys.stdout, sys.stderr = _halo_buf_stdout, _halo_buf_stderr
-
-_halo_exit_code = 0
-try:
-    if _halo_runtime.user_globals is None:
-        raise RuntimeError("sandbox not bootstrapped: bootstrap() must be called before execute()")
-    code = pyodide_user_code  # set via pyodide.globals.set
-    exec(compile(code, "<sandbox>", "exec"), _halo_runtime.user_globals, _halo_runtime.user_globals)
-except BaseException:
-    _halo_exit_code = 1
-    traceback.print_exc()
-finally:
-    sys.stdout, sys.stderr = _halo_old_stdout, _halo_old_stderr
-
-_halo_result = {
-    "exit_code": _halo_exit_code,
-    "stdout": _halo_buf_stdout.getvalue(),
-    "stderr": _halo_buf_stderr.getvalue(),
-}
-`;
-
-// Bootstrap script wrapper: runs once after mounts to populate the user
-// globals dict. Same stdout/stderr capture + traceback so a failed bootstrap
-// produces an actionable error to the host.
-const PYTHON_BOOTSTRAP_TEMPLATE = `
-import sys, io, traceback
-import _halo_runtime
-
-_halo_buf_stdout = io.StringIO()
-_halo_buf_stderr = io.StringIO()
-_halo_old_stdout, _halo_old_stderr = sys.stdout, sys.stderr
-sys.stdout, sys.stderr = _halo_buf_stdout, _halo_buf_stderr
-
-_halo_exit_code = 0
-try:
-    code = pyodide_bootstrap_code
-    bootstrap_globals = {"__name__": "__halo_bootstrap__"}
-    exec(compile(code, "<bootstrap>", "exec"), bootstrap_globals, bootstrap_globals)
-    if "user_globals" not in bootstrap_globals:
-        raise RuntimeError("bootstrap script must define a 'user_globals' dict")
-    _halo_runtime.user_globals = bootstrap_globals["user_globals"]
-except BaseException:
-    _halo_exit_code = 1
-    traceback.print_exc()
-finally:
-    sys.stdout, sys.stderr = _halo_old_stdout, _halo_old_stderr
-
-_halo_result = {
-    "exit_code": _halo_exit_code,
-    "stdout": _halo_buf_stdout.getvalue(),
-    "stderr": _halo_buf_stderr.getvalue(),
-}
-`;
+// Define ``halo_bootstrap`` and ``halo_execute`` in the Pyodide globals.
+// Single ``runPython`` at boot — every per-call request from the host
+// just invokes the live functions, no Python codegen at request time.
+pyodide.runPython(Deno.readTextFileSync(runtimePath));
 
 // =============================================================================
 // Method handlers
@@ -156,17 +111,6 @@ function mountFile(params) {
   return { mounted: virtualPath };
 }
 
-function injectText(params) {
-  const virtualPath = params.virtual_path;
-  const text = params.text;
-  if (!virtualPath || typeof text !== "string") {
-    throw new Error("inject_text requires virtual_path and text");
-  }
-  ensurePyodideDir(virtualPath);
-  pyodide.FS.writeFile(virtualPath, new TextEncoder().encode(text));
-  return { injected: virtualPath };
-}
-
 function ensurePyodideDir(virtualPath) {
   const segments = virtualPath.split("/").slice(1, -1);
   let cur = "";
@@ -180,20 +124,25 @@ function ensurePyodideDir(virtualPath) {
   }
 }
 
-async function bootstrap(params) {
-  const code = params.code || "";
-  pyodide.globals.set("pyodide_bootstrap_code", code);
-  await pyodide.runPythonAsync(PYTHON_BOOTSTRAP_TEMPLATE);
-  const result = pyodide.globals.get("_halo_result").toJs({ dict_converter: Object.fromEntries });
-  return result;
+function callPyResult(fn, ...args) {
+  // The Python helpers return plain dicts; convert to a JS object so we
+  // can JSON-stringify directly. ``Object.fromEntries`` keeps numeric
+  // ``exit_code`` numeric rather than coercing to a wrapped PyProxy.
+  const result = fn(...args);
+  return result.toJs({ dict_converter: Object.fromEntries });
 }
 
-async function executeCode(params) {
-  const code = params.code || "";
-  pyodide.globals.set("pyodide_user_code", code);
-  await pyodide.runPythonAsync(PYTHON_RUN_TEMPLATE);
-  const result = pyodide.globals.get("_halo_result").toJs({ dict_converter: Object.fromEntries });
-  return result;
+function bootstrap(params) {
+  const tracePath = params.trace_path;
+  const indexPath = params.index_path;
+  if (!tracePath || !indexPath) {
+    throw new Error("bootstrap requires trace_path and index_path");
+  }
+  return callPyResult(pyodide.globals.get("halo_bootstrap"), tracePath, indexPath);
+}
+
+function executeCode(params) {
+  return callPyResult(pyodide.globals.get("halo_execute"), params.code || "");
 }
 
 // =============================================================================
@@ -256,12 +205,10 @@ for await (const chunk of Deno.stdin.readable) {
       let result;
       if (method === "mount_file") {
         result = mountFile(params);
-      } else if (method === "inject_text") {
-        result = injectText(params);
       } else if (method === "bootstrap") {
-        result = await bootstrap(params);
+        result = bootstrap(params);
       } else if (method === "execute") {
-        result = await executeCode(params);
+        result = executeCode(params);
       } else {
         console.log(jsonrpcError(
           JSONRPC_PROTOCOL_ERRORS.MethodNotFound,

@@ -12,6 +12,8 @@ from pathlib import Path
 from engine.sandbox.log import log_unavailable
 
 _RUNNER_FILENAME = "runner.js"
+_RUNTIME_FILENAME = "pyodide_runtime.py"
+_TRACE_COMPAT_FILENAME = "pyodide_trace_compat.py"
 
 # Wheels Pyodide must load to satisfy ``import numpy``/``import pandas``.
 # ``_PYODIDE_VERSION`` is the npm version this client expects; the matching
@@ -40,9 +42,17 @@ _DENO_MISSING_REMEDIATION = (
 
 @dataclass(frozen=True)
 class PyodideAssets:
-    """Resolved on-disk locations the runner needs read access to."""
+    """Resolved on-disk locations the runner needs read access to.
+
+    ``runner_path``, ``runtime_path``, and ``trace_compat_path`` all live
+    in the same package directory; the runner reads its sibling .py files
+    via ``import.meta.url``, so all three must be on the Deno
+    ``--allow-read`` set even though only the runner is the entry point.
+    """
 
     runner_path: Path
+    runtime_path: Path
+    trace_compat_path: Path
     deno_dir: Path
     pyodide_npm_dir: Path
 
@@ -114,7 +124,8 @@ class PyodideClient:
         """Build the ``deno run`` argv with HALO's locked-down permission set.
 
         ``--allow-read`` is enumerated explicitly (no wildcards) and covers:
-          - the runner script
+          - the runner script + its two sibling .py files (runtime, trace
+            compat) which the runner loads at boot via ``import.meta.url``
           - the Deno cache directory (where ``npm:pyodide`` resolves and
             the pre-cached ``*.whl`` wheels live next to ``pyodide.asm.wasm``)
           - any additional per-run paths the caller mounts (trace, index)
@@ -125,7 +136,12 @@ class PyodideClient:
         spawn. ``--no-prompt`` is passed so a missing permission errors
         instead of pausing on a TTY prompt.
         """
-        read_paths = [self._assets.runner_path, self._assets.deno_dir]
+        read_paths = [
+            self._assets.runner_path,
+            self._assets.runtime_path,
+            self._assets.trace_compat_path,
+            self._assets.deno_dir,
+        ]
         read_paths.extend(extra_read_paths)
         allow_read = ",".join(str(p) for p in read_paths)
         return [
@@ -185,9 +201,13 @@ def _resolve_assets(deno_path: Path) -> PyodideAssets:
     after the first time Deno fetches the npm package, but we backfill any
     missing files here so the sandbox is usable on a fresh checkout.
     """
-    runner_path = (Path(__file__).parent / _RUNNER_FILENAME).resolve()
-    if not runner_path.is_file():
-        raise _ResolutionError(f"runner script missing at {runner_path}")
+    here = Path(__file__).parent
+    runner_path = (here / _RUNNER_FILENAME).resolve()
+    runtime_path = (here / _RUNTIME_FILENAME).resolve()
+    trace_compat_path = (here / _TRACE_COMPAT_FILENAME).resolve()
+    for required in (runner_path, runtime_path, trace_compat_path):
+        if not required.is_file():
+            raise _ResolutionError(f"required sandbox file missing at {required}")
 
     deno_dir = _query_deno_dir(deno_path)
     pyodide_dir = _ensure_pyodide_npm_cache(deno_path, deno_dir)
@@ -195,6 +215,8 @@ def _resolve_assets(deno_path: Path) -> PyodideAssets:
 
     return PyodideAssets(
         runner_path=runner_path,
+        runtime_path=runtime_path,
+        trace_compat_path=trace_compat_path,
         deno_dir=deno_dir,
         pyodide_npm_dir=pyodide_dir,
     )
@@ -324,11 +346,16 @@ class _RunnerSession:
         self,
         *,
         mounts: list[tuple[Path, str]],
-        injects: list[tuple[str, str]],
-        bootstrap_code: str,
+        bootstrap_paths: tuple[str, str],
         user_code: str,
     ) -> "_ExecutionOutcome":
-        """Drive the runner: ready → mount → inject → bootstrap → execute → shutdown."""
+        """Drive the runner: ready → mount → bootstrap → execute → shutdown.
+
+        ``bootstrap_paths`` is the ``(trace_virtual_path, index_virtual_path)``
+        pair the in-Pyodide ``halo_bootstrap`` reads. The runner side owns
+        the rest of the setup (loading the runtime, staging the trace
+        compat shim) so the host doesn't ship Python source per call.
+        """
         proc = await asyncio.create_subprocess_exec(
             *self._argv,
             stdin=asyncio.subprocess.PIPE,
@@ -340,7 +367,7 @@ class _RunnerSession:
         try:
             try:
                 outcome = await asyncio.wait_for(
-                    self._drive(proc, mounts, injects, bootstrap_code, user_code),
+                    self._drive(proc, mounts, bootstrap_paths, user_code),
                     timeout=self._timeout,
                 )
                 stderr_bytes = await stderr_task
@@ -369,8 +396,7 @@ class _RunnerSession:
         self,
         proc: asyncio.subprocess.Process,
         mounts: list[tuple[Path, str]],
-        injects: list[tuple[str, str]],
-        bootstrap_code: str,
+        bootstrap_paths: tuple[str, str],
         user_code: str,
     ) -> "_ExecutionOutcome":
         assert proc.stdin is not None and proc.stdout is not None
@@ -387,14 +413,14 @@ class _RunnerSession:
                 request_id,
             )
 
-        for virtual_path, text in injects:
-            request_id += 1
-            await self._call(
-                proc, "inject_text", {"virtual_path": virtual_path, "text": text}, request_id
-            )
-
+        trace_virtual_path, index_virtual_path = bootstrap_paths
         request_id += 1
-        boot = await self._call(proc, "bootstrap", {"code": bootstrap_code}, request_id)
+        boot = await self._call(
+            proc,
+            "bootstrap",
+            {"trace_path": trace_virtual_path, "index_path": index_virtual_path},
+            request_id,
+        )
         if boot.error is not None:
             return _ExecutionOutcome(
                 exit_code=1,
