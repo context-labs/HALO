@@ -15,9 +15,17 @@ def _install_fake_bwrap(
     *,
     info_fd_payload: bytes,
     stderr: bytes = b"",
+    returncode: int = 127,
     captured_argv: list[str] | None = None,
 ) -> None:
-    """Replace ``subprocess.Popen`` with a stub that mimics bwrap writing ``--info-fd``."""
+    """Replace ``subprocess.Popen`` with a stub that mimics bwrap writing ``--info-fd``.
+
+    ``returncode`` defaults to 127 (the value bwrap returns when execvp hits
+    ENOENT for our nonexistent probe target — i.e. the *successful* probe
+    case where namespace setup completed). Set 1 to simulate a bwrap-internal
+    failure that occurred after info-fd was written (for example loopback
+    configuration blocked by Ubuntu 24.04 AppArmor).
+    """
 
     def _fake_popen(argv, *args, **kwargs):
         if captured_argv is not None:
@@ -27,8 +35,8 @@ def _install_fake_bwrap(
             os.write(info_fd, info_fd_payload)
 
         proc = MagicMock(spec=["wait", "kill", "returncode", "stderr"])
-        proc.returncode = 127
-        proc.wait.return_value = 127
+        proc.returncode = returncode
+        proc.wait.return_value = returncode
         proc.stderr.read.return_value = stderr
         return proc
 
@@ -100,6 +108,7 @@ def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Namespace setup itself is rejected: nothing is written to --info-fd, bwrap exits 1."""
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
 
@@ -110,12 +119,43 @@ def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
         monkeypatch,
         info_fd_payload=b"",
         stderr=b"bwrap: setting up uid map: Operation not permitted\n",
+        returncode=1,
     )
 
     assert LinuxClient.resolve() is None
     err = capsys.readouterr().err
     assert "Operation not permitted" in err
     assert "user namespaces" in err
+
+
+def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """bwrap can write child-pid to --info-fd and *then* die during loopback
+    setup (Ubuntu 24.04 AppArmor blocks ``RTM_NEWADDR`` in unprivileged
+    user namespaces). The probe must reject this case rather than treat
+    the info-fd marker alone as success — actual ``run_python`` calls would
+    fail the same way and the model would see a confusing error."""
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text("")
+
+    monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
+    monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: str(bwrap))
+    monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
+    _install_fake_bwrap(
+        monkeypatch,
+        info_fd_payload=b'{"child-pid":42}',
+        stderr=b"bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n",
+        returncode=1,
+    )
+
+    assert LinuxClient.resolve() is None
+    err = capsys.readouterr().err
+    assert "loopback" in err
+    assert "Operation not permitted" in err
+    assert "AppArmor" in err
 
 
 def test_probe_argv_is_explicit_and_uses_empty_rootfs(

@@ -20,11 +20,14 @@ _LINUX_MISSING_REMEDIATION = (
 )
 
 _LINUX_NAMESPACE_REMEDIATION = (
-    "bubblewrap is installed but the kernel/runtime denied namespace creation.\n"
-    "  Bare Linux:  enable unprivileged user namespaces "
+    "bubblewrap is installed but the kernel/runtime denied a sandbox operation.\n"
+    "  Bare Linux:    enable unprivileged user namespaces "
     "(sysctl kernel.unprivileged_userns_clone=1).\n"
-    "  Docker:      run with --privileged or relax seccomp/userns restrictions.\n"
-    "  Kubernetes:  use securityContext.privileged: true (or equivalent cluster policy)."
+    "  Ubuntu 24.04+: also relax AppArmor on user namespaces "
+    "(sysctl kernel.apparmor_restrict_unprivileged_userns=0); the default policy\n"
+    "                 blocks loopback configuration in --unshare-net sandboxes.\n"
+    "  Docker:        run with --privileged or relax seccomp/userns restrictions.\n"
+    "  Kubernetes:    use securityContext.privileged: true (or equivalent cluster policy)."
 )
 
 
@@ -184,18 +187,23 @@ def _packaged_bwrap() -> Path | None:
 
 
 def _probe(executable: Path) -> str | None:
-    """Run ``bwrap`` with hardening flags and detect namespace setup via ``--info-fd``.
+    """Run ``bwrap`` with hardening flags and verify the sandbox is fully usable.
 
     bwrap writes a JSON status object containing ``"child-pid"`` to the FD
-    passed via ``--info-fd`` *after* the sandbox is fully set up and *just
-    before* it execs the user command. We exec a deliberately nonexistent
-    path so the kernel's ``exec(2)`` inside the sandbox fails with ENOENT —
-    by then bwrap has already emitted the status object, so we know setup
-    worked.
+    passed via ``--info-fd`` *after* the user/mount namespaces are created
+    but *before* it sets up loopback (for ``--unshare-net``) and execs the
+    user command. We deliberately exec a path that does not exist so the
+    in-sandbox ``exec(2)`` fails with ENOENT — execvp's ENOENT path makes
+    bwrap exit 127. That gives us two independent success signals to check:
 
-    Net effect: the probe runs with an entirely empty mount namespace and
-    distinguishes real namespace failures (``"child-pid"`` never appears)
-    from the expected sandbox-set-up-fine-but-exec-failed-as-expected case.
+      1. ``"child-pid"`` written to ``--info-fd`` (namespaces created), and
+      2. exit code 127 (everything between info-fd write and exec succeeded).
+
+    Both are required. If a kernel/runtime restriction blocks loopback
+    configuration (Ubuntu 24.04 AppArmor restricts unprivileged user
+    namespaces from doing this), bwrap dies *between* (1) and (2) with a
+    different exit code, which we treat as probe failure even though
+    ``"child-pid"`` is present.
 
     Returns ``None`` on success, or a diagnostic string on failure.
     """
@@ -244,12 +252,12 @@ def _probe(executable: Path) -> str | None:
         except OSError:
             info = b""
 
-        if b'"child-pid"' in info:
+        if b'"child-pid"' in info and proc.returncode == 127:
             return None
 
         stderr_bytes = proc.stderr.read() if proc.stderr is not None else b""
         diagnostic = stderr_bytes.decode("utf-8", errors="replace").strip()
-        return diagnostic or f"bwrap exited {proc.returncode} without writing --info-fd output"
+        return diagnostic or f"bwrap exited {proc.returncode}"
     finally:
         os.close(read_fd)
         if write_fd_open:

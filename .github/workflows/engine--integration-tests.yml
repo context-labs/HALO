@@ -121,6 +121,19 @@ jobs:
       - name: Install engine dependencies
         run: task ci:setup
 
+      - name: Allow unprivileged user namespaces to configure loopback
+        # Ubuntu 24.04 ships an AppArmor restriction that blocks
+        # unprivileged user namespaces from doing things like configuring
+        # the loopback interface inside a ``--unshare-net`` sandbox. Our
+        # sandbox stays fully locked down (still --unshare-all + --unshare-net,
+        # still no host network), but bwrap needs to be allowed to bring up
+        # ``lo`` inside its own namespace. Both sysctls only relax policy
+        # *for sandboxes the runner spawns* and have no effect outside the
+        # job. Tolerate missing keys so older Ubuntu releases don't fail.
+        run: |
+          sudo sysctl --write kernel.unprivileged_userns_clone=1 2>/dev/null || true
+          sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+
       - name: Run Linux sandbox integration tests
         run: task test:integration-linux
 
