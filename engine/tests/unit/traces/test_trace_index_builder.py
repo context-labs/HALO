@@ -301,3 +301,38 @@ def test_split_into_chunks_empty_input_returns_empty_list() -> None:
     from engine.traces.trace_index_builder import _split_into_chunks
 
     assert _split_into_chunks([], 4) == []
+
+
+def test_process_chunk_accumulates_spans_by_trace_id(tmp_path: Path, fixtures_dir: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets, _process_chunk
+
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    line_offsets = _index_line_offsets(trace_path)
+    result = _process_chunk(trace_path, line_offsets)
+
+    assert set(result.keys()) == {"t-aaaa", "t-bbbb", "t-cccc"}
+    bb = result["t-bbbb"]
+    assert bb.span_count == 2
+    assert bb.has_errors is True
+    assert "gpt-5.4" in bb.model_names
+    assert bb.total_input_tokens == 200
+    assert bb.total_output_tokens == 40
+
+
+def test_process_chunk_partial_chunk_only_sees_its_lines(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets, _process_chunk
+
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    line_offsets = _index_line_offsets(trace_path)
+    first_two = _process_chunk(trace_path, line_offsets[:2])
+
+    assert set(first_two.keys()) == {"t-aaaa"}
+    assert first_two["t-aaaa"].span_count == 2
