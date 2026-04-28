@@ -117,11 +117,14 @@ async def probe_invocation_returns_subagent_result_json() -> None:
     state = await make_run_state(cfg, runner=runner)
     root = _register_root(state)
 
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     subagent_tool = _build_subagent_as_tool(
         run_state=state,
         child_depth=1,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphore,
         parent_execution=root,
     )
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-aaaa", tool_arguments="what is the answer?")
@@ -156,11 +159,14 @@ async def probe_child_execution_registered_with_correct_metadata() -> None:
     state = await make_run_state(cfg, runner=runner)
     root = _register_root(state, agent_id="root-bbbb")
 
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     subagent_tool = _build_subagent_as_tool(
         run_state=state,
         child_depth=1,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphore,
         parent_execution=root,
     )
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-bbbb")
@@ -208,11 +214,14 @@ async def probe_child_emits_items_at_depth_1() -> None:
     state = await make_run_state(cfg, runner=runner)
     root = _register_root(state, agent_id="root-cccc")
 
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     subagent_tool = _build_subagent_as_tool(
         run_state=state,
         child_depth=1,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphore,
         parent_execution=root,
     )
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-cccc")
@@ -257,11 +266,14 @@ async def probe_depth_guard_raises_before_any_sdk_call() -> None:
     state = await make_run_state(cfg, runner=runner)
     root = _register_root(state, agent_id="root-dddd")
 
-    semaphore = asyncio.Semaphore(cfg.maximum_parallel_subagents)
+    semaphore = {
+        d: asyncio.Semaphore(cfg.maximum_parallel_subagents)
+        for d in range(1, cfg.maximum_depth + 1)
+    }
     over_depth_tool = _build_subagent_as_tool(
         run_state=state,
         child_depth=2,
-        semaphore=semaphore,
+        semaphores_by_depth=semaphore,
         parent_execution=root,
     )
 

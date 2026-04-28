@@ -19,6 +19,7 @@ from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.subagent_tool_factory import (
     _build_subagent_as_tool,
     _child_tools_for_depth,
+    build_subagent_semaphores,
 )
 from engine.traces.trace_store import TraceStore
 
@@ -73,11 +74,11 @@ def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=2,
         run_state=run_state,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
         parent_context=_fake_parent_context(),
     )
@@ -91,11 +92,11 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
     run_state.config = cfg
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
-    sem = asyncio.Semaphore(4)
+    sem = {d: asyncio.Semaphore(4) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=1,
         run_state=run_state,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
         parent_context=_fake_parent_context(),
     )
@@ -115,11 +116,11 @@ async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
     run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
     run_state.runner = MagicMock()
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=cfg.maximum_depth + 1,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
     )
 
@@ -140,11 +141,11 @@ async def test_get_context_item_resolves_through_wired_agent_context() -> None:
     parent_context = _fake_parent_context()
     parent_context.append(AgentContextItem(item_id="ctx-42", role="user", content="stored content"))
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=0,
         run_state=run_state,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
         parent_context=parent_context,
     )
@@ -180,11 +181,11 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
 
     run_state.runner = _ExplodingRunner
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=1,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
     )
 
@@ -249,11 +250,11 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
 
     run_state.runner = _FakeRunner
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=1,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
     )
     result_json = await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
@@ -297,11 +298,11 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
 
     run_state.runner = _CapturingRunner
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=1,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
     )
 
@@ -355,13 +356,84 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
 
     run_state.runner = _FakeRunner
 
-    sem = asyncio.Semaphore(1)
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=1,
-        semaphore=sem,
+        semaphores_by_depth=sem,
         parent_execution=_fake_parent(),
     )
     result_json = await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
     result = SubagentToolResult.model_validate_json(result_json)
     assert result.answer == "child says 42"
+
+
+def test_build_subagent_semaphores_returns_independent_pool_per_depth() -> None:
+    """Sharing one semaphore across depths is the deadlock bug. Each spawnable
+    depth must get its own ``Semaphore`` instance."""
+    cfg = _engine_config(max_depth=3)
+    cfg = cfg.model_copy(update={"maximum_parallel_subagents": 2})
+    sems = build_subagent_semaphores(cfg)
+    assert set(sems.keys()) == {1, 2, 3}
+    # Each depth must hold its own object.
+    assert len({id(s) for s in sems.values()}) == 3
+
+
+@pytest.mark.asyncio
+async def test_depth_2_tool_runs_when_depth_1_slot_held() -> None:
+    """Regression: at ``max_parallel=1`` ``max_depth=2`` a depth-2 tool must
+    complete even while the depth-1 semaphore is held externally — the
+    realistic case where a depth-1 parent is parked inside ``runner.run``
+    waiting on this very grandchild's tool result. With the previous
+    single-shared-semaphore design this deadlocks because the only slot
+    is held by the parent we're meant to unblock.
+    """
+    cfg = _engine_config(max_depth=2)
+    cfg = cfg.model_copy(update={"maximum_parallel_subagents": 1})
+    fake_store = MagicMock(spec=TraceStore)
+    run_state = EngineRunState(trace_store=fake_store, output_bus=EngineOutputBus(), config=cfg)
+
+    one_event = SimpleNamespace(
+        type="run_item_stream_event",
+        item=SimpleNamespace(
+            type="message_output_item",
+            raw_item=SimpleNamespace(
+                id="m1",
+                role="assistant",
+                content=[SimpleNamespace(type="output_text", text="answered")],
+            ),
+        ),
+    )
+
+    class _Stream:
+        async def stream_events(self):
+            yield one_event
+
+    class _Runner:
+        @staticmethod
+        def run_streamed(**_kwargs):
+            return _Stream()
+
+    run_state.runner = _Runner
+
+    sems = build_subagent_semaphores(cfg)
+
+    # Hold the depth-1 slot, simulating a parent waiting on this grandchild.
+    await sems[1].acquire()
+    try:
+        tool = _build_subagent_as_tool(
+            run_state=run_state,
+            child_depth=2,
+            semaphores_by_depth=sems,
+            parent_execution=_fake_parent(),
+        )
+        # Pre-fix this hangs on ``async with semaphore`` because the
+        # global semaphore had zero free slots.
+        result_json = await asyncio.wait_for(
+            tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask grandchild"}'),
+            timeout=2.0,
+        )
+        result = SubagentToolResult.model_validate_json(result_json)
+        assert result.answer == "answered"
+    finally:
+        sems[1].release()
