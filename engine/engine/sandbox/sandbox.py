@@ -430,12 +430,24 @@ async def _drive(
     request_id = 0
     for host_path, virtual_path in mounts:
         request_id += 1
-        await _call(
+        mount = await _call(
             proc,
             "mount_file",
             {"host_path": str(host_path), "virtual_path": virtual_path},
             request_id,
         )
+        # Surface mount failures up front. Without this, a Deno permission
+        # denial or missing host file makes the next bootstrap call fall
+        # over with a confusing ``FileNotFoundError`` deep inside Pyodide
+        # — the user sees a Python traceback when the real cause is the
+        # file never landing in the WASM FS.
+        if mount.error is not None:
+            return CodeExecutionResult(
+                exit_code=1,
+                stdout="",
+                stderr=_format_rpc_error(f"mount_file({virtual_path})", mount.error),
+                timed_out=False,
+            )
 
     request_id += 1
     boot = await _call(
@@ -610,11 +622,29 @@ async def _drain_capped(stream: asyncio.StreamReader | None, cap: int) -> bytes:
     return bytes(buf)
 
 
-def _truncate(text: str, cap: int) -> str:
-    if cap <= 0 or len(text) <= cap:
+def _truncate(text: str, cap_bytes: int) -> str:
+    """Truncate ``text`` so its UTF-8 encoding is at most ``cap_bytes`` bytes.
+
+    The cap is named in bytes (``_MAX_STDOUT_BYTES`` etc.) so we honor
+    that contract: encode, slice on bytes, decode with ``errors="ignore"``
+    to drop any trailing partial UTF-8 sequence (no U+FFFD smearing
+    when the cut lands mid-character). Multi-byte content like emoji
+    or CJK shrinks the visible character count but never lets the byte
+    output exceed the cap.
+
+    The truncation marker is pure ASCII so its byte length equals its
+    character length; we reserve those bytes at the tail. With the
+    realistic 64 KB caps the engine ships, the marker (~30 bytes) is
+    always tiny relative to the budget.
+    """
+    if cap_bytes <= 0:
         return text
-    head_len = max(0, cap - len(_TRUNCATION_MARKER))
-    return text[:head_len] + _TRUNCATION_MARKER[: cap - head_len]
+    encoded = text.encode("utf-8")
+    if len(encoded) <= cap_bytes:
+        return text
+    head_budget = max(0, cap_bytes - len(_TRUNCATION_MARKER))
+    head = encoded[:head_budget].decode("utf-8", errors="ignore")
+    return head + _TRUNCATION_MARKER
 
 
 def _attach_deno_stderr(result: CodeExecutionResult, stderr_extra: bytes) -> CodeExecutionResult:
