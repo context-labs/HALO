@@ -48,23 +48,30 @@ def test_render_profile_exact_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         writable_paths=[work],
     )
 
-    assert (
-        profile
-        == f"""(version 1)
-(deny default)
-(allow process*)
-(allow mach-lookup)
-(allow ipc-posix-shm)
-(allow sysctl-read)
-(allow signal)
-(allow file-read*)
-(deny file-read* (subpath "/Users/tester"))
-(allow file-read* (literal "{trace}"))
-(allow file-read* (literal "{index}"))
-(allow file-read* (subpath "{runtime}"))
-(allow file-write* (subpath "{work}"))
-(deny network*)
-"""
+    assert profile == (
+        "(version 1)\n"
+        "(deny default)\n"
+        "(allow process*)\n"
+        "(allow mach-lookup)\n"
+        "(allow ipc-posix-shm)\n"
+        "(allow sysctl-read)\n"
+        "(allow signal)\n"
+        "(allow file-read*)\n"
+        '(deny file-read* (subpath "/Users/tester/.ssh"))\n'
+        '(deny file-read* (subpath "/Users/tester/.aws"))\n'
+        '(deny file-read* (subpath "/Users/tester/.gnupg"))\n'
+        '(deny file-read* (subpath "/Users/tester/.config"))\n'
+        '(deny file-read* (subpath "/Users/tester/.docker"))\n'
+        '(deny file-read* (subpath "/Users/tester/.kube"))\n'
+        '(deny file-read* (subpath "/Users/tester/.gcloud"))\n'
+        '(deny file-read* (subpath "/Users/tester/Documents"))\n'
+        '(deny file-read* (subpath "/Users/tester/Desktop"))\n'
+        '(deny file-read* (subpath "/Users/tester/Downloads"))\n'
+        f'(allow file-read* (literal "{trace}"))\n'
+        f'(allow file-read* (literal "{index}"))\n'
+        f'(allow file-read* (subpath "{runtime}"))\n'
+        f'(allow file-write* (subpath "{work}"))\n'
+        "(deny network*)\n"
     )
 
 

@@ -5,6 +5,26 @@ from pathlib import Path
 
 from engine.sandbox.log import log_unavailable
 
+# Subdirectories under ``$HOME`` that we explicitly deny reads on. These are
+# the common locations of secrets/credentials/private user data. We do NOT
+# wholesale-deny ``$HOME`` itself because that would block path traversal to
+# allowed deeper paths (e.g. a venv living under ``$HOME/work/...``):
+# the macOS sandbox checks read permission on directory traversal, not just
+# on the final target, so denying a parent of an allowed path makes the
+# allowed path unreachable.
+_MACOS_HOME_DENY_SUBDIRS = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".config",
+    ".docker",
+    ".kube",
+    ".gcloud",
+    "Documents",
+    "Desktop",
+    "Downloads",
+)
+
 
 class MacosClient:
     """``sandbox-exec``-backed sandbox client.
@@ -56,34 +76,38 @@ class MacosClient:
             normal startup; without these, the interpreter aborts before
             reaching user code.
 
-        Reads of ``$HOME`` (typical user-data location) are denied even
-        though ``file-read*`` is otherwise broad. Each ``readonly_paths``
-        entry is then re-allowed by literal/subpath, so trace and index
-        files remain accessible regardless of where they live.
+        Reads of common credential/secret directories under ``$HOME`` are
+        denied (``.ssh``, ``.aws``, etc.). We deliberately do NOT
+        wholesale-deny ``$HOME``: macOS sandbox-exec checks read permission
+        on every component of a path during traversal, so denying the home
+        directory itself blocks reach-through to allowed deeper paths
+        (e.g. a venv living at ``$HOME/work/.../.venv``).
         """
-        re_allows_read = "\n".join(
-            f'(allow file-read* (subpath "{p}"))'
-            if p.is_dir()
-            else f'(allow file-read* (literal "{p}"))'
-            for p in readonly_paths
-        )
-        allows_write = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in writable_paths)
-        home_dir = _home_dir()
-        home_clause = f'(deny file-read* (subpath "{home_dir}"))' if home_dir else ""
+        lines: list[str] = [
+            "(version 1)",
+            "(deny default)",
+            "(allow process*)",
+            "(allow mach-lookup)",
+            "(allow ipc-posix-shm)",
+            "(allow sysctl-read)",
+            "(allow signal)",
+            "(allow file-read*)",
+        ]
 
-        return f"""(version 1)
-(deny default)
-(allow process*)
-(allow mach-lookup)
-(allow ipc-posix-shm)
-(allow sysctl-read)
-(allow signal)
-(allow file-read*)
-{home_clause}
-{re_allows_read}
-{allows_write}
-(deny network*)
-"""
+        home_dir = _home_dir()
+        if home_dir is not None:
+            for subdir in _MACOS_HOME_DENY_SUBDIRS:
+                lines.append(f'(deny file-read* (subpath "{home_dir}/{subdir}"))')
+
+        for path in readonly_paths:
+            kind = "subpath" if path.is_dir() else "literal"
+            lines.append(f'(allow file-read* ({kind} "{path}"))')
+
+        for path in writable_paths:
+            lines.append(f'(allow file-write* (subpath "{path}"))')
+
+        lines.append("(deny network*)")
+        return "\n".join(lines) + "\n"
 
     def build_argv(
         self,

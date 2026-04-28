@@ -31,10 +31,18 @@ unsupported platform).
 ## Sandbox limitations
 
 `bwrap` from this package still requires kernel/runtime support for
-unprivileged user namespaces. On hosts that disable that support (some
-hardened distros, locked-down Docker / Kubernetes environments) the binary
-exists but namespace creation will fail with `Operation not permitted`.
-That is a host policy issue and cannot be fixed by repackaging.
+unprivileged user namespaces. On hosts that disable or restrict that
+support (some hardened distros, locked-down Docker / Kubernetes
+environments, Ubuntu 24.04+ AppArmor `unprivileged_userns_clone`
+restrictions) the binary exists but the sandbox will fail to set up.
+
+That's a host-level policy decision and cannot be fixed by repackaging.
+The simplest workaround on those hosts is to install bubblewrap from the
+distro package manager — `sudo apt install bubblewrap` (or `dnf` / `apk`
+equivalents) — which ships with the policy hooks the distro maintainer
+configured. The packaged binary in this wheel is unmodified upstream
+bubblewrap and is intended for hosts where unprivileged user namespaces
+work out of the box.
 
 ## Versioning
 

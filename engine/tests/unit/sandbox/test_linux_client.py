@@ -9,22 +9,28 @@ import pytest
 from engine.sandbox import linux_client
 from engine.sandbox.linux_client import HALO_BWRAP_ENV_VAR, LinuxClient
 
+# Stderr line bwrap writes when execvp fails with ENOENT. The probe relies
+# on this string as the "namespace setup completed all the way to exec"
+# signal, so the test fakes mimic real bwrap output.
+_PROBE_EXEC_FAIL_STDERR = (
+    b"bwrap: execvp /halo-sandbox-probe-no-such-exec-target: No such file or directory\n"
+)
+
 
 def _install_fake_bwrap(
     monkeypatch: pytest.MonkeyPatch,
     *,
     info_fd_payload: bytes,
-    stderr: bytes = b"",
-    returncode: int = 127,
+    stderr: bytes = _PROBE_EXEC_FAIL_STDERR,
+    returncode: int = 1,
     captured_argv: list[str] | None = None,
 ) -> None:
     """Replace ``subprocess.Popen`` with a stub that mimics bwrap writing ``--info-fd``.
 
-    ``returncode`` defaults to 127 (the value bwrap returns when execvp hits
-    ENOENT for our nonexistent probe target — i.e. the *successful* probe
-    case where namespace setup completed). Set 1 to simulate a bwrap-internal
-    failure that occurred after info-fd was written (for example loopback
-    configuration blocked by Ubuntu 24.04 AppArmor).
+    Defaults match the *successful* probe case: bwrap writes ``child-pid`` to
+    ``--info-fd``, sets up the namespace fully, then dies with exit 1 because
+    ``execvp`` could not find our deliberately-nonexistent target. Override
+    ``stderr`` and ``info_fd_payload`` to simulate failure modes.
     """
 
     def _fake_popen(argv, *args, **kwargs):
@@ -119,13 +125,12 @@ def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
         monkeypatch,
         info_fd_payload=b"",
         stderr=b"bwrap: setting up uid map: Operation not permitted\n",
-        returncode=1,
     )
 
     assert LinuxClient.resolve() is None
     err = capsys.readouterr().err
     assert "Operation not permitted" in err
-    assert "user namespaces" in err
+    assert "apt install bubblewrap" in err
 
 
 def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
@@ -135,9 +140,11 @@ def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
 ) -> None:
     """bwrap can write child-pid to --info-fd and *then* die during loopback
     setup (Ubuntu 24.04 AppArmor blocks ``RTM_NEWADDR`` in unprivileged
-    user namespaces). The probe must reject this case rather than treat
-    the info-fd marker alone as success — actual ``run_python`` calls would
-    fail the same way and the model would see a confusing error."""
+    user namespaces). The probe must reject this case — actual
+    ``run_python`` calls would fail the same way and the model would see
+    a confusing error. Detection rule: success requires ``child-pid`` in
+    info-fd *and* ``bwrap: execvp`` in stderr (proof bwrap reached the
+    final exec phase, after every prior setup step succeeded)."""
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
 
@@ -148,14 +155,13 @@ def test_resolve_returns_none_when_bwrap_dies_after_info_fd_written(
         monkeypatch,
         info_fd_payload=b'{"child-pid":42}',
         stderr=b"bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n",
-        returncode=1,
     )
 
     assert LinuxClient.resolve() is None
     err = capsys.readouterr().err
     assert "loopback" in err
     assert "Operation not permitted" in err
-    assert "AppArmor" in err
+    assert "apt install bubblewrap" in err
 
 
 def test_probe_argv_is_explicit_and_uses_empty_rootfs(

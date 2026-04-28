@@ -2,10 +2,9 @@
 
 The package ships a statically-linked ``bwrap`` executable inside the wheel
 under ``bubblewrap_bin/_bin/bwrap``. ``bwrap_path()`` returns the absolute
-path to that executable so callers can invoke it directly. The Python
-package itself is intentionally minimal — it exists so other packages can
-declare ``bubblewrap-bin`` as a dependency and obtain a working ``bwrap``
-without requiring ``apt install bubblewrap`` on the host.
+path so callers can invoke ``bwrap`` directly. The Python package itself
+is intentionally minimal — anything more complex (AppArmor policy,
+sandbox setup) is the responsibility of the host or the consumer.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import os
 import stat
 from pathlib import Path
 
-__all__ = ["bwrap_path", "BubblewrapNotBundledError"]
+__all__ = ["BubblewrapNotBundledError", "bwrap_path"]
 
 
 class BubblewrapNotBundledError(RuntimeError):

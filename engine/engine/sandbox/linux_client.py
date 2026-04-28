@@ -11,21 +11,39 @@ HALO_BWRAP_ENV_VAR = "HALO_BWRAP_PATH"
 
 
 _LINUX_MISSING_REMEDIATION = (
-    "Install bubblewrap or the bubblewrap-bin Python package, "
-    "or set HALO_BWRAP_PATH to a usable bwrap binary.\n"
+    "Install bubblewrap from your distro's package manager:\n"
     "  Debian/Ubuntu: sudo apt install bubblewrap\n"
     "  Fedora/RHEL:   sudo dnf install bubblewrap\n"
     "  Alpine:        sudo apk add bubblewrap\n"
-    "  Or:            pip install bubblewrap-bin"
+    "Then re-run the engine. If you cannot install system packages, set\n"
+    "HALO_BWRAP_PATH to a usable bwrap binary."
+)
+
+_LINUX_NAMESPACE_REMEDIATION = (
+    "bubblewrap is on the host but the kernel/runtime denied a sandbox operation.\n"
+    "Easiest fix: install bubblewrap from your distro's package manager — the\n"
+    "system package ships with the right policy hooks (e.g. AppArmor profile\n"
+    "on Ubuntu 24.04+) that the bundled binary doesn't have:\n"
+    "  Debian/Ubuntu: sudo apt install bubblewrap\n"
+    "  Fedora/RHEL:   sudo dnf install bubblewrap\n"
+    "If you're already using the system bwrap and still hitting this, the\n"
+    "host or container is restricting user namespaces:\n"
+    "  Docker:     run with --privileged or relax seccomp/userns restrictions.\n"
+    "  Kubernetes: use securityContext.privileged: true."
 )
 
 _LINUX_NAMESPACE_REMEDIATION = (
     "bubblewrap is installed but the kernel/runtime denied a sandbox operation.\n"
     "  Bare Linux:    enable unprivileged user namespaces "
     "(sysctl kernel.unprivileged_userns_clone=1).\n"
-    "  Ubuntu 24.04+: also relax AppArmor on user namespaces "
-    "(sysctl kernel.apparmor_restrict_unprivileged_userns=0); the default policy\n"
-    "                 blocks loopback configuration in --unshare-net sandboxes.\n"
+    "  Ubuntu 24.04+: install the bundled AppArmor profile so the packaged\n"
+    "                 bwrap can use unprivileged user namespaces:\n"
+    "                   sudo install -m 644 \\\n"
+    '                     "$(python -m bubblewrap_bin print-apparmor-profile-path)" \\\n'
+    "                     /etc/apparmor.d/bubblewrap-bin\n"
+    "                   sudo apparmor_parser -r /etc/apparmor.d/bubblewrap-bin\n"
+    "                 Or `sudo apt install bubblewrap` to use the system\n"
+    "                 binary which ships its own profile.\n"
     "  Docker:        run with --privileged or relax seccomp/userns restrictions.\n"
     "  Kubernetes:    use securityContext.privileged: true (or equivalent cluster policy)."
 )
@@ -192,18 +210,20 @@ def _probe(executable: Path) -> str | None:
     bwrap writes a JSON status object containing ``"child-pid"`` to the FD
     passed via ``--info-fd`` *after* the user/mount namespaces are created
     but *before* it sets up loopback (for ``--unshare-net``) and execs the
-    user command. We deliberately exec a path that does not exist so the
-    in-sandbox ``exec(2)`` fails with ENOENT — execvp's ENOENT path makes
-    bwrap exit 127. That gives us two independent success signals to check:
+    user command. To know that loopback succeeded too, we rely on the
+    in-sandbox ``execvp`` reaching the kernel and writing the ENOENT
+    diagnostic ``"bwrap: execvp <path>: No such file or directory"`` to
+    stderr — bwrap only reaches that point if every preceding setup step
+    (namespaces, mounts, loopback) succeeded.
 
-      1. ``"child-pid"`` written to ``--info-fd`` (namespaces created), and
-      2. exit code 127 (everything between info-fd write and exec succeeded).
+    Probe success requires both signals:
+      1. ``"child-pid"`` in ``--info-fd`` output (namespaces created), and
+      2. ``"bwrap: execvp"`` in stderr (setup completed all the way to exec).
 
-    Both are required. If a kernel/runtime restriction blocks loopback
-    configuration (Ubuntu 24.04 AppArmor restricts unprivileged user
-    namespaces from doing this), bwrap dies *between* (1) and (2) with a
-    different exit code, which we treat as probe failure even though
-    ``"child-pid"`` is present.
+    bwrap exits with status 1 in both the exec-failure and the
+    namespace-internal-failure paths (``die_with_error``), so we cannot
+    rely on the exit code to discriminate; the stderr marker is the
+    reliable signal.
 
     Returns ``None`` on success, or a diagnostic string on failure.
     """
@@ -252,10 +272,11 @@ def _probe(executable: Path) -> str | None:
         except OSError:
             info = b""
 
-        if b'"child-pid"' in info and proc.returncode == 127:
+        stderr_bytes = proc.stderr.read() if proc.stderr is not None else b""
+
+        if b'"child-pid"' in info and b"bwrap: execvp" in stderr_bytes:
             return None
 
-        stderr_bytes = proc.stderr.read() if proc.stderr is not None else b""
         diagnostic = stderr_bytes.decode("utf-8", errors="replace").strip()
         return diagnostic or f"bwrap exited {proc.returncode}"
     finally:
