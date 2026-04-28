@@ -32,22 +32,6 @@ _LINUX_NAMESPACE_REMEDIATION = (
     "  Kubernetes: use securityContext.privileged: true."
 )
 
-_LINUX_NAMESPACE_REMEDIATION = (
-    "bubblewrap is installed but the kernel/runtime denied a sandbox operation.\n"
-    "  Bare Linux:    enable unprivileged user namespaces "
-    "(sysctl kernel.unprivileged_userns_clone=1).\n"
-    "  Ubuntu 24.04+: install the bundled AppArmor profile so the packaged\n"
-    "                 bwrap can use unprivileged user namespaces:\n"
-    "                   sudo install -m 644 \\\n"
-    '                     "$(python -m bubblewrap_bin print-apparmor-profile-path)" \\\n'
-    "                     /etc/apparmor.d/bubblewrap-bin\n"
-    "                   sudo apparmor_parser -r /etc/apparmor.d/bubblewrap-bin\n"
-    "                 Or `sudo apt install bubblewrap` to use the system\n"
-    "                 binary which ships its own profile.\n"
-    "  Docker:        run with --privileged or relax seccomp/userns restrictions.\n"
-    "  Kubernetes:    use securityContext.privileged: true (or equivalent cluster policy)."
-)
-
 
 class LinuxClient:
     """Bubblewrap-backed sandbox client.
