@@ -46,6 +46,26 @@ def _split_into_chunks(
     return chunks
 
 
+def _merge_accumulators(
+    per_worker: list[dict[str, _RowAccumulator]],
+) -> dict[str, _RowAccumulator]:
+    """Stage 3: merge per-worker partials by trace_id; chunk-order traversal preserves file order.
+
+    Iterating ``per_worker`` in order — and ``Pool.map`` returns results in input
+    order — is what guarantees ``byte_offsets`` within a trace stays sorted by
+    file position. No explicit sort step is needed.
+    """
+    merged: dict[str, _RowAccumulator] = {}
+    for partial in per_worker:
+        for trace_id, acc in partial.items():
+            existing = merged.get(trace_id)
+            if existing is None:
+                merged[trace_id] = acc
+            else:
+                existing.merge_in(acc)
+    return merged
+
+
 def _process_chunk(
     trace_path: Path, chunk: list[tuple[int, int]]
 ) -> dict[str, _RowAccumulator]:
