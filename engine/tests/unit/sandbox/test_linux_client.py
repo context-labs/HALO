@@ -7,11 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from engine.sandbox import linux_client
-from engine.sandbox.linux_client import (
-    HALO_BWRAP_ENV_VAR,
-    LinuxClient,
-    SandboxNotAvailable,
-)
+from engine.sandbox.linux_client import HALO_BWRAP_ENV_VAR, LinuxClient
 
 
 def _install_fake_bwrap(
@@ -49,6 +45,7 @@ def test_resolve_uses_env_override_first(tmp_path: Path, monkeypatch: pytest.Mon
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
 
     client = LinuxClient.resolve()
+    assert client is not None
     assert client.executable == env_bwrap
 
 
@@ -64,24 +61,27 @@ def test_resolve_falls_back_to_packaged_when_system_missing(
     _install_fake_bwrap(monkeypatch, info_fd_payload=b'{"child-pid":42}')
 
     client = LinuxClient.resolve()
+    assert client is not None
     assert client.executable == packaged
 
 
-def test_resolve_raises_missing_when_no_candidates(
-    monkeypatch: pytest.MonkeyPatch,
+def test_resolve_returns_none_with_install_remediation_when_no_candidates(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv(HALO_BWRAP_ENV_VAR, raising=False)
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
 
-    with pytest.raises(SandboxNotAvailable) as exc_info:
-        LinuxClient.resolve()
-    assert "not found" in exc_info.value.diagnostic
-    assert "install" in exc_info.value.remediation.lower()
+    assert LinuxClient.resolve() is None
+    err = capsys.readouterr().err
+    assert "not found" in err
+    assert "install" in err.lower()
 
 
-def test_resolve_raises_missing_when_only_candidate_is_nonexistent_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_resolve_returns_none_with_install_remediation_when_only_candidate_is_nonexistent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nonexistent = tmp_path / "does-not-exist"
 
@@ -89,14 +89,16 @@ def test_resolve_raises_missing_when_only_candidate_is_nonexistent_path(
     monkeypatch.setattr(linux_client.shutil, "which", lambda *_a, **_kw: None)
     monkeypatch.setattr(linux_client, "_packaged_bwrap", lambda: None)
 
-    with pytest.raises(SandboxNotAvailable) as exc_info:
-        LinuxClient.resolve()
-    assert str(nonexistent) in exc_info.value.diagnostic
-    assert "install" in exc_info.value.remediation.lower()
+    assert LinuxClient.resolve() is None
+    err = capsys.readouterr().err
+    assert str(nonexistent) in err
+    assert "install" in err.lower()
 
 
-def test_resolve_raises_namespace_denied_when_probe_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_resolve_returns_none_with_namespace_remediation_when_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     bwrap = tmp_path / "bwrap"
     bwrap.write_text("")
@@ -110,10 +112,10 @@ def test_resolve_raises_namespace_denied_when_probe_fails(
         stderr=b"bwrap: setting up uid map: Operation not permitted\n",
     )
 
-    with pytest.raises(SandboxNotAvailable) as exc_info:
-        LinuxClient.resolve()
-    assert "Operation not permitted" in exc_info.value.diagnostic
-    assert "user namespaces" in exc_info.value.remediation
+    assert LinuxClient.resolve() is None
+    err = capsys.readouterr().err
+    assert "Operation not permitted" in err
+    assert "user namespaces" in err
 
 
 def test_probe_argv_is_explicit_and_uses_empty_rootfs(

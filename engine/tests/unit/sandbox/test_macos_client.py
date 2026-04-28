@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from engine.sandbox import macos_client
-from engine.sandbox.linux_client import SandboxNotAvailable
 from engine.sandbox.macos_client import MacosClient
 
 
@@ -17,15 +16,18 @@ def test_resolve_finds_sandbox_exec_on_path(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     client = MacosClient.resolve()
+    assert client is not None
     assert client.executable == Path("/usr/bin/sandbox-exec")
 
 
-def test_resolve_raises_when_sandbox_exec_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_returns_none_when_sandbox_exec_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(macos_client.shutil, "which", lambda *_a, **_kw: None)
 
-    with pytest.raises(SandboxNotAvailable) as exc_info:
-        MacosClient.resolve()
-    assert "sandbox-exec" in exc_info.value.diagnostic
+    assert MacosClient.resolve() is None
+    err = capsys.readouterr().err
+    assert "sandbox-exec not found on PATH" in err
 
 
 def test_render_profile_exact_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
