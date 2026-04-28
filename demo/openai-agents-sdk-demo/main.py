@@ -16,11 +16,14 @@ def main(
     model: str = typer.Option("gpt-4o-mini", "--model", help="OpenAI model name"),
 ) -> None:
     load_dotenv()
-    setup_tracing()
-    agent = build_agent(model)
-    ctx = AgentContext(root=root.resolve())
-    result = Runner.run_sync(agent, question, context=ctx)
-    rprint(result.final_output)
+    processor = setup_tracing()
+    try:
+        agent = build_agent(model)
+        ctx = AgentContext(root=root.resolve())
+        result = Runner.run_sync(agent, question, context=ctx)
+        rprint(result.final_output)
+    finally:
+        processor.shutdown()
 
 
 if __name__ == "__main__":
