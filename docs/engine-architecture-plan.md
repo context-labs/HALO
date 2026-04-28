@@ -169,7 +169,7 @@ class EngineConfig(BaseModel):
     trace_index: TraceIndexConfig = TraceIndexConfig()
     sandbox: SandboxConfig = SandboxConfig()
     text_message_compaction_keep_last_messages: int = 12
-    tool_call_compaction_keep_last_messages: int = 6
+    tool_call_compaction_keep_last_turns: int = 3
     maximum_depth: int = 2
     maximum_parallel_subagents: int = 4
 ```
@@ -579,14 +579,14 @@ class AgentContext:
     items: list[AgentContextItem]
     compaction_model: ModelConfig
     text_message_compaction_keep_last_messages: int
-    tool_call_compaction_keep_last_messages: int
+    tool_call_compaction_keep_last_turns: int
 
     def __init__(
         self,
         items: list[AgentContextItem],
         compaction_model: ModelConfig,
         text_message_compaction_keep_last_messages: int,
-        tool_call_compaction_keep_last_messages: int,
+        tool_call_compaction_keep_last_turns: int,
     ) -> None:
         ...
 
@@ -609,7 +609,7 @@ class AgentContext:
 Compaction uses two independent keep-last thresholds:
 
 - `text_message_compaction_keep_last_messages`: how many recent non-tool-call text messages remain uncompacted.
-- `tool_call_compaction_keep_last_messages`: how many recent tool-call-related messages remain uncompacted. Tool-call-related means assistant messages with non-empty `tool_calls` and `tool` role result messages.
+- `tool_call_compaction_keep_last_turns`: how many recent tool-call turns remain uncompacted. A turn = one assistant message with non-empty `tool_calls`, paired with the `role="tool"` result messages whose `tool_call_id` matches one of those calls. Eligibility operates on whole turns so an assistant tool-call and its results are always compacted together — never split. Standalone `role="tool"` messages with no matching assistant tool-call in context don't form a turn and are skipped.
 
 System messages are never compacted.
 

@@ -1,0 +1,26 @@
+{
+  "include": [
+    "engine",
+    "tests/unit",
+    "tests/integration",
+    "tests/e2e"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    ".sandbox-venv"
+  ],
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "reportMissingImports": false,
+      "reportAttributeAccessIssue": false,
+      "reportArgumentType": false
+    }
+  ]
+}

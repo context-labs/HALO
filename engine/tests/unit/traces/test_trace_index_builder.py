@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from engine.traces.models.trace_index_config import TraceIndexConfig
+from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
+from engine.traces.trace_index_builder import TraceIndexBuilder
+
+
+def _write_meta(
+    meta_path: Path, *, trace_path: Path, schema_version: int = 1, trace_count: int = 0
+) -> None:
+    """Pre-seed a meta sidecar with the current stat fingerprint so the reuse path is taken."""
+    size, mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
+    meta = TraceIndexMeta(
+        schema_version=schema_version,
+        trace_count=trace_count,
+        source_size=size,
+        source_mtime_ns=mtime_ns,
+    )
+    meta_path.write_text(meta.model_dump_json())
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_exists_default_path_returned(tmp_path: Path) -> None:
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_text("")
+    default_index = Path(str(trace_path) + ".engine-index.jsonl")
+    default_meta = Path(str(trace_path) + ".engine-index.meta.json")
+    default_index.write_text("")
+    _write_meta(default_meta, trace_path=trace_path)
+
+    result_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    assert result_path == default_index
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_exists_explicit_override(tmp_path: Path) -> None:
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_text("")
+    custom_index = tmp_path / "custom.idx.jsonl"
+    custom_meta = Path(str(custom_index) + ".meta.json")
+    custom_index.write_text("")
+    _write_meta(custom_meta, trace_path=trace_path)
+
+    result_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(index_path=custom_index),
+    )
+    assert result_path == custom_index
+
+
+@pytest.mark.asyncio
+async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    result_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    assert result_path.exists()
+    meta_path = TraceIndexBuilder._meta_path_for(result_path)
+    assert meta_path.exists()
+
+    meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert meta.schema_version == 1
+    assert meta.trace_count == 3
+    expected_size, expected_mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
+    assert meta.source_size == expected_size
+    assert meta.source_mtime_ns == expected_mtime_ns
+
+    rows = [
+        TraceIndexRow.model_validate_json(line) for line in result_path.read_text().splitlines()
+    ]
+    rows_by_id = {r.trace_id: r for r in rows}
+    assert set(rows_by_id) == {"t-aaaa", "t-bbbb", "t-cccc"}
+
+    bb = rows_by_id["t-bbbb"]
+    assert bb.has_errors is True
+    assert "gpt-5.4" in bb.model_names
+    assert bb.total_input_tokens == 200
+    assert bb.total_output_tokens == 40
+
+    with trace_path.open("rb") as fh:
+        fh.seek(bb.byte_offsets[0])
+        blob = fh.read(bb.byte_lengths[0])
+    span = json.loads(blob)
+    assert span["span_id"] == "s-bbbb-1"
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_rebuilds_on_schema_mismatch(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+    index_path = Path(str(trace_path) + ".engine-index.jsonl")
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+    index_path.write_text("")
+    size, mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
+    stale = TraceIndexMeta(
+        schema_version=999,
+        trace_count=0,
+        source_size=size,
+        source_mtime_ns=mtime_ns,
+    )
+    meta_path.write_text(stale.model_dump_json())
+
+    result_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(schema_version=1),
+    )
+    assert result_path == index_path
+    rebuilt_meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert rebuilt_meta.schema_version == 1
+    assert rebuilt_meta.trace_count == 3
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_rebuilds_when_trace_changes(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+    original_meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert original_meta.trace_count == 3
+
+    extra_span = (
+        '{"trace_id":"t-dddd","span_id":"s-dddd-1","parent_span_id":"","trace_state":"",'
+        '"name":"root","kind":"SPAN_KIND_INTERNAL",'
+        '"start_time":"2026-04-23T08:00:00.000000000Z",'
+        '"end_time":"2026-04-23T08:00:01.000000000Z",'
+        '"status":{"code":"STATUS_CODE_OK","message":""},'
+        '"resource":{"attributes":{"service.name":"agent-c"}},'
+        '"scope":{"name":"@test/scope","version":"0.0.1"},'
+        '"attributes":{"openinference.span.kind":"AGENT","inference.export.schema_version":1,'
+        '"inference.project_id":"prj_test","inference.observation_kind":"AGENT",'
+        '"inference.agent_name":"agent-c"}}\n'
+    )
+    with trace_path.open("ab") as fh:
+        fh.write(extra_span.encode("utf-8"))
+
+    rebuilt_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    assert rebuilt_path == index_path
+    rebuilt_meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert rebuilt_meta.trace_count == 4
+    assert rebuilt_meta.source_size > original_meta.source_size
+    expected_size, expected_mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
+    assert rebuilt_meta.source_size == expected_size
+    assert rebuilt_meta.source_mtime_ns == expected_mtime_ns
+
+
+@pytest.mark.asyncio
+async def test_ensure_index_reuses_when_trace_unchanged(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+    first_meta_mtime = meta_path.stat().st_mtime_ns
+    first_index_mtime = index_path.stat().st_mtime_ns
+
+    await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    assert meta_path.stat().st_mtime_ns == first_meta_mtime
+    assert index_path.stat().st_mtime_ns == first_index_mtime
