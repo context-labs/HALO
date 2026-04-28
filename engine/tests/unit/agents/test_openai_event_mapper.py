@@ -1,61 +1,46 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import pytest
-
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.openai_event_mapper import OpenAiEventMapper
-from engine.models.engine_output import AgentOutputItem
+from tests.unit.agents._sdk_events import (
+    assistant_message_event,
+    text_delta_event,
+    tool_call_event,
+    tool_output_event,
+)
 
 
-def _exec() -> AgentExecution:
+def _exec(*, depth: int = 0, parent_tool_call_id: str | None = None) -> AgentExecution:
     return AgentExecution(
         agent_id="root",
         agent_name="root",
-        depth=0,
-        parent_agent_id=None,
-        parent_tool_call_id=None,
+        depth=depth,
+        parent_agent_id="root" if depth else None,
+        parent_tool_call_id=parent_tool_call_id,
     )
-
-
-def _wrap_item(item: SimpleNamespace) -> SimpleNamespace:
-    return SimpleNamespace(type="run_item_stream_event", item=item)
 
 
 def test_assistant_text_item_plain() -> None:
     mapper = OpenAiEventMapper()
-    raw = _wrap_item(
-        SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="msg_1",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text="Done.")],
-            ),
-        )
+    mapped = mapper.to_mapped_event(
+        assistant_message_event(item_id="msg_1", text="Done."),
+        execution=_exec(),
+        is_root=True,
     )
-    mapped = mapper.to_mapped_event(raw, execution=_exec(), is_root=True)
     assert mapped.context_item is not None
     assert mapped.context_item.role == "assistant"
     assert mapped.output_item is not None
-    assert isinstance(mapped.output_item, AgentOutputItem)
     assert mapped.output_item.final is False
+    assert mapped.output_item.item.content == "Done."
 
 
 def test_root_assistant_final_sentinel_strips_and_sets_final() -> None:
     mapper = OpenAiEventMapper()
-    raw = _wrap_item(
-        SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="msg_2",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text="Final answer.\n<final/>")],
-            ),
-        )
+    mapped = mapper.to_mapped_event(
+        assistant_message_event(item_id="msg_2", text="Final answer.\n<final/>"),
+        execution=_exec(),
+        is_root=True,
     )
-    mapped = mapper.to_mapped_event(raw, execution=_exec(), is_root=True)
     assert mapped.output_item is not None
     assert mapped.context_item is not None
     assert mapped.output_item.final is True
@@ -65,109 +50,76 @@ def test_root_assistant_final_sentinel_strips_and_sets_final() -> None:
 
 def test_subagent_assistant_final_sentinel_ignored() -> None:
     mapper = OpenAiEventMapper()
-    raw = _wrap_item(
-        SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="msg_3",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text="sub done <final/>")],
-            ),
-        )
+    mapped = mapper.to_mapped_event(
+        assistant_message_event(item_id="msg_3", text="sub done <final/>"),
+        execution=_exec(depth=1, parent_tool_call_id="c1"),
+        is_root=False,
     )
-    execution = AgentExecution(
-        agent_id="sub",
-        agent_name="sub",
-        depth=1,
-        parent_agent_id="root",
-        parent_tool_call_id="c1",
-    )
-    mapped = mapper.to_mapped_event(raw, execution=execution, is_root=False)
     assert mapped.output_item is not None
     assert mapped.output_item.final is False
     assert "sub done" in (mapped.output_item.item.content or "")
 
 
-def test_tool_call_output_item() -> None:
+def test_tool_call_item_extracts_name_and_arguments() -> None:
+    """Object-form ``raw_item`` (Responses-API streaming): SDK property surface works directly."""
     mapper = OpenAiEventMapper()
-    raw = _wrap_item(
-        SimpleNamespace(
-            type="tool_call_item",
-            raw_item=SimpleNamespace(
-                call_id="call_1",
-                id="call_1",
-                name="query_traces",
-                arguments="{}",
-            ),
-        )
+    mapped = mapper.to_mapped_event(
+        tool_call_event(call_id="call_1", name="query_traces", arguments='{"q":"x"}'),
+        execution=_exec(),
+        is_root=True,
     )
-    mapped = mapper.to_mapped_event(raw, execution=_exec(), is_root=True)
     assert mapped.context_item is not None
-    assert mapped.context_item.role == "assistant"
     assert mapped.context_item.tool_calls is not None
-    assert mapped.context_item.tool_calls[0].function.name == "query_traces"
+    tc = mapped.context_item.tool_calls[0]
+    assert tc.id == "call_1"
+    assert tc.function.name == "query_traces"
+    assert tc.function.arguments == '{"q":"x"}'
 
 
-def test_tool_output_item() -> None:
+def test_tool_output_item_uses_call_id_and_output() -> None:
+    """Dict-form ``raw_item`` (Chat-Completions / replay path): the SDK ``call_id`` property still works."""
     mapper = OpenAiEventMapper()
-    raw = _wrap_item(
-        SimpleNamespace(
-            type="tool_call_output_item",
-            raw_item=SimpleNamespace(call_id="call_1", id="call_1", name="query_traces"),
-            output="ok",
-        )
+    mapped = mapper.to_mapped_event(
+        tool_output_event(call_id="call_1", output="ok"),
+        execution=_exec(),
+        is_root=True,
     )
-    mapped = mapper.to_mapped_event(raw, execution=_exec(), is_root=True)
     assert mapped.context_item is not None
     assert mapped.context_item.role == "tool"
     assert mapped.context_item.tool_call_id == "call_1"
+    assert mapped.context_item.content == "ok"
 
 
 def test_raw_text_delta_produces_delta_only() -> None:
     mapper = OpenAiEventMapper()
-    raw = SimpleNamespace(
-        type="raw_response_event",
-        data=SimpleNamespace(
-            type="response.output_text.delta",
-            delta="par",
-            item_id="msg_1",
-        ),
+    mapped = mapper.to_mapped_event(
+        text_delta_event(item_id="msg_1", delta="par"), execution=_exec(), is_root=True
     )
-    mapped = mapper.to_mapped_event(raw, execution=_exec(), is_root=True)
     assert mapped.context_item is None
     assert mapped.output_item is None
     assert mapped.delta is not None
     assert mapped.delta.text_delta == "par"
+    assert mapped.delta.item_id == "msg_1"
 
 
-def test_tool_call_and_output_have_distinct_item_ids_when_raw_id_missing() -> None:
-    """Regression: when the SDK's raw item lacks an ``id``, both the
-    tool_call and tool_output events used to fall back to the same
-    ``call_id`` for ``item_id``, so ``AgentContext._index`` overwrote the
-    first entry and ``get_context_item`` returned the wrong item.
+def test_tool_call_and_output_have_distinct_item_ids() -> None:
+    """``AgentContext._index`` keys by ``item_id``; the tool_call and its tool_output
+    must not collide on the same key, otherwise ``get_context_item`` returns the
+    wrong record. Synthetic ``tool-call-{call_id}`` / ``tool-result-{call_id}``
+    naming guarantees they differ even when both events share the same call_id.
     """
     mapper = OpenAiEventMapper()
-    call_event = _wrap_item(
-        SimpleNamespace(
-            type="tool_call_item",
-            raw_item=SimpleNamespace(
-                # No ``id`` attribute — exercises the fallback.
-                call_id="call_xyz",
-                name="query_traces",
-                arguments="{}",
-            ),
-        )
+    call_mapped = mapper.to_mapped_event(
+        tool_call_event(call_id="call_xyz", name="query_traces"),
+        execution=_exec(),
+        is_root=True,
     )
-    output_event = _wrap_item(
-        SimpleNamespace(
-            type="tool_call_output_item",
-            raw_item=SimpleNamespace(call_id="call_xyz", name="query_traces"),
-            output="ok",
-        )
+    output_mapped = mapper.to_mapped_event(
+        tool_output_event(call_id="call_xyz", output="ok"),
+        execution=_exec(),
+        is_root=True,
     )
-
-    call_mapped = mapper.to_mapped_event(call_event, execution=_exec(), is_root=True)
-    output_mapped = mapper.to_mapped_event(output_event, execution=_exec(), is_root=True)
     assert call_mapped.context_item is not None
     assert output_mapped.context_item is not None
-    assert call_mapped.context_item.item_id != output_mapped.context_item.item_id
+    assert call_mapped.context_item.item_id == "tool-call-call_xyz"
+    assert output_mapped.context_item.item_id == "tool-result-call_xyz"
