@@ -7,16 +7,12 @@ from pathlib import Path
 
 from engine.sandbox.log import log_unavailable
 
-HALO_BWRAP_ENV_VAR = "HALO_BWRAP_PATH"
-
-
 _LINUX_MISSING_REMEDIATION = (
     "Install bubblewrap from your distro's package manager:\n"
     "  Debian/Ubuntu: sudo apt install bubblewrap\n"
     "  Fedora/RHEL:   sudo dnf install bubblewrap\n"
     "  Alpine:        sudo apk add bubblewrap\n"
-    "Then re-run the engine. If you cannot install system packages, set\n"
-    "HALO_BWRAP_PATH to a usable bwrap binary."
+    "Then re-run the engine."
 )
 
 _LINUX_NAMESPACE_REMEDIATION = (
@@ -47,53 +43,43 @@ class LinuxClient:
 
     @staticmethod
     def resolve() -> LinuxClient | None:
-        """Find the first bwrap candidate and verify it can create namespaces.
+        """Find a working ``bwrap`` and verify it can create namespaces.
 
-        Resolution order: ``HALO_BWRAP_PATH`` env override → system ``bwrap``
-        on ``PATH`` → packaged ``bwrap`` from the optional ``bubblewrap-bin``
-        dependency. We pick the highest-priority candidate that exists and
-        probe only that one — if a user explicitly set ``HALO_BWRAP_PATH``
-        and it's broken, falling through to a different bwrap silently
-        would hide their misconfiguration; if the namespace probe fails,
-        every bwrap on this kernel will fail the same way.
-
-        On failure, logs a warning with a remediation distinguishing
-        "binary missing/broken" from "binary exists but namespace probe
-        failed", then returns ``None``.
+        Resolution order: system ``bwrap`` on ``PATH`` (which is
+        ``/usr/bin/bwrap`` on distros that ship the package) → packaged
+        ``bwrap`` from the optional ``bubblewrap-bin`` dependency. If the
+        system probe fails (e.g. AppArmor on Ubuntu 24.04+ blocking an
+        unprivileged user namespace), we fall through to the packaged copy
+        rather than give up. On failure, logs a warning and returns ``None``.
         """
-        env = os.environ.get(HALO_BWRAP_ENV_VAR)
-        if env:
-            executable = Path(env)
-            source = f"{HALO_BWRAP_ENV_VAR} override"
-        elif (system := shutil.which("bwrap")) is not None:
+        failures: list[str] = []
+
+        system = shutil.which("bwrap")
+        if system is not None:
             executable = Path(system)
-            source = "system PATH"
-        elif (packaged := _packaged_bwrap()) is not None:
-            executable = packaged
-            source = "bubblewrap-bin package"
+            failure = _probe(executable)
+            if failure is None:
+                return LinuxClient(executable=executable)
+            failures.append(f"system PATH ({executable}) probe failed: {failure}")
+
+        packaged = _packaged_bwrap()
+        if packaged is not None:
+            failure = _probe(packaged)
+            if failure is None:
+                return LinuxClient(executable=packaged)
+            failures.append(f"bubblewrap-bin package ({packaged}) probe failed: {failure}")
+
+        if not failures:
+            log_unavailable(
+                diagnostic="bubblewrap not found via PATH or bubblewrap-bin package",
+                remediation=_LINUX_MISSING_REMEDIATION,
+            )
         else:
             log_unavailable(
-                diagnostic="bubblewrap not found via env, PATH, or bubblewrap-bin package",
-                remediation=_LINUX_MISSING_REMEDIATION,
-            )
-            return None
-
-        if not executable.exists():
-            log_unavailable(
-                diagnostic=f"{source} does not exist: {executable}",
-                remediation=_LINUX_MISSING_REMEDIATION,
-            )
-            return None
-
-        failure = _probe(executable)
-        if failure is not None:
-            log_unavailable(
-                diagnostic=f"{source} ({executable}) probe failed: {failure}",
+                diagnostic="no working bubblewrap candidate:\n  " + "\n  ".join(failures),
                 remediation=_LINUX_NAMESPACE_REMEDIATION,
             )
-            return None
-
-        return LinuxClient(executable=executable)
+        return None
 
     def build_argv(
         self,
@@ -107,7 +93,10 @@ class LinuxClient:
         """Build the ``bwrap`` argv that runs ``script_path`` under namespace isolation.
 
         Hardening:
-          - ``--unshare-all`` and explicit ``--unshare-net`` for redundancy.
+          - Explicit user, PID, and network namespaces. This matches Codex's
+            current bwrap shape more closely than ``--unshare-all`` and avoids
+            asking the host for cgroup/IPC/UTS namespaces this sandbox does not
+            need.
           - ``--clearenv`` then a small explicit env set; no host env leaks.
           - ``--die-with-parent`` and ``--new-session`` to bound process lifetime.
           - ``--dev /dev`` mounts a fresh tmpfs containing only
@@ -130,7 +119,8 @@ class LinuxClient:
             str(self.executable),
             "--die-with-parent",
             "--new-session",
-            "--unshare-all",
+            "--unshare-user",
+            "--unshare-pid",
             "--unshare-net",
             "--clearenv",
             "--dev",
@@ -192,9 +182,8 @@ def _probe(executable: Path) -> str | None:
     """Run ``bwrap`` with hardening flags and verify the sandbox is fully usable.
 
     bwrap writes a JSON status object containing ``"child-pid"`` to the FD
-    passed via ``--info-fd`` *after* the user/mount namespaces are created
-    but *before* it sets up loopback (for ``--unshare-net``) and execs the
-    user command. To know that loopback succeeded too, we rely on the
+    passed via ``--info-fd`` after the core namespaces are created. To know
+    that network namespace setup succeeded too, we rely on the
     in-sandbox ``execvp`` reaching the kernel and writing the ENOENT
     diagnostic ``"bwrap: execvp <path>: No such file or directory"`` to
     stderr — bwrap only reaches that point if every preceding setup step
@@ -211,13 +200,17 @@ def _probe(executable: Path) -> str | None:
 
     Returns ``None`` on success, or a diagnostic string on failure.
     """
+    if not executable.is_file():
+        return "missing executable"
+
     read_fd, write_fd = os.pipe()
     write_fd_open = True
     proc: subprocess.Popen[bytes] | None = None
 
     argv = [
         str(executable),
-        "--unshare-all",
+        "--unshare-user",
+        "--unshare-pid",
         "--unshare-net",
         "--die-with-parent",
         "--new-session",
