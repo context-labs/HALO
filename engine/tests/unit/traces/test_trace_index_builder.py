@@ -550,3 +550,27 @@ async def test_build_index_empty_file_writes_empty_index(tmp_path: Path) -> None
     meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
     assert meta.trace_count == 0
     assert meta.source_size == 0
+
+
+@pytest.mark.asyncio
+async def test_small_file_uses_inline_path_no_pool_spawn(
+    tmp_path: Path, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tiny fixture is well under SMALL_FILE_THRESHOLD; building must not spawn a Pool."""
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("Pool should not be spawned for small files")
+
+    monkeypatch.setattr("engine.traces.trace_index_builder.mp.get_context", _boom)
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta = TraceIndexMeta.model_validate_json(
+        TraceIndexBuilder._meta_path_for(index_path).read_text()
+    )
+    assert meta.trace_count == 3
