@@ -35,6 +35,9 @@ testpaths = ["tests/unit"]
 python_files = "test_*.py"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+markers = [
+    "live: test hits a live external service (LLM provider, etc.) and requires credentials. Excluded from the default integration run; included in `task test:integration:live` and the release pipeline.",
+]
 
 [tool.ruff]
 target-version = "py312"
