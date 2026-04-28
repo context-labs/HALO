@@ -113,6 +113,7 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
         trace_store=trace_store,
         output_bus=output_bus,
         config=cfg,
+        sandbox=None,
         runner=runner,
     )
     parent_execution = AgentExecution(

@@ -15,7 +15,7 @@ def test_final_sentinel_constant() -> None:
     assert FINAL_SENTINEL == "<final/>"
 
 
-def test_root_prompt_includes_sentinel_instruction() -> None:
+def test_root_prompt_includes_sentinel_instructions_and_caps() -> None:
     text = render_root_system_prompt(
         instructions="Investigate failing traces.",
         maximum_depth=2,
@@ -23,9 +23,11 @@ def test_root_prompt_includes_sentinel_instruction() -> None:
     )
     assert FINAL_SENTINEL in text
     assert "Investigate failing traces." in text
+    assert "maximum_depth=2" in text
+    assert "4" in text and "concurrently" in text
 
 
-def test_subagent_prompt_reports_depth() -> None:
+def test_subagent_prompt_reports_depth_and_caps() -> None:
     text = render_subagent_system_prompt(
         instructions="You are a sub.",
         depth=1,

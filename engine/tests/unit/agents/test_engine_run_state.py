@@ -39,7 +39,12 @@ async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) ->
     )
     store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
-    state = EngineRunState(trace_store=store, output_bus=EngineOutputBus(), config=_cfg())
+    state = EngineRunState(
+        trace_store=store,
+        output_bus=EngineOutputBus(),
+        config=_cfg(),
+        sandbox=None,
+    )
 
     exec_ = AgentExecution(
         agent_id="root",

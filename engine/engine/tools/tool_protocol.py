@@ -11,15 +11,15 @@ if TYPE_CHECKING:
     from engine.agents.agent_execution import AgentExecution
     from engine.agents.engine_output_bus import EngineOutputBus
     from engine.agents.engine_run_state import EngineRunState
-    from engine.sandbox.sandbox_runner import SandboxRunner
+    from engine.sandbox.sandbox import Sandbox
     from engine.traces.trace_store import TraceStore
 
 
 class ToolContext(BaseModel):
     """Per-invocation context handed to every EngineTool's ``run``.
 
-    Holds optional references to the run-wide singletons (TraceStore, RunState,
-    OutputBus, SandboxRunner) plus the calling agent's own AgentContext/Execution.
+    Holds references to the run-wide singletons (TraceStore, RunState,
+    OutputBus, Sandbox) plus the calling agent's own AgentContext/Execution.
     Tools call ``require_*`` accessors to assert presence, since not every tool
     needs every dependency.
     """
@@ -31,7 +31,7 @@ class ToolContext(BaseModel):
     agent_context: "AgentContext | None" = None
     agent_execution: "AgentExecution | None" = None
     output_bus: "EngineOutputBus | None" = None
-    sandbox_runner: "SandboxRunner | None" = None
+    sandbox: "Sandbox | None" = None
 
     def require_trace_store(self) -> "TraceStore":
         """Return the TraceStore or raise — every trace tool needs it."""
@@ -44,6 +44,12 @@ class ToolContext(BaseModel):
         if self.agent_context is None:
             raise RuntimeError("ToolContext.agent_context required")
         return self.agent_context
+
+    def require_sandbox(self) -> "Sandbox":
+        """Return the run's Sandbox or raise — needed by ``run_code``."""
+        if self.sandbox is None:
+            raise RuntimeError("ToolContext.sandbox required")
+        return self.sandbox
 
 
 @runtime_checkable

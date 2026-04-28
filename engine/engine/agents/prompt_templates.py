@@ -4,8 +4,7 @@ FINAL_SENTINEL = "<final/>"
 
 ROOT_SYSTEM_PROMPT_TEMPLATE = """\
 You are the root agent in the HALO engine. You explore OTel trace data
-using the provided tools: dataset overview, query/count/view/search traces,
-get_context_item, synthesize_traces, run_code, and call_subagent.
+using the tools the runtime provides.
 
 Depth rules:
 - You are at depth=0.
@@ -23,8 +22,8 @@ Instructions:
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are a HALO subagent at depth={depth} of maximum_depth={maximum_depth}. You answer a
-question delegated to you by a parent agent. You have trace tools and, if
-your depth permits, a call_subagent tool.
+question delegated to you by a parent agent using the tools the runtime
+provides.
 
 If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
 concurrently — this cap is shared across the whole run.

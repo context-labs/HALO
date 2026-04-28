@@ -301,6 +301,7 @@ async def make_run_state(
         trace_store=store,
         output_bus=EngineOutputBus(),
         config=cfg,
+        sandbox=None,
     )
     if runner is not None:
         state.runner = runner

@@ -12,6 +12,7 @@ on:
 env:
   PYTHON_VERSION: "3.12"
   INFISICAL_CLI_VERSION: "0.41.2"
+  INFISICAL_PROJECT_ID: "822ab0ec-ad72-4b7d-9f49-93b43be4eda0"
 
 permissions:
   checks: write
@@ -86,5 +87,145 @@ jobs:
         if: always()
         with:
           name: engine-integration-test-results
+          path: engine/test-results/
+          retention-days: 14
+
+  linux-sandbox-tests:
+    name: Linux Sandbox Tests
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Install go-task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Install engine dependencies
+        run: task ci:setup
+
+      - name: Probe bubblewrap availability
+        run: |
+          .venv/bin/python -c "
+          from engine.sandbox.sandbox_availability import (
+              render_unavailable_warning,
+              resolve_sandbox_status,
+          )
+          status = resolve_sandbox_status()
+          if not status.available:
+              raise SystemExit(
+                  'sandbox unavailable in CI:\n' + render_unavailable_warning(status)
+              )
+          print(f'sandbox backend: {status.backend.value} ({status.executable})')
+          "
+
+      - name: Run Linux sandbox integration tests
+        run: task test:integration-linux
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: "engine/test-results/integration-linux.xml"
+          update_check: true
+          detailed_summary: true
+          include_passed: true
+          include_time_in_summary: true
+          fail_on_failure: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-linux-sandbox-results
+          path: engine/test-results/
+          retention-days: 14
+
+  macos-sandbox-tests:
+    name: macOS Sandbox Tests
+    # TODO: confirm the exact label set provisioned for the team's self-hosted
+    # macOS runners. The placeholder below uses the standard GitHub Actions
+    # self-hosted label tuple; replace once the runner pool publishes its
+    # canonical labels (e.g. ["self-hosted", "macOS", "ARM64", "halo"]).
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "engine/uv.lock"
+
+      - name: Install go-task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Install engine dependencies
+        run: task ci:setup
+
+      - name: Probe sandbox-exec availability
+        run: |
+          .venv/bin/python -c "
+          from engine.sandbox.sandbox_availability import (
+              render_unavailable_warning,
+              resolve_sandbox_status,
+          )
+          status = resolve_sandbox_status()
+          if not status.available:
+              raise SystemExit(
+                  'sandbox unavailable in CI:\n' + render_unavailable_warning(status)
+              )
+          print(f'sandbox backend: {status.backend.value} ({status.executable})')
+          "
+
+      - name: Run macOS sandbox integration tests
+        run: task test:integration-macos
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: "engine/test-results/integration-macos.xml"
+          update_check: true
+          detailed_summary: true
+          include_passed: true
+          include_time_in_summary: true
+          fail_on_failure: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-macos-sandbox-results
           path: engine/test-results/
           retention-days: 14

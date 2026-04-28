@@ -8,7 +8,18 @@ dependencies = [
     "pydantic==2.13.3",
     "openai==2.32.0",
     "openai-agents==0.14.5",
+    "numpy==2.2.6",
+    "pandas==2.2.3",
+    # bubblewrap-bin is intentionally NOT listed here yet — it is not on PyPI
+    # so we cannot resolve it from a clean environment. ``LinuxClient.resolve()``
+    # tries to ``import bubblewrap_bin`` and silently falls back to system
+    # ``bwrap`` (or returns None and disables ``run_code``) if the import fails.
+    # Re-enable both lines below once the package is published to PyPI.
+    # "bubblewrap-bin==0.1.0; sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
 ]
+
+# [tool.uv.sources]
+# bubblewrap-bin = { path = "../bubblewrap-bin", editable = true }
 
 [dependency-groups]
 dev = [
