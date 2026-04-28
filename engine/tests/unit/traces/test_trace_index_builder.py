@@ -185,3 +185,50 @@ async def test_ensure_index_reuses_when_trace_unchanged(tmp_path: Path, fixtures
     )
     assert meta_path.stat().st_mtime_ns == first_meta_mtime
     assert index_path.stat().st_mtime_ns == first_index_mtime
+
+
+def test_row_accumulator_merge_in_combines_partial_state() -> None:
+    from engine.traces.trace_index_builder import _RowAccumulator
+
+    a = _RowAccumulator(trace_id="t-1")
+    a.byte_offsets = [0, 100]
+    a.byte_lengths = [80, 120]
+    a.span_count = 2
+    a.start_time = "2026-04-23T05:00:00.000000000Z"
+    a.end_time = "2026-04-23T05:00:01.000000000Z"
+    a.has_errors = False
+    a.service_names = {"svc-a"}
+    a.model_names = {"model-x"}
+    a.agent_names = {"agent-a"}
+    a.total_input_tokens = 100
+    a.total_output_tokens = 50
+    a.project_id = "prj_test"
+
+    b = _RowAccumulator(trace_id="t-1")
+    b.byte_offsets = [300, 500]
+    b.byte_lengths = [60, 90]
+    b.span_count = 2
+    b.start_time = "2026-04-23T05:00:02.000000000Z"
+    b.end_time = "2026-04-23T05:00:03.000000000Z"
+    b.has_errors = True
+    b.service_names = {"svc-b"}
+    b.model_names = {"model-y"}
+    b.agent_names = {"agent-b"}
+    b.total_input_tokens = 30
+    b.total_output_tokens = 20
+    b.project_id = None
+
+    a.merge_in(b)
+
+    assert a.byte_offsets == [0, 100, 300, 500]
+    assert a.byte_lengths == [80, 120, 60, 90]
+    assert a.span_count == 4
+    assert a.start_time == "2026-04-23T05:00:00.000000000Z"
+    assert a.end_time == "2026-04-23T05:00:03.000000000Z"
+    assert a.has_errors is True
+    assert a.service_names == {"svc-a", "svc-b"}
+    assert a.model_names == {"model-x", "model-y"}
+    assert a.agent_names == {"agent-a", "agent-b"}
+    assert a.total_input_tokens == 130
+    assert a.total_output_tokens == 70
+    assert a.project_id == "prj_test"
