@@ -95,6 +95,17 @@ class SandboxError(RuntimeError):
     """Raised when the Deno/Pyodide subprocess returns a JSON-RPC error or dies."""
 
 
+# Successful resolves are memoized at module level. Resolution work is
+# deterministic in a given process — same Deno binary, same sibling files,
+# same Deno cache — and shells out to ``deno info`` plus does file-existence
+# checks on every call, which adds noticeable per-call latency on a server
+# handling many requests. Failed resolves are *not* cached: a transient
+# failure (e.g., wheel download blip) shouldn't poison the rest of the
+# process. Tests that need a fresh resolve clear via
+# ``monkeypatch.setattr(sandbox_module, "_RESOLVED_SANDBOX", None)``.
+_RESOLVED_SANDBOX: "Sandbox | None" = None
+
+
 @dataclass(frozen=True, kw_only=True)
 class Sandbox:
     """Resolved Deno+Pyodide WASM sandbox: paths to read + binary to spawn.
@@ -133,7 +144,16 @@ class Sandbox:
         emitted via :func:`log_unavailable` and ``None`` is returned so
         ``run_code`` is silently dropped from the agent's tool surface
         rather than registered with broken plumbing.
+
+        Successful results are memoized in ``_RESOLVED_SANDBOX`` so a
+        long-lived process (e.g., a server handling many engine runs)
+        doesn't pay the ``deno info`` subprocess + file-existence checks
+        on every request. Failures are deliberately not cached.
         """
+        global _RESOLVED_SANDBOX
+        if _RESOLVED_SANDBOX is not None:
+            return _RESOLVED_SANDBOX
+
         deno = _locate_deno_executable()
         if deno is None:
             log_unavailable(
@@ -155,13 +175,15 @@ class Sandbox:
         except _ResolutionError as exc:
             log_unavailable(diagnostic=str(exc), remediation=_DENO_MISSING_REMEDIATION)
             return None
-        return cls(
+        sandbox = cls(
             deno_executable=deno,
             runner_path=runner_path,
             runtime_path=runtime_path,
             trace_compat_path=trace_compat_path,
             deno_dir=deno_dir,
         )
+        _RESOLVED_SANDBOX = sandbox
+        return sandbox
 
     async def run_python(
         self,
@@ -528,7 +550,11 @@ async def _read_ready(stdout: asyncio.StreamReader) -> None:
             raise SandboxError(f"runner failed at startup: {msg['error']}")
         if msg.get("id") == 0 and msg.get("result", {}).get("ready") is True:
             return
-        raise SandboxError(f"runner emitted unexpected JSON before ready: {msg}")
+        # Future Pyodide / Deno releases could emit JSON diagnostics on
+        # stdout during boot. Skip-and-keep-looking matches what
+        # ``_read_response`` already does for non-matching ids; raising
+        # here would kill the session for nothing.
+        continue
     raise SandboxError("too many non-JSON lines while waiting for ready sentinel")
 
 

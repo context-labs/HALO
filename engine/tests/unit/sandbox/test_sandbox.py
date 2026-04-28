@@ -38,6 +38,22 @@ def _fake_sandbox(tmp_path: Path) -> Sandbox:
 # -- Sandbox.resolve -----------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _clear_resolve_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sandbox.resolve memoizes successful results in ``_RESOLVED_SANDBOX``.
+
+    A test that runs after an integration suite would otherwise hit the
+    cached real Sandbox and bypass the monkeypatched discovery helpers.
+    Resetting the cache before every unit test keeps each test
+    hermetic without needing every test to do the reset itself.
+
+    ``raising=False`` so the fixture is a no-op against any code that
+    hasn't introduced the cache yet — the test bodies still exercise
+    the real behavior on either side of the fix.
+    """
+    monkeypatch.setattr(sandbox_module, "_RESOLVED_SANDBOX", None, raising=False)
+
+
 def test_resolve_returns_none_when_deno_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """No Deno on PATH or via the PyPI dep → ``Sandbox.resolve`` returns ``None``.
 
@@ -60,6 +76,66 @@ def test_resolve_returns_none_when_required_file_missing(
     # sibling files don't exist relative to it.
     monkeypatch.setattr(sandbox_module, "__file__", str(tmp_path / "sandbox.py"))
     assert Sandbox.resolve() is None
+
+
+def test_resolve_caches_successful_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Successful resolves must be memoized — discovery is subprocess-heavy.
+
+    Regression: a long-lived process (e.g., a server handling many
+    ``stream_engine_async`` requests) would otherwise pay the
+    ``deno info`` subprocess + file-existence checks on every call.
+    The cache should also produce **the same** instance — Sandbox is a
+    frozen value object, so identity is meaningful.
+    """
+    deno = tmp_path / "deno"
+    deno.write_text("")
+    deno_dir = tmp_path / "deno-cache"
+    deno_dir.mkdir()
+    pyodide_dir = tmp_path / "pyodide"
+    pyodide_dir.mkdir()
+
+    counts = {"locate": 0, "deno_info": 0, "npm_cache": 0, "wheels": 0}
+
+    def _locate():
+        counts["locate"] += 1
+        return deno
+
+    def _query(_deno):
+        counts["deno_info"] += 1
+        return deno_dir
+
+    def _npm_cache(_deno, _dir):
+        counts["npm_cache"] += 1
+        return pyodide_dir
+
+    def _wheels(_dir):
+        counts["wheels"] += 1
+
+    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", _locate)
+    monkeypatch.setattr(sandbox_module, "_query_deno_dir", _query)
+    monkeypatch.setattr(sandbox_module, "_ensure_pyodide_npm_cache", _npm_cache)
+    monkeypatch.setattr(sandbox_module, "_ensure_pyodide_wheels", _wheels)
+
+    first = Sandbox.resolve()
+    second = Sandbox.resolve()
+    third = Sandbox.resolve()
+
+    assert first is not None
+    assert second is first, "second resolve must return the cached instance"
+    assert third is first, "third resolve must return the cached instance"
+    assert counts == {"locate": 1, "deno_info": 1, "npm_cache": 1, "wheels": 1}, (
+        f"discovery helpers must run exactly once across cached resolves; got {counts}"
+    )
+
+
+def test_resolve_does_not_cache_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed resolve must not poison the cache — a transient failure
+    should not silently disable ``run_code`` for the rest of the process.
+    """
+    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: None)
+    assert Sandbox.resolve() is None
+    # Cache stays empty so the next attempt re-runs discovery.
+    assert sandbox_module._RESOLVED_SANDBOX is None
 
 
 # -- Sandbox.run_python: argv shape -------------------------------------------
@@ -288,3 +364,68 @@ async def test_run_python_surfaces_mount_file_error(
     assert "Failed to mount file" in result.stderr
     # Driver stopped at the failed mount; bootstrap/execute never ran.
     assert captured["phases"] == ["mount_file"]
+
+
+# -- _read_ready: tolerate unexpected JSON before sentinel --------------------
+
+
+class _FakeStdout:
+    """Async-readline shim returning pre-scripted byte lines, then EOF."""
+
+    def __init__(self, lines: list[bytes]) -> None:
+        self._lines = list(lines)
+        self._idx = 0
+
+    async def readline(self) -> bytes:
+        if self._idx >= len(self._lines):
+            return b""
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
+
+@pytest.mark.asyncio
+async def test_read_ready_skips_unexpected_json_before_sentinel() -> None:
+    """Unexpected JSON before the ready sentinel must be skipped, not fatal.
+
+    Regression: ``_read_ready`` previously raised on any valid JSON line
+    that wasn't an error and wasn't the ``id=0, result.ready=True``
+    sentinel. Future Pyodide / Deno releases could legitimately log JSON
+    diagnostics on stdout during boot; that should not kill the session.
+    Behavior must mirror ``_read_response``, which already
+    skip-and-retries on non-matching ids.
+    """
+    stdout = _FakeStdout(
+        [
+            b'{"some": "diagnostic"}\n',
+            b'{"jsonrpc":"2.0","method":"unknown_event"}\n',
+            b'{"jsonrpc":"2.0","id":0,"result":{"ready":true}}\n',
+        ]
+    )
+    # Should return cleanly (no exception).
+    await sandbox_module._read_ready(stdout)
+
+
+@pytest.mark.asyncio
+async def test_read_ready_still_raises_on_explicit_startup_error() -> None:
+    """An ``error`` field in JSON before the sentinel is still a fatal startup signal.
+
+    Skipping unexpected JSON must not also swallow real error
+    notifications — the runner emits these from its
+    ``unhandledrejection`` handler, and they encode genuine failures.
+    """
+    stdout = _FakeStdout(
+        [
+            b'{"jsonrpc":"2.0","error":{"code":-32007,"message":"boom"}}\n',
+        ]
+    )
+    with pytest.raises(sandbox_module.SandboxError, match="runner failed at startup"):
+        await sandbox_module._read_ready(stdout)
+
+
+@pytest.mark.asyncio
+async def test_read_ready_raises_on_premature_eof() -> None:
+    """Empty stdout (process exited before signalling) is still fatal."""
+    stdout = _FakeStdout([])
+    with pytest.raises(sandbox_module.SandboxError, match="exited before signalling ready"):
+        await sandbox_module._read_ready(stdout)
