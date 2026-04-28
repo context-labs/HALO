@@ -533,3 +533,20 @@ async def test_merge_rollups_across_chunks(
     assert split.total_input_tokens == 10 + 20 + 30
     assert split.total_output_tokens == 5 + 10 + 15
     assert split.byte_offsets == sorted(split.byte_offsets)
+
+
+@pytest.mark.asyncio
+async def test_build_index_empty_file_writes_empty_index(tmp_path: Path) -> None:
+    trace_path = tmp_path / "empty.jsonl"
+    trace_path.write_bytes(b"")
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+
+    assert index_path.read_text() == ""
+    meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert meta.trace_count == 0
+    assert meta.source_size == 0
