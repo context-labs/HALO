@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
@@ -45,6 +46,19 @@ def _parent() -> AgentExecution:
     )
 
 
+def _parent_context() -> AgentContext:
+    return AgentContext(
+        items=[],
+        compaction_model=ModelConfig(name="claude-haiku-4-5"),
+        text_message_compaction_keep_last_messages=2,
+        tool_call_compaction_keep_last_turns=2,
+    )
+
+
+def _semaphores() -> dict[int, asyncio.Semaphore]:
+    return {depth: asyncio.Semaphore(1) for depth in range(1, 4)}
+
+
 def _runtime_mounts(tmp_path: Path) -> PythonRuntimeMounts:
     python = tmp_path / "bin" / "python"
     python.parent.mkdir()
@@ -80,8 +94,9 @@ def test_run_code_registered_when_sandbox_available(tmp_path: Path) -> None:
     tools = _child_tools_for_depth(
         depth=0,
         run_state=run_state,
-        semaphore=asyncio.Semaphore(1),
+        semaphores_by_depth=_semaphores(),
         parent_execution=_parent(),
+        parent_context=_parent_context(),
     )
 
     assert "run_code" in {t.name for t in tools}
@@ -98,8 +113,9 @@ def test_run_code_omitted_when_sandbox_unavailable(tmp_path: Path) -> None:
     tools = _child_tools_for_depth(
         depth=0,
         run_state=run_state,
-        semaphore=asyncio.Semaphore(1),
+        semaphores_by_depth=_semaphores(),
         parent_execution=_parent(),
+        parent_context=_parent_context(),
     )
 
     names = {t.name for t in tools}
@@ -119,8 +135,9 @@ def test_run_code_omitted_when_runtime_mounts_missing(tmp_path: Path) -> None:
     tools = _child_tools_for_depth(
         depth=0,
         run_state=run_state,
-        semaphore=asyncio.Semaphore(1),
+        semaphores_by_depth=_semaphores(),
         parent_execution=_parent(),
+        parent_context=_parent_context(),
     )
 
     assert "run_code" not in {t.name for t in tools}
