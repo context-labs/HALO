@@ -152,7 +152,11 @@ class OpenAiEventMapper:
                 arguments=str(getattr(raw, "arguments", "") or ""),
             ),
         )
-        item_id = str(getattr(raw, "id", "") or call_id)
+        # Namespace the fallback so a tool_call and its tool_output don't
+        # collide on the same call_id when the SDK doesn't populate raw.id
+        # — AgentContext._index keys by item_id and the second append would
+        # silently overwrite the first, breaking get_context_item.
+        item_id = str(getattr(raw, "id", "") or f"tool-call-{call_id}")
         context_item = AgentContextItem(
             item_id=item_id,
             role="assistant",
@@ -181,7 +185,9 @@ class OpenAiEventMapper:
             output = getattr(raw, "output", "")
         content = str(output)
         name = getattr(raw, "name", None) or getattr(item, "name", None)
-        item_id = str(getattr(raw, "id", "") or call_id)
+        # See ``_map_tool_call``: namespaced fallback prevents the tool_call
+        # and tool_output for the same call_id from sharing an item_id.
+        item_id = str(getattr(raw, "id", "") or f"tool-result-{call_id}")
         context_item = AgentContextItem(
             item_id=item_id,
             role="tool",
