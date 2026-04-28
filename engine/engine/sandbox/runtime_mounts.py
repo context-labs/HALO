@@ -3,60 +3,34 @@ from __future__ import annotations
 import platform
 import site
 import sys
-import sysconfig
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
-
-class PythonRuntimeMounts(BaseModel):
-    """The narrow set of host paths needed to execute Python inside the sandbox.
-
-    Computed from the running interpreter (``sys`` / ``sysconfig`` / ``site``)
-    plus ``/proc/self/maps`` on Linux, so the sandbox only sees the specific
-    interpreter binary, stdlib, site-packages, and shared libraries that are
-    already loaded by the host process. We deliberately avoid binding broad
-    system roots like ``/usr`` or ``/lib``.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    python_executable: Path
-    runtime_paths: tuple[Path, ...]
-    library_paths: tuple[Path, ...]
+from engine.sandbox.models import PythonRuntimeMounts
 
 
 def discover_python_runtime_mounts(*, python_executable: Path | None = None) -> PythonRuntimeMounts:
-    """Compute the minimal mount manifest for running ``python_executable`` in a sandbox.
+    """Compute the minimal mount manifest for Python in a sandbox.
 
-    On Linux, libraries currently loaded by this process (read from
-    ``/proc/self/maps``) are included so the sandboxed interpreter can resolve
-    its dynamic dependencies without binding broad system directories. On
-    other platforms only the runtime dirs are returned; macOS uses
-    ``sandbox-exec`` profiles that allow library resolution via the host.
+    Imports ``numpy`` and ``pandas`` eagerly so ``/proc/self/maps`` reflects
+    their ``.so`` files when we read it on Linux. Both are pinned engine
+    dependencies; if either import fails the engine cannot run user code at
+    all and we let the error surface here instead of silently producing an
+    incomplete mount manifest.
 
-    ``numpy`` and ``pandas`` are imported best-effort so their native shared
-    objects are loaded into this process before ``/proc/self/maps`` is read.
-    The bootstrap script depends on both, so ensuring their libraries are in
-    the manifest avoids resolution failures inside the sandbox.
+    A venv's ``bin/python`` is a symlink to the base interpreter; we keep
+    the symlink path (not the resolved target) because Python uses it to
+    locate ``pyvenv.cfg`` and pick up the venv's site-packages.
     """
-    # Do not resolve symlinks here: a venv's ``bin/python`` is a symlink to
-    # the base interpreter, and Python uses the symlink path to detect the
-    # venv (via ``pyvenv.cfg``). Resolving would point us at the base
-    # interpreter and silently skip the venv's site-packages. The venv root
-    # and the resolved base install are both included via runtime_paths.
+    import numpy  # noqa: F401  pyright: ignore[reportUnusedImport]
+    import pandas  # noqa: F401  pyright: ignore[reportUnusedImport]
+
     executable = python_executable or Path(sys.executable)
-
-    if platform.system() == "Linux":
-        _force_load_bootstrap_libraries()
-
-    runtime_paths = _collect_runtime_paths(executable=executable)
-    library_paths: tuple[Path, ...]
-    if platform.system() == "Linux":
-        library_paths = _collect_linux_library_paths(runtime_paths=runtime_paths)
-    else:
-        library_paths = ()
-
+    runtime_paths = _collect_runtime_paths()
+    library_paths = (
+        _collect_loaded_shared_libraries(runtime_roots=runtime_paths)
+        if platform.system() == "Linux"
+        else ()
+    )
     return PythonRuntimeMounts(
         python_executable=executable,
         runtime_paths=runtime_paths,
@@ -64,117 +38,63 @@ def discover_python_runtime_mounts(*, python_executable: Path | None = None) -> 
     )
 
 
-def _force_load_bootstrap_libraries() -> None:
-    """Import ``numpy`` and ``pandas`` so their native ``.so`` files are mmap'd.
+def _collect_runtime_paths() -> tuple[Path, ...]:
+    """Union of Python install + venv + site-packages + ``sys.path`` roots, deduped.
 
-    The runtime mount manifest is read from ``/proc/self/maps``; libraries
-    that have not been loaded by the time we read it will not appear there
-    and the sandbox will fail to import them.
+    ``sys.path`` is included because editable installs (``pip install -e .``)
+    register the package's source directory there via a ``.pth`` file rather
+    than copying it into ``site-packages``. Without ``sys.path`` the
+    sandboxed bootstrap script can't import the engine package itself.
     """
-    try:
-        import numpy  # noqa: F401
-    except ImportError:
-        pass
-    try:
-        import pandas  # noqa: F401
-    except ImportError:
-        pass
-
-
-def _collect_runtime_paths(*, executable: Path) -> tuple[Path, ...]:
-    """Collect Python install + venv prefixes and site-packages directories.
-
-    This is the set of directories that contain Python's stdlib, the venv (if
-    any), and installed third-party packages required by the bootstrap
-    script (``engine``, ``numpy``, ``pandas``, ``pydantic``).
-    """
-    candidates: list[Path] = [executable.parent]
-
-    for attr in ("prefix", "base_prefix", "exec_prefix", "base_exec_prefix"):
-        value = getattr(sys, attr, None)
-        if value:
-            candidates.append(Path(value))
-
-    for path_name in ("stdlib", "platstdlib", "purelib", "platlib"):
-        try:
-            value = sysconfig.get_path(path_name)
-        except KeyError:
-            continue
-        if value:
-            candidates.append(Path(value))
-
-    candidates.extend(Path(p) for p in site.getsitepackages())
-    candidates.append(Path(site.getusersitepackages()))
-
-    for entry in sys.path:
-        if entry:
-            candidates.append(Path(entry))
-
-    return _normalize_paths(candidates)
-
-
-def _collect_linux_library_paths(*, runtime_paths: tuple[Path, ...]) -> tuple[Path, ...]:
-    """Read ``/proc/self/maps`` for shared libraries already loaded by this process.
-
-    Excludes paths that are already covered by ``runtime_paths`` to keep the
-    bwrap argv short. Each returned path is an individual file, not a
-    directory — the caller binds them one-by-one at their original locations.
-    """
-    maps_path = Path("/proc/self/maps")
-    if not maps_path.exists():
-        return ()
-
-    runtime_set = {p.resolve() for p in runtime_paths}
-    discovered: set[Path] = set()
-    try:
-        with maps_path.open("r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                parts = line.split(maxsplit=5)
-                if len(parts) < 6:
-                    continue
-                pathname = parts[5].strip()
-                if not pathname.startswith("/"):
-                    continue
-                path = Path(pathname)
-                if path.suffix not in {".so"} and ".so." not in path.name:
-                    continue
-                try:
-                    resolved = path.resolve()
-                except OSError:
-                    continue
-                if not resolved.is_file():
-                    continue
-                if any(_is_relative_to(resolved, root) for root in runtime_set):
-                    continue
-                discovered.add(resolved)
-    except OSError:
-        return ()
-
-    return tuple(sorted(discovered))
-
-
-def _normalize_paths(paths: list[Path]) -> tuple[Path, ...]:
-    """De-duplicate paths by resolved canonical form, dropping ones that don't exist."""
+    candidates = [
+        Path(sys.prefix),
+        Path(sys.base_prefix),
+        Path(sys.exec_prefix),
+        Path(sys.base_exec_prefix),
+        *(Path(p) for p in site.getsitepackages()),
+        Path(site.getusersitepackages()),
+        *(Path(p) for p in sys.path if p),
+    ]
     seen: set[Path] = set()
-    result: list[Path] = []
-    for path in paths:
+    out: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved.exists() and resolved not in seen:
+            seen.add(resolved)
+            out.append(resolved)
+    return tuple(out)
+
+
+def _collect_loaded_shared_libraries(*, runtime_roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Read ``/proc/self/maps`` and return loaded ``.so`` files outside ``runtime_roots``.
+
+    Each line of ``/proc/self/maps`` has the form::
+
+        ADDRESS PERMS OFFSET DEV INODE PATHNAME
+
+    ``PATHNAME`` may contain spaces, so we split with ``maxsplit=5`` to keep
+    it intact. Pseudo-entries like ``[heap]``, ``[stack]``, ``[vdso]``, and
+    ``(deleted)`` filenames are filtered by the leading-slash + ``.so``
+    checks. Paths that already live under one of the runtime roots are
+    skipped so the bwrap argv stays short.
+    """
+    discovered: set[Path] = set()
+    for line in Path("/proc/self/maps").read_text().splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) < 6:
+            continue
+        pathname = fields[5].strip()
+        if not pathname.startswith("/"):
+            continue
+        if not (pathname.endswith(".so") or ".so." in pathname):
+            continue
         try:
-            resolved = path.resolve()
+            resolved = Path(pathname).resolve()
         except OSError:
             continue
-        if not resolved.exists():
+        if not resolved.is_file():
             continue
-        if resolved in seen:
+        if any(resolved.is_relative_to(root) for root in runtime_roots):
             continue
-        seen.add(resolved)
-        result.append(resolved)
-    return tuple(result)
-
-
-def _is_relative_to(child: Path, parent: Path) -> bool:
-    """``Path.is_relative_to`` shim that treats unresolved/inaccessible paths as not-related."""
-    try:
-        child.relative_to(parent)
-    except ValueError:
-        return False
-    return True
+        discovered.add(resolved)
+    return tuple(sorted(discovered))

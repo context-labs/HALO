@@ -111,6 +111,7 @@ def _child_tools_for_depth(
             trace_store=run_state.trace_store,
             output_bus=run_state.output_bus,
             agent_context=parent_context,
+            sandbox=run_state.sandbox,
         )
 
     leaf_tools: list[Tool] = [
@@ -130,15 +131,7 @@ def _child_tools_for_depth(
     ]
 
     if run_state.sandbox is not None:
-        leaf_tools.append(
-            to_sdk_function_tool(
-                RunCodeTool(
-                    sandbox_config=engine_config.sandbox,
-                    sandbox=run_state.sandbox,
-                ),
-                context_factory=make_ctx,
-            )
-        )
+        leaf_tools.append(to_sdk_function_tool(RunCodeTool(), context_factory=make_ctx))
 
     if depth >= engine_config.maximum_depth:
         return leaf_tools

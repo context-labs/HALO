@@ -2,23 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from engine.sandbox.sandbox_availability import (
-    SandboxBackend,
-    _probe_bwrap,
-    resolve_sandbox_runtime,
-)
+from engine.sandbox.linux_client import LinuxClient
+from engine.sandbox.models import SandboxConfig
+from engine.sandbox.sandbox import resolve_sandbox
 
 
-def test_linux_bwrap_probe_succeeds_with_empty_rootfs() -> None:
-    sandbox = resolve_sandbox_runtime()
+def test_linux_resolve_sandbox_returns_working_bubblewrap_client() -> None:
+    """End-to-end probe must succeed in CI; failure here is a release blocker."""
+    sandbox = resolve_sandbox(config=SandboxConfig())
     if sandbox is None:
         pytest.fail("Linux sandbox unavailable in CI; this must work for release.")
 
-    assert sandbox.backend in (
-        SandboxBackend.LINUX_BWRAP_SYSTEM,
-        SandboxBackend.LINUX_BWRAP_PACKAGED,
-    )
-
-    ok, diagnostic = _probe_bwrap(sandbox.executable)
-    assert ok is True
-    assert diagnostic == ""
+    assert isinstance(sandbox.client, LinuxClient)
+    assert sandbox.client.executable.is_file()

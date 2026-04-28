@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from engine.sandbox.sandbox_bootstrap import render_bootstrap_script
+from engine.sandbox.bootstrap import render_bootstrap_script
 
 
 def test_bootstrap_script_includes_user_code() -> None:
