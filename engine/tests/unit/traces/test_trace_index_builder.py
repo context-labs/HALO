@@ -232,3 +232,33 @@ def test_row_accumulator_merge_in_combines_partial_state() -> None:
     assert a.total_input_tokens == 130
     assert a.total_output_tokens == 70
     assert a.project_id == "prj_test"
+
+
+def test_index_line_offsets_returns_non_empty_line_byte_ranges(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    payload = b'{"a":1}\n{"b":2}\n\n{"c":3}\n'
+    trace_path.write_bytes(payload)
+
+    offsets = _index_line_offsets(trace_path)
+
+    assert offsets == [(0, 8), (8, 8), (17, 8)]
+
+
+def test_index_line_offsets_empty_file_returns_empty_list(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_bytes(b"")
+    assert _index_line_offsets(trace_path) == []
+
+
+def test_index_line_offsets_handles_missing_trailing_newline(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_bytes(b'{"a":1}\n{"b":2}')
+
+    offsets = _index_line_offsets(trace_path)
+    assert offsets == [(0, 8), (8, 7)]

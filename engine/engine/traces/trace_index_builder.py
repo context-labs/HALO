@@ -8,6 +8,23 @@ from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
 
 
+def _index_line_offsets(trace_path: Path) -> list[tuple[int, int]]:
+    """Stage 1: sequentially scan the JSONL, return (byte_offset, byte_length) for every non-empty line.
+
+    ``byte_length`` includes the trailing newline; workers strip it before parsing.
+    Empty lines are filtered out so worker processes never see them.
+    """
+    offsets: list[tuple[int, int]] = []
+    with trace_path.open("rb") as fh:
+        position = 0
+        for raw_line in fh:
+            length = len(raw_line)
+            if raw_line.rstrip(b"\n"):
+                offsets.append((position, length))
+            position += length
+    return offsets
+
+
 # TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
