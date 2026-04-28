@@ -10,7 +10,7 @@ from engine.agents.agent_config import AgentConfig
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
-from tests.unit.agents._sdk_events import assistant_message_event
+from tests._sdk_events import assistant_message_event
 
 
 class _FakeStream:
