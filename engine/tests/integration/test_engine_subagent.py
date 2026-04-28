@@ -127,7 +127,7 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
     tool = _build_subagent_as_tool(
         run_state=run_state,
         child_depth=1,
-        semaphore=asyncio.Semaphore(1),
+        semaphores_by_depth={1: asyncio.Semaphore(1)},
         parent_execution=parent_execution,
     )
 
