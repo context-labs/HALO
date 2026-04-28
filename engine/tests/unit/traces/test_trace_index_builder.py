@@ -379,3 +379,31 @@ def test_merge_accumulators_empty_input_returns_empty_dict() -> None:
 
     assert _merge_accumulators([]) == {}
     assert _merge_accumulators([{}, {}]) == {}
+
+
+@pytest.mark.asyncio
+async def test_parallel_matches_inline_byte_for_byte(
+    tmp_path: Path, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = fixtures_dir / "medium_traces.jsonl"
+
+    parallel_dir = tmp_path / "parallel"
+    parallel_dir.mkdir()
+    parallel_trace = parallel_dir / "traces.jsonl"
+    parallel_trace.write_bytes(src.read_bytes())
+    parallel_index = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=parallel_trace,
+        config=TraceIndexConfig(),
+    )
+
+    inline_dir = tmp_path / "inline"
+    inline_dir.mkdir()
+    inline_trace = inline_dir / "traces.jsonl"
+    inline_trace.write_bytes(src.read_bytes())
+    monkeypatch.setattr(TraceIndexBuilder, "SMALL_FILE_THRESHOLD", 10_000_000)
+    inline_index = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=inline_trace,
+        config=TraceIndexConfig(),
+    )
+
+    assert parallel_index.read_bytes() == inline_index.read_bytes()
