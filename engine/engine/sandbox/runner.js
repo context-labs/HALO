@@ -15,7 +15,13 @@
 // Permissions are hardcoded by the parent (--allow-read=<runner>,<deno cache>,<trace>,<index>).
 // We never request --allow-net, --allow-write, --allow-env, --allow-run.
 
-import pyodideModule from "npm:pyodide/pyodide.js";
+// Version pin must match ``_PYODIDE_VERSION`` in ``pyodide_client.py``:
+// the client looks up cached wheels and the npm package directory by that
+// exact version string. Without the pin Deno would resolve to whatever is
+// latest on npm, populate a different cache directory, and the client's
+// existence check would silently fail — leaving ``run_code`` quietly
+// disabled the next time pyodide ships a release.
+import pyodideModule from "npm:pyodide@0.29.3/pyodide.js";
 
 // =============================================================================
 // JSON-RPC helpers
@@ -201,11 +207,16 @@ await pyodide.loadPackage(["numpy", "pandas"]);
 // Tell the host we're ready. The host parses the first line as a sentinel.
 console.log(jsonrpcResult({ ready: true }, 0));
 
-const decoder = new TextDecoder();
+// ``stream: true`` makes the decoder buffer trailing partial UTF-8
+// sequences across chunks. Without it, a multi-byte character split
+// across two stdin reads (entirely possible for any non-ASCII content
+// in user code or trace data) would emit U+FFFD on each side of the
+// split and corrupt the JSON-RPC message.
+const decoder = new TextDecoder("utf-8");
 let buffer = "";
 
 for await (const chunk of Deno.stdin.readable) {
-  buffer += decoder.decode(chunk);
+  buffer += decoder.decode(chunk, { stream: true });
   let newlineIdx;
   while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
     const line = buffer.slice(0, newlineIdx);

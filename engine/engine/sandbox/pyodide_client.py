@@ -12,12 +12,13 @@ from pathlib import Path
 from engine.sandbox.log import log_unavailable
 
 _RUNNER_FILENAME = "runner.js"
-_TRACE_COMPAT_FILENAME = "pyodide_trace_compat.py"
 
 # Wheels Pyodide must load to satisfy ``import numpy``/``import pandas``.
-# Pinned to the set the runner declares in ``pyodide.loadPackage``; the
-# version string comes from the ``pyodide`` npm package and must stay aligned
-# with whatever npm resolves at boot.
+# ``_PYODIDE_VERSION`` is the npm version this client expects; the matching
+# pin lives in ``runner.js`` (``npm:pyodide@<version>/pyodide.js``). Both
+# must move together — Deno caches the npm package by version under
+# ``<deno_dir>/npm/registry.npmjs.org/pyodide/<version>/`` and the wheel
+# filenames are ABI-tied to that release.
 _PYODIDE_VERSION = "0.29.3"
 _REQUIRED_WHEELS = (
     "numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
@@ -483,8 +484,17 @@ class _RunnerSession:
         return await self._read_response(proc, request_id, method)
 
     async def _send(self, proc: asyncio.subprocess.Process, payload: dict) -> None:
+        """Serialize ``payload`` as one JSON-RPC line and write it to the runner's stdin.
+
+        ``ensure_ascii=False`` keeps non-ASCII content as raw UTF-8 rather
+        than ``\\uXXXX`` escapes — smaller wire, and (more importantly)
+        the path the runner's ``TextDecoder`` actually has to handle
+        across chunk boundaries. With ASCII escaping every byte on stdin
+        is single-byte, so the multi-byte decode path would never be
+        exercised in production.
+        """
         assert proc.stdin is not None
-        data = (json.dumps(payload) + "\n").encode("utf-8")
+        data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
         proc.stdin.write(data)
         await proc.stdin.drain()
 
