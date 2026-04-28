@@ -10,7 +10,12 @@ dependencies = [
     "openai-agents==0.14.5",
     "numpy==2.2.6",
     "pandas==2.2.3",
-    "bubblewrap-bin==0.1.1; sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
+    # Ships the deno binary as a platform wheel so the WASM sandbox runs
+    # out-of-the-box after `pip install`/`uv sync`. Wheels exist for macOS
+    # (x86_64/arm64), Linux (x86_64/aarch64), and Windows (x86_64); on
+    # unsupported platforms (e.g. musl Linux) pip will fall back to the
+    # sdist and the sandbox will look for ``deno`` on PATH instead.
+    "deno==2.7.14",
 ]
 
 [dependency-groups]
@@ -27,6 +32,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["engine"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"engine/sandbox/runner.js" = "engine/sandbox/runner.js"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

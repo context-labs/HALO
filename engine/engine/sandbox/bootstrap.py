@@ -1,50 +1,42 @@
 from __future__ import annotations
 
-_TEMPLATE = """\
-from __future__ import annotations
-
+# Bootstrap script template injected into Pyodide once per ``run_python``.
+#
+# Imports the stdlib-only TraceStore compat shim mounted at
+# ``/halo/pyodide_trace_compat.py`` and constructs the ``user_globals`` dict
+# the runner exposes to user code. Trace + index files are mounted at fixed
+# virtual paths by ``Sandbox.run_python``.
+_BOOTSTRAP_TEMPLATE = """\
 import sys
-from pathlib import Path
+sys.path.insert(0, "/halo")
 
 import numpy
 import pandas
 
-from engine.traces.trace_store import TraceStore
+from pyodide_trace_compat import TraceStore
 
 trace_store = TraceStore.load(
-    trace_path=Path({trace_path!r}),
-    index_path=Path({index_path!r}),
+    trace_path={trace_virtual_path!r},
+    index_path={index_virtual_path!r},
 )
 
-_USER_CODE = {user_code!r}
-
-_globals = {{
+user_globals = {{
     "trace_store": trace_store,
     "numpy": numpy,
     "pandas": pandas,
     "np": numpy,
     "pd": pandas,
-    "Path": Path,
 }}
-
-exec(_USER_CODE, _globals, _globals)
 """
 
 
 def render_bootstrap_script(
     *,
-    user_code: str,
-    trace_path: str,
-    index_path: str,
+    trace_virtual_path: str,
+    index_virtual_path: str,
 ) -> str:
-    """Render the wrapper script the sandbox runs: preloads ``trace_store``, numpy, pandas, then exec's user code.
-
-    Trace and index paths are passed as the host paths because both Linux
-    (bubblewrap) and macOS (sandbox-exec) bind those files at their original
-    locations.
-    """
-    return _TEMPLATE.format(
-        user_code=user_code,
-        trace_path=trace_path,
-        index_path=index_path,
+    """Render the Python bootstrap that imports the trace compat module and builds the user globals dict."""
+    return _BOOTSTRAP_TEMPLATE.format(
+        trace_virtual_path=trace_virtual_path,
+        index_virtual_path=index_virtual_path,
     )
