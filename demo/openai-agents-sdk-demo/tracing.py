@@ -2,7 +2,7 @@
 
 This is the single integration file for HALO. Drop it into your project, call
 ``setup_tracing()`` once at startup before constructing any ``Agent``, and every
-agent / LLM / tool span emitted by the SDK will be appended to a gzipped JSONL
+agent / LLM / tool span emitted by the SDK will be appended to a JSONL
 file in the inference.net OTLP-shaped export format that the HALO Engine reads.
 
 Usage:
@@ -13,7 +13,7 @@ Usage:
     processor = setup_tracing(service_name="my-agent", project_id="my-project")
     agent = Agent(name="assistant", instructions="Be helpful.")
     Runner.run_sync(agent, "Hello")
-    processor.shutdown()  # flush the gzip stream
+    processor.shutdown()  # flush the file
 
 The processor is *additive* — the default OpenAI-dashboard processor still runs
 unless disabled. Set ``OPENAI_AGENTS_DISABLE_TRACING=1`` or call
@@ -25,7 +25,6 @@ in ``openai-agents-sdk-span-conversion.md``.
 
 from __future__ import annotations
 
-import gzip
 import json
 import os
 import threading
@@ -42,7 +41,7 @@ from agents.tracing.processor_interface import TracingProcessor
 # ---------------------------------------------------------------------------
 
 EXPORT_SCHEMA_VERSION = 1
-DEFAULT_OUTPUT_PATH = "traces.jsonl.gz"
+DEFAULT_OUTPUT_PATH = "traces.jsonl"
 
 # observation_kind vocabulary we emit. Pick from the same enum the router
 # uses server-side so the projection is stable across sources.
@@ -440,7 +439,7 @@ def _sdk_version() -> str:
 # ---------------------------------------------------------------------------
 
 class InferenceOtlpFileProcessor(TracingProcessor):
-    """Append-only JSONL.gz writer, one line per span, spec-compliant with
+    """Append-only JSONL writer, one line per span, spec-compliant with
     07-export.md. Safe to use in dev / evals / one-off exports. For
     production ingest you'd replace the file sink with an HTTP POST to
     your edge proxy — the `span_to_otlp_line` call is the same."""
@@ -449,7 +448,7 @@ class InferenceOtlpFileProcessor(TracingProcessor):
         self._path = path
         self._ctx = ctx
         self._lock = threading.Lock()
-        self._fh = gzip.open(path, mode="at", encoding="utf-8")
+        self._fh = open(path, mode="a", encoding="utf-8")
         self._trace_meta: dict[str, tuple[str | None, str | None]] = {}
 
     # ----- Trace lifecycle ------------------------------------------------
@@ -512,9 +511,9 @@ def setup_tracing(
 ) -> InferenceOtlpFileProcessor:
     """Construct an `InferenceOtlpFileProcessor` and register it with the SDK.
 
-    Output path defaults to ``./traces.jsonl.gz``; override with the
+    Output path defaults to ``./traces.jsonl``; override with the
     ``HALO_TRACES_PATH`` env var. Call ``processor.shutdown()`` before exit
-    so the gzip stream flushes its final block.
+    to flush the file.
     """
     path = os.getenv("HALO_TRACES_PATH", DEFAULT_OUTPUT_PATH)
     ctx = ExportContext(project_id=project_id, service_name=service_name)

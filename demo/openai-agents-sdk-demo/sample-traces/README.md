@@ -27,11 +27,11 @@ Every trace has a single top-level `AGENT` span (`agent.HaloCodeHelper`), interl
 
 ```bash
 cd ~/dev/HALO/demo/openai-agents-sdk-demo
-HALO_TRACES_PATH=sample-traces/traces.jsonl.gz uv run main.py "Which Python file configures tracing? Answer with the filename only." --root .
-HALO_TRACES_PATH=sample-traces/traces.jsonl.gz uv run main.py "Which tools does the agent expose?" --root .
-HALO_TRACES_PATH=sample-traces/traces.jsonl.gz uv run main.py "What Python dependencies does this demo declare?" --root .
+HALO_TRACES_PATH=sample-traces/traces.jsonl uv run main.py "Which Python file configures tracing? Answer with the filename only." --root .
+HALO_TRACES_PATH=sample-traces/traces.jsonl uv run main.py "Which tools does the agent expose?" --root .
+HALO_TRACES_PATH=sample-traces/traces.jsonl uv run main.py "What Python dependencies does this demo declare?" --root .
 ```
 
-Each run appends to the gzipped JSONL file. Verify with `uv run python verify_traces.py sample-traces/traces.jsonl.gz`.
+Each run appends to the JSONL file. Verify with `uv run python verify_traces.py sample-traces/traces.jsonl`.
 
 No secrets are embedded. The spans contain prompts and completions about this demo directory's own source code (public).

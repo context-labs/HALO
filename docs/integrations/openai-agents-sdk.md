@@ -34,14 +34,14 @@ No OpenTelemetry packages required. `tracing.py` is a single self-contained modu
 Copy [`demo/openai-agents-sdk-demo/tracing.py`](../../demo/openai-agents-sdk-demo/tracing.py) into your project verbatim. It's one ~450-line module that bundles three things:
 
 - **`ExportContext`** — frozen dataclass for per-process identity (`project_id`, `service_name`, optional `service_version`, `deployment_environment`). `project_id` becomes `inference.project_id` (the Engine filters on this); `service_name` becomes `resource.attributes."service.name"`.
-- **`InferenceOtlpFileProcessor`** — an `agents.tracing.processor_interface.TracingProcessor` subclass that converts each `Span` to a JSON line via `span_to_otlp_line()` and appends it to a gzipped JSONL file. Thread-safe; writes on `on_span_end`. Stamps every span with the `inference.*` projection keys (`inference.project_id`, `inference.observation_kind`, `inference.llm.model_name`, `inference.llm.input_tokens`, etc.) per the inference.net `07-export.md` spec — these are what the HALO Engine indexes on.
-- **`setup_tracing()`** — the one function you call from your app. It builds an `ExportContext`, instantiates the processor at `$HALO_TRACES_PATH` (default `./traces.jsonl.gz`), registers it with `add_trace_processor(...)`, and returns the processor so you can call `.shutdown()` before exit.
+- **`InferenceOtlpFileProcessor`** — an `agents.tracing.processor_interface.TracingProcessor` subclass that converts each `Span` to a JSON line via `span_to_otlp_line()` and appends it to a JSONL file. Thread-safe; writes on `on_span_end`. Stamps every span with the `inference.*` projection keys (`inference.project_id`, `inference.observation_kind`, `inference.llm.model_name`, `inference.llm.input_tokens`, etc.) per the inference.net `07-export.md` spec — these are what the HALO Engine indexes on.
+- **`setup_tracing()`** — the one function you call from your app. It builds an `ExportContext`, instantiates the processor at `$HALO_TRACES_PATH` (default `./traces.jsonl`), registers it with `add_trace_processor(...)`, and returns the processor so you can call `.shutdown()` before exit.
 
 The module is vendored, not packaged — copy it as-is and don't edit it. Future spec changes will land in the demo copy first.
 
 ## Wire it into your app
 
-Call `setup_tracing()` once at startup, before constructing any `Agent`, and call `processor.shutdown()` before exit so the gzip stream flushes:
+Call `setup_tracing()` once at startup, before constructing any `Agent`, and call `processor.shutdown()` before exit to flush the file:
 
 ```python
 from dotenv import load_dotenv
@@ -62,23 +62,13 @@ def main():
 
 Order matters: `setup_tracing()` must run before the first `Agent(...)` so the processor is in place when the SDK starts emitting trace lifecycle events.
 
-## Run your app and unzip the traces
+## Run your app
 
 ```bash
 uv run main.py "your question"
 ```
 
-Traces land at `./traces.jsonl.gz` (or wherever `HALO_TRACES_PATH` points).
-
-**The HALO Engine reads plain JSONL, not gzip.** `engine/traces/trace_index_builder.py` opens the trace file with `Path.open("rb")` and parses one span per line — it does not transparently decompress. Before pointing the Engine at a traces file, decompress it:
-
-```bash
-gunzip traces.jsonl.gz          # produces traces.jsonl, removes the .gz
-# or, keep the gzipped copy:
-gunzip -k traces.jsonl.gz       # produces traces.jsonl, keeps traces.jsonl.gz
-```
-
-Then pass `traces.jsonl` (not `.gz`) to the Engine. The index builder writes a sidecar `traces.jsonl.engine-index.jsonl` next to it on first read.
+Traces land at `./traces.jsonl` (or wherever `HALO_TRACES_PATH` points). Pass that file directly to the Engine — it reads plain JSONL and writes a sidecar `traces.jsonl.engine-index.jsonl` next to it on first read.
 
 ## Hosted (HALO Cloud)
 
@@ -97,7 +87,7 @@ agent.MyAgent              (AGENT)
 └── response.gpt-4o-mini   (LLM)   turn 3, final
 ```
 
-Each line in `traces.jsonl(.gz)` is one span. Every line carries OTLP-compatible identity (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start_time`, `end_time`, `status`), a `resource.attributes` block, a `scope` block (`openai-agents-sdk` + version), and an `attributes` map containing both raw upstream keys and the normalised `inference.*` projection.
+Each line in `traces.jsonl` is one span. Every line carries OTLP-compatible identity (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start_time`, `end_time`, `status`), a `resource.attributes` block, a `scope` block (`openai-agents-sdk` + version), and an `attributes` map containing both raw upstream keys and the normalised `inference.*` projection.
 
 Selected attributes:
 
@@ -123,7 +113,7 @@ The full vocabulary lives in the per-span-type converters in `tracing.py` — `_
 The demo ships [`verify_traces.py`](../../demo/openai-agents-sdk-demo/verify_traces.py), a stdlib-only assertion script. Copy it (or run it from the demo directory) against your output:
 
 ```bash
-uv run python verify_traces.py traces.jsonl.gz
+uv run python verify_traces.py traces.jsonl
 # OK: 23 spans passed all spec assertions
 ```
 
@@ -132,17 +122,11 @@ It checks: top-level keys present, `kind` is `SPAN_KIND_*`, `status.code` is `ST
 For an ad-hoc look:
 
 ```bash
-zcat traces.jsonl.gz | head -1 | jq '{trace_id, span_id, name, kind, observation_kind: .attributes."inference.observation_kind"}'
-zcat traces.jsonl.gz | jq -r '[.trace_id, .name, .attributes."inference.observation_kind"] | @tsv'
+jq -c '{trace_id, span_id, name, kind, observation_kind: .attributes."inference.observation_kind"}' traces.jsonl | head -1
+jq -r '[.trace_id, .name, .attributes."inference.observation_kind"] | @tsv' traces.jsonl
 ```
 
 ## Troubleshooting
-
-**`traces.jsonl.gz` is empty or missing.**
-You probably exited before `processor.shutdown()` ran, so the gzip stream never flushed its final block. Always call `processor.shutdown()` (or `processor.force_flush()`) before process exit. The demo's `main.py` is the canonical pattern.
-
-**The HALO Engine errors out reading `traces.jsonl.gz` directly.**
-Decompress first — see [Run your app and unzip the traces](#run-your-app-and-unzip-the-traces). The Engine reads the file as plain UTF-8 JSONL with no gzip layer.
 
 **Duplicate span exports, or errors about uploading to `platform.openai.com`.**
 The OpenAI Agents SDK ships a default `TracingProcessor` that uploads to OpenAI's trace dashboard. `add_trace_processor(...)` is *additive* — both run by default. If you only want the inference.net file:
@@ -161,9 +145,9 @@ The SDK only populates `usage` on `response` / `generation` spans for models whe
 **`agents.add_trace_processor` import fails.**
 You're on an older `openai-agents` version. The trace processor API landed in 0.0.4+; bump with `uv add openai-agents@latest`.
 
-**Lines in `traces.jsonl.gz` look fine but the Engine reports `0 traces`.**
-After decompression, check that `inference.project_id` is set on every line — the index builder filters on it. Pass `project_id=` to `setup_tracing()` (the default `"my-project"` works but is intentionally generic).
+**Lines in `traces.jsonl` look fine but the Engine reports `0 traces`.**
+Check that `inference.project_id` is set on every line — the index builder filters on it. Pass `project_id=` to `setup_tracing()` (the default `"my-project"` works but is intentionally generic).
 
 ## See a working example
 
-[`demo/openai-agents-sdk-demo/`](../../demo/openai-agents-sdk-demo/) is a runnable agent that uses exactly this `tracing.py`. It answers questions about a local codebase using three file tools (`list_files`, `grep`, `read_file`) and produces multi-turn traces suitable as Engine fixtures. Sample output is checked in at [`demo/openai-agents-sdk-demo/sample-traces/traces.jsonl.gz`](../../demo/openai-agents-sdk-demo/sample-traces/).
+[`demo/openai-agents-sdk-demo/`](../../demo/openai-agents-sdk-demo/) is a runnable agent that uses exactly this `tracing.py`. It answers questions about a local codebase using three file tools (`list_files`, `grep`, `read_file`) and produces multi-turn traces suitable as Engine fixtures. Sample output is checked in at [`demo/openai-agents-sdk-demo/sample-traces/traces.jsonl`](../../demo/openai-agents-sdk-demo/sample-traces/).
