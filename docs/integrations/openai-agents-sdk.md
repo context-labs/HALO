@@ -1,14 +1,13 @@
 # HALO — OpenAI Agents SDK integration
 
-Wire your existing OpenAI Agents SDK app into HALO's OpenInference-shaped OTEL pipeline. Both local (self-hosted `otel-interceptor` + compactor) and hosted (HALO Cloud) sinks are covered. After this guide, every LLM call and tool call in your agent becomes an OTEL span with OpenInference attributes, captured on disk locally or forwarded to HALO Cloud with no code change between the two.
+Wire your existing OpenAI Agents SDK app into HALO's trace pipeline. Drop in one file (`tracing.py`), call `setup_tracing()` once at startup, and every agent / LLM / tool call becomes a JSONL span line on disk in the inference.net OTLP-shaped export format that the HALO Engine consumes.
 
-> **Hosted sink not yet launched.** The endpoint and API key format are TODO. Fill in `<TODO-halo-ingest-endpoint>` and `<TODO-halo-api-key>` once we publish them. Local sink works today — scroll to [Pick a sink → Local](#local-otel-interceptor).
+> **Hosted sink not yet launched.** This guide covers the local file sink, which works today. See [Hosted (HALO Cloud)](#hosted-halo-cloud) for the placeholder.
 
 ## Prereqs
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - An OpenAI API key (`OPENAI_API_KEY`)
-- A clone of [`github.com/context-labs/otel-interceptor`](https://github.com/context-labs/otel-interceptor) for the local sink path
 
 ## Install
 
@@ -18,57 +17,31 @@ Add these dependencies to your project:
 [project]
 dependencies = [
     "openai-agents",
-    "openinference-instrumentation-openai-agents",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp-proto-http",
     "python-dotenv",
 ]
 ```
 
-Or in one line with uv:
+Or with uv:
 
 ```bash
-uv add openai-agents openinference-instrumentation-openai-agents \
-       opentelemetry-sdk opentelemetry-exporter-otlp-proto-http \
-       python-dotenv
+uv add openai-agents python-dotenv
 ```
 
-## The tracing snippet
+No OpenTelemetry packages required. `tracing.py` is a single self-contained module — stdlib + `openai-agents` only — so there's no OTLP exporter, no collector, and no instrumentor in the dependency graph.
 
-Drop this `tracing.py` into your project. This is the whole integration.
+## Add `tracing.py`
 
-```python
-"""Minimal OpenInference + OTEL wiring. Copy-paste into any OpenAI Agents SDK app."""
-import os
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from openinference.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+Copy [`demo/openai-agents-sdk-demo/tracing.py`](../../demo/openai-agents-sdk-demo/tracing.py) into your project verbatim. It's one ~450-line module that bundles three things:
 
-DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
+- **`ExportContext`** — frozen dataclass for per-process identity (`project_id`, `service_name`, optional `service_version`, `deployment_environment`). `project_id` becomes `inference.project_id` (the Engine filters on this); `service_name` becomes `resource.attributes."service.name"`.
+- **`InferenceOtlpFileProcessor`** — an `agents.tracing.processor_interface.TracingProcessor` subclass that converts each `Span` to a JSON line via `span_to_otlp_line()` and appends it to a gzipped JSONL file. Thread-safe; writes on `on_span_end`. Stamps every span with the `inference.*` projection keys (`inference.project_id`, `inference.observation_kind`, `inference.llm.model_name`, `inference.llm.input_tokens`, etc.) per the inference.net `07-export.md` spec — these are what the HALO Engine indexes on.
+- **`setup_tracing()`** — the one function you call from your app. It builds an `ExportContext`, instantiates the processor at `$HALO_TRACES_PATH` (default `./traces.jsonl.gz`), registers it with `add_trace_processor(...)`, and returns the processor so you can call `.shutdown()` before exit.
 
-
-def setup_tracing(service_name: str = "my-agent") -> TracerProvider:
-    resource = Resource.create({"service.name": service_name})
-    provider = TracerProvider(resource=resource)
-    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT).rstrip("/")
-    provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=f"{base}/v1/traces")))
-    OpenAIAgentsInstrumentor().instrument(tracer_provider=provider)
-    return provider
-```
-
-What each block does:
-
-- `Resource.create({"service.name": ...})` tags every span so you can group them in any backend. Without this, spans appear as `unknown_service`.
-- `SimpleSpanProcessor` over `BatchSpanProcessor` exports one span at a time. For short-lived agent runs, batching adds flush-at-exit friction without meaningful throughput gain.
-- `OTLPSpanExporter` from the HTTP/protobuf package avoids pulling in `grpcio` (~40 MB of native code).
-- `OTEL_EXPORTER_OTLP_ENDPOINT` is treated as a base URL per OTEL spec; `/v1/traces` is appended in code. `OTEL_EXPORTER_OTLP_HEADERS` is read natively by the OTEL SDK, so hosted-sink auth works without code changes.
-- `OpenAIAgentsInstrumentor().instrument(...)` hooks the OpenAI Agents SDK's `TracingProcessor` ABC so every `Agent` / `Runner` call, LLM call, and tool call becomes an OpenInference span automatically.
+The module is vendored, not packaged — copy it as-is and don't edit it. Future spec changes will land in the demo copy first.
 
 ## Wire it into your app
 
-Call `setup_tracing()` once at startup, before building any `Agent`:
+Call `setup_tracing()` once at startup, before constructing any `Agent`, and call `processor.shutdown()` before exit so the gzip stream flushes:
 
 ```python
 from dotenv import load_dotenv
@@ -76,134 +49,101 @@ from dotenv import load_dotenv
 from tracing import setup_tracing
 from my_app import build_agent  # your existing factory
 
+
 def main():
     load_dotenv()
-    setup_tracing(service_name="my-agent")
+    processor = setup_tracing(service_name="my-agent", project_id="my-project")
     agent = build_agent()
-    # ... Runner.run_sync(agent, question) or Runner.run(...) as you already do
+    # ... Runner.run_sync(agent, question) etc.
+    processor.shutdown()
 ```
 
-Order matters: `setup_tracing()` must run before the first `Agent(...)` construction — the instrumentor hooks methods at install time.
+Order matters: `setup_tracing()` must run before the first `Agent(...)` so the processor is in place when the SDK starts emitting trace lifecycle events.
 
-## Pick a sink
-
-Same `tracing.py`. Different destination.
-
-### Local (otel-interceptor)
-
-Three terminals run in parallel. All three are required — the interceptor receives OTLP export requests, the compactor turns batch-fragmented NDJSON into the canonical one-line-per-trace shape, and your agent emits the traces.
+## Run your app and unzip the traces
 
 ```bash
-# Terminal 1 — OTLP receiver. Listens on :4318 (HTTP) + :4317 (gRPC).
-cd ~/dev/otel-interceptor
-task install    # one-time
-task start
+uv run main.py "your question"
 ```
+
+Traces land at `./traces.jsonl.gz` (or wherever `HALO_TRACES_PATH` points).
+
+**The HALO Engine reads plain JSONL, not gzip.** `engine/traces/trace_index_builder.py` opens the trace file with `Path.open("rb")` and parses one span per line — it does not transparently decompress. Before pointing the Engine at a traces file, decompress it:
 
 ```bash
-# Terminal 2 — compactor. Groups spans by traceId and writes JSONL.
-cd ~/dev/otel-interceptor
-task compact:watch:all
+gunzip traces.jsonl.gz          # produces traces.jsonl, removes the .gz
+# or, keep the gzipped copy:
+gunzip -k traces.jsonl.gz       # produces traces.jsonl, keeps traces.jsonl.gz
 ```
 
-```bash
-# Terminal 3 — your agent.
-uv run main.py
-```
+Then pass `traces.jsonl` (not `.gz`) to the Engine. The index builder writes a sidecar `traces.jsonl.engine-index.jsonl` next to it on first read.
 
-The default endpoint in `tracing.py` is `http://localhost:4318`, matching the interceptor's HTTP port. No env vars needed.
+## Hosted (HALO Cloud)
 
-**Why both interceptor and compactor?** The interceptor appends one line to `data/traces.ndjson` per OTLP export *request* — spans from one trace can split across many lines as batches flush. Downstream HALO tooling (including the RLM harness in this repo) expects one-line-per-*trace*, which is what `task compact:watch:all` produces at `data/traces-by-trace.jsonl`. Running only the interceptor gets you raw telemetry; running both gets you HALO-compatible traces.
-
-See the [otel-interceptor README](https://github.com/context-labs/otel-interceptor) for install details, alternative transports (gRPC, HTTP/JSON), and the full list of tasks.
-
-### Hosted (HALO Cloud)
-
-> **Not yet launched.** The two values below are placeholders. Once HALO Cloud publishes an ingest endpoint and API key format, replace them.
-
-Set two env vars in your shell or `.env`:
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=<TODO-halo-ingest-endpoint>
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <TODO-halo-api-key>"
-```
-
-Run your agent as normal. **No compactor step** — HALO Cloud compacts server-side.
-
-The OTEL OTLP HTTP exporter reads both env vars natively, so `tracing.py` needs no changes to switch sinks.
+> **Not yet launched.** When the hosted ingest endpoint ships, this section will describe how to swap `InferenceOtlpFileProcessor` for an HTTP processor that POSTs the same JSONL line shape to HALO Cloud — same `ExportContext`, same `span_to_otlp_line` projection, different sink. Until then, the local file path above is the only supported sink.
 
 ## Trace shape
 
-A single agent run produces an OpenInference tree, all in-process:
+A single agent run produces a tree like this (one `Trace` → many `Span`s):
 
 ```
-AgentWorkflow
-└── Agent
-    ├── LLM   (turn 1)
-    ├── Tool  (e.g. grep)
-    ├── LLM   (turn 2)
-    ├── Tool  (e.g. read_file)
-    └── LLM   (turn 3, final)
+agent.MyAgent              (AGENT)
+├── response.gpt-4o-mini   (LLM)   turn 1
+├── function.grep          (TOOL)
+├── response.gpt-4o-mini   (LLM)   turn 2
+├── function.read_file     (TOOL)
+└── response.gpt-4o-mini   (LLM)   turn 3, final
 ```
 
-Every span carries these attributes in the OpenInference shape:
+Each line in `traces.jsonl(.gz)` is one span. Every line carries OTLP-compatible identity (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start_time`, `end_time`, `status`), a `resource.attributes` block, a `scope` block (`openai-agents-sdk` + version), and an `attributes` map containing both raw upstream keys and the normalised `inference.*` projection.
+
+Selected attributes:
 
 | Attribute | Example | Which span |
 |---|---|---|
-| `openinference.span.kind` | `AGENT`, `LLM`, `TOOL` | all |
-| `llm.model_name` | `gpt-4o-mini` | LLM |
-| `llm.input_messages` | JSON array of `{role, content}` objects | LLM |
-| `llm.output_messages` | JSON array of `{role, content}` objects | LLM |
-| `llm.token_count.prompt` | `1234` | LLM |
-| `llm.token_count.completion` | `56` | LLM |
-| `tool.name` | `grep` | TOOL |
-| `tool.parameters` | JSON string of the tool arguments | TOOL |
-| `service.name` | whatever you passed to `setup_tracing()` | all |
+| `openinference.span.kind` | `AGENT`, `LLM`, `TOOL`, `CHAIN`, `GUARDRAIL` | all |
+| `inference.observation_kind` | `AGENT`, `LLM`, `TOOL`, `CHAIN`, `GUARDRAIL`, `SPAN` | all |
+| `inference.project_id` | whatever you passed to `setup_tracing()` | all |
+| `inference.export.schema_version` | `1` | all |
+| `llm.model_name` / `inference.llm.model_name` | `gpt-4o-mini` | LLM |
+| `llm.input_messages`, `llm.output_messages` | JSON-encoded message arrays | LLM |
+| `llm.input_messages.{i}.message.role` etc. | flat OpenInference projection | LLM |
+| `llm.token_count.prompt` / `inference.llm.input_tokens` | `1234` | LLM |
+| `llm.token_count.completion` / `inference.llm.output_tokens` | `56` | LLM |
+| `tool.name`, `input.value`, `output.value` | `grep`, JSON args, JSON result | TOOL |
+| `agent.name`, `agent.tools`, `agent.handoffs` | `MyAgent`, JSON arrays | AGENT |
+| `service.name` (under `resource.attributes`) | from `ExportContext.service_name` | all |
 
-All spans share one `trace_id`. Child spans carry their parent's `span_id` in `parent_span_id`.
+The full vocabulary lives in the per-span-type converters in `tracing.py` — `_generation_attrs`, `_response_attrs`, `_function_attrs`, etc.
 
 ## Verify it's working
 
-With the interceptor and compactor running, and your agent emitting traces:
+The demo ships [`verify_traces.py`](../../demo/openai-agents-sdk-demo/verify_traces.py), a stdlib-only assertion script. Copy it (or run it from the demo directory) against your output:
 
 ```bash
-# Confirm export requests are arriving.
-tail -n 1 ~/dev/otel-interceptor/data/traces.ndjson | jq '.payload.resourceSpans[0].resource'
-
-# Confirm the compacted file has one line per trace.
-tail -n 1 ~/dev/otel-interceptor/data/traces-by-trace.jsonl | jq '{traceId, spanCount, services, spanNames: [.spans[].name]}'
+uv run python verify_traces.py traces.jsonl.gz
+# OK: 23 spans passed all spec assertions
 ```
 
-A healthy compacted line looks like:
+It checks: top-level keys present, `kind` is `SPAN_KIND_*`, `status.code` is `STATUS_CODE_*`, timestamps are ISO-8601 with nanosecond precision and trailing `Z`, and the four required `inference.*` keys (`schema_version`, `project_id`, `observation_kind`) are populated.
 
-```json
-{
-  "traceId": "c39c72dabeb2c3fe8aab4fdacb5805d8",
-  "spanCount": 7,
-  "services": ["my-agent"],
-  "spanNames": ["AgentWorkflow", "Agent", "LLM", "Tool", "LLM", "Tool", "LLM"]
-}
-```
-
-Confirm the `openinference.span.kind` attribute appears on each span:
+For an ad-hoc look:
 
 ```bash
-tail -n 1 ~/dev/otel-interceptor/data/traces-by-trace.jsonl \
-  | jq '[.spans[] | {name, kind: (.attributes[] | select(.key == "openinference.span.kind") | .value.stringValue)}]'
+zcat traces.jsonl.gz | head -1 | jq '{trace_id, span_id, name, kind, observation_kind: .attributes."inference.observation_kind"}'
+zcat traces.jsonl.gz | jq -r '[.trace_id, .name, .attributes."inference.observation_kind"] | @tsv'
 ```
-
-If every span has a kind, instrumentation is working end-to-end.
 
 ## Troubleshooting
 
-**Nothing appears in `traces.ndjson`.**
-Your process may be exiting before the first export. Add `OTEL_TRACES_EXPORT_INTERVAL=1000` to your `.env` while debugging. `SimpleSpanProcessor` already exports synchronously, so an empty file usually means the exporter never reached the receiver (see next entry).
+**`traces.jsonl.gz` is empty or missing.**
+You probably exited before `processor.shutdown()` ran, so the gzip stream never flushed its final block. Always call `processor.shutdown()` (or `processor.force_flush()`) before process exit. The demo's `main.py` is the canonical pattern.
 
-**`Connection refused` on port 4318.**
-The interceptor isn't running. Start it with `task start` in the interceptor repo. Confirm nothing else is bound: `lsof -iTCP:4318 -sTCP:LISTEN`.
+**The HALO Engine errors out reading `traces.jsonl.gz` directly.**
+Decompress first — see [Run your app and unzip the traces](#run-your-app-and-unzip-the-traces). The Engine reads the file as plain UTF-8 JSONL with no gzip layer.
 
 **Duplicate span exports, or errors about uploading to `platform.openai.com`.**
-The OpenAI Agents SDK ships a default `TracingProcessor` that uploads to OpenAI's trace dashboard. If you see both destinations exporting, disable the built-in one:
+The OpenAI Agents SDK ships a default `TracingProcessor` that uploads to OpenAI's trace dashboard. `add_trace_processor(...)` is *additive* — both run by default. If you only want the inference.net file:
 
 ```python
 import os
@@ -213,15 +153,15 @@ os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
 #   agents.set_trace_processors([])
 ```
 
-**Spans arrive but OpenInference attributes are empty.**
-`OpenAIAgentsInstrumentor().instrument(...)` must run before the first `Agent(...)` construction. Move `setup_tracing()` to the top of `main()` and re-run.
+**Spans appear but `inference.llm.input_tokens` / `output_tokens` are `None`.**
+The SDK only populates `usage` on `response` / `generation` spans for models where it was returned by the API. Check that your model returns usage in the OpenAI response payload — older / streaming-only configurations sometimes omit it.
 
-**`OTEL_EXPORTER_OTLP_HEADERS` format errors.**
-The value is comma-separated `key=value` pairs, *not* a JSON object. Use `authorization=Bearer <TODO-halo-api-key>`, not `{"authorization": "Bearer <TODO-halo-api-key>"}`.
+**`agents.add_trace_processor` import fails.**
+You're on an older `openai-agents` version. The trace processor API landed in 0.0.4+; bump with `uv add openai-agents@latest`.
 
-**404 on `/v1/traces/v1/traces`.**
-Your `OTEL_EXPORTER_OTLP_ENDPOINT` includes the path suffix. `tracing.py` appends `/v1/traces` itself. Set the env var to a base URL with no path.
+**Lines in `traces.jsonl.gz` look fine but the Engine reports `0 traces`.**
+After decompression, check that `inference.project_id` is set on every line — the index builder filters on it. Pass `project_id=` to `setup_tracing()` (the default `"my-project"` works but is intentionally generic).
 
 ## See a working example
 
-[`demo/openai-agents-sdk-demo/`](../../demo/openai-agents-sdk-demo/) in this repo is a runnable agent that uses exactly this `tracing.py`. It answers questions about a local codebase using three file tools (`list_files`, `grep`, `read_file`) and produces multi-turn traces suitable as fixtures. See also the [OpenInference instrumentor docs](https://github.com/Arize-ai/openinference/tree/main/python/instrumentation/openinference-instrumentation-openai-agents).
+[`demo/openai-agents-sdk-demo/`](../../demo/openai-agents-sdk-demo/) is a runnable agent that uses exactly this `tracing.py`. It answers questions about a local codebase using three file tools (`list_files`, `grep`, `read_file`) and produces multi-turn traces suitable as Engine fixtures. Sample output is checked in at [`demo/openai-agents-sdk-demo/sample-traces/traces.jsonl.gz`](../../demo/openai-agents-sdk-demo/sample-traces/).
