@@ -5,9 +5,10 @@
 #   src/bubblewrap_bin/_bin/bwrap
 #
 # Inputs:
-#   BWRAP_VERSION  upstream version tag (e.g. 0.11.0)
-#   BWRAP_SHA256   sha256 of the upstream release tarball
-#   ARCH           target arch label used in cache filenames (x86_64|aarch64)
+#   BWRAP_VERSION  upstream version tag (e.g. 0.11.0); defaults to the
+#                  contents of VENDORED_BWRAP_VERSION at the package root.
+#   BWRAP_SHA256   sha256 of the upstream release tarball.
+#   ARCH           target arch label used in cache filenames (x86_64|aarch64).
 #
 # Build pinning:
 #   - libcap is installed via the host package manager and statically linked
@@ -16,11 +17,11 @@
 
 set -euo pipefail
 
-BWRAP_VERSION="${BWRAP_VERSION:?BWRAP_VERSION must be set}"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+BWRAP_VERSION="${BWRAP_VERSION:-$(cat "${repo_root}/VENDORED_BWRAP_VERSION")}"
 BWRAP_SHA256="${BWRAP_SHA256:?BWRAP_SHA256 must be set}"
 ARCH="${ARCH:?ARCH must be set (x86_64|aarch64)}"
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 out_dir="${repo_root}/src/bubblewrap_bin/_bin"
 work_dir="$(mktemp -d -t bubblewrap-bin-XXXXXX)"
 trap 'rm -rf "${work_dir}"' EXIT
@@ -59,9 +60,6 @@ meson install -C "${build_dir}"
 
 echo "[bubblewrap-bin] copying binary to ${out_dir}/bwrap"
 install --mode=0755 "${prefix}/bin/bwrap" "${out_dir}/bwrap"
-
-echo "[bubblewrap-bin] recording version"
-echo "${BWRAP_VERSION}" > "${repo_root}/VENDORED_BWRAP_VERSION"
 
 echo "[bubblewrap-bin] smoke test"
 "${out_dir}/bwrap" --version

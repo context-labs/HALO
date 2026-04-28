@@ -3,15 +3,6 @@ name: "[bubblewrap-bin] Release"
 on:
   workflow_dispatch:
     inputs:
-      semver_action:
-        description: "Semantic version bump"
-        required: true
-        default: patch
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
       dry_run:
         description: "Dry run (build only; skip commit, push, and PyPI publish)"
         required: true
@@ -24,7 +15,10 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  BWRAP_VERSION: "0.11.0"
+  # Upstream bwrap version is stored in bubblewrap-bin/VENDORED_BWRAP_VERSION
+  # (single source of truth read by both the build script and the bump step).
+  # The SHA stays here because it is paired with the version pin and only
+  # needs to change when VENDORED_BWRAP_VERSION changes.
   BWRAP_SHA256: "988fd6b232dafa04b8b8198723efeaccdb3c6aa9c1c7936219d5791a8b7a8646"
   CI_BOT_GITHUB_APP_ID: "1281730"
 
@@ -62,11 +56,30 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Bump version
+      - name: Compute next version
+        # Versioning scheme (per README):
+        #   - Package version tracks the upstream bwrap version verbatim.
+        #   - Repackaging the same upstream (e.g. fixing a packaging bug)
+        #     bumps a PEP 440 ``.postN`` suffix on the same upstream version.
+        # Effect: 0.11.0 -> 0.11.0.post1 -> 0.11.0.post2 -> (bump upstream)
+        # -> 0.12.0 -> 0.12.0.post1 -> ...
         id: bump
         run: |
-          NEW_VERSION=$(uv version --bump "${{ inputs.semver_action }}" --short --no-sync)
-          echo "Bumped bubblewrap-bin version to ${NEW_VERSION}"
+          UPSTREAM_VERSION=$(cat VENDORED_BWRAP_VERSION)
+          CURRENT_VERSION=$(uv version --short --no-sync)
+          CURRENT_RELEASE="${CURRENT_VERSION%.post*}"
+
+          if [ "$CURRENT_RELEASE" != "$UPSTREAM_VERSION" ]; then
+            NEW_VERSION="$UPSTREAM_VERSION"
+          elif [[ "$CURRENT_VERSION" == *.post* ]]; then
+            POST_N="${CURRENT_VERSION##*.post}"
+            NEW_VERSION="${UPSTREAM_VERSION}.post$((POST_N + 1))"
+          else
+            NEW_VERSION="${UPSTREAM_VERSION}.post1"
+          fi
+
+          uv version --no-sync "$NEW_VERSION"
+          echo "Bumped bubblewrap-bin: ${CURRENT_VERSION} -> ${NEW_VERSION} (upstream bwrap ${UPSTREAM_VERSION})"
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload bumped manifest
@@ -128,6 +141,7 @@ jobs:
       - name: Build vendored bwrap
         env:
           ARCH: ${{ matrix.arch }}
+          BWRAP_SHA256: ${{ env.BWRAP_SHA256 }}
         run: ./scripts/build_bwrap.sh
 
       - name: Build wheel
@@ -295,11 +309,11 @@ jobs:
     if: always()
     runs-on: depot-ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Generate summary
         env:
           DRY_RUN: ${{ inputs.dry_run }}
-          SEMVER_ACTION: ${{ inputs.semver_action }}
-          BWRAP_VERSION: ${{ env.BWRAP_VERSION }}
           NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
           CHECKS_RESULT: ${{ needs.checks.result }}
           BUMP_RESULT: ${{ needs.bump-version.result }}
@@ -308,11 +322,11 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           TAG_PUSH_RESULT: ${{ needs.tag-and-push.result }}
         run: |
+          UPSTREAM_VERSION=$(cat bubblewrap-bin/VENDORED_BWRAP_VERSION)
           {
             echo "## bubblewrap-bin Release Summary"
             echo ""
-            echo "**Semver action:**     ${SEMVER_ACTION}"
-            echo "**Bundled bwrap:**     ${BWRAP_VERSION}"
+            echo "**Bundled bwrap:**     ${UPSTREAM_VERSION}"
             echo "**New version:**       ${NEW_VERSION:-unknown}"
             echo "**Dry run:**           ${DRY_RUN}"
             echo ""
