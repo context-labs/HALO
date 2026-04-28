@@ -7,7 +7,12 @@ import sys
 
 def verify(path: str) -> int:
     count = 0
-    with gzip.open(path, "rt") as fh:
+    if path.endswith(".gz") or path.endswith(".gzip"):
+        open_func = lambda p: gzip.open(p, "rt")
+    else:
+        open_func = lambda p: open(p, "rt")
+
+    with open_func(path) as fh:
         for raw in fh:
             line = json.loads(raw)
             assert set(line) >= {
