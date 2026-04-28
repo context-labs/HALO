@@ -24,6 +24,16 @@ async def test_stdout_cap_truncates() -> None:
         config=SandboxConfig(timeout_seconds=5.0, maximum_stdout_bytes=1000),
     )
     assert len(result.stdout.encode()) <= 1000
+    assert result.stdout.endswith("[... output truncated ...]\n")
+
+
+@pytest.mark.asyncio
+async def test_stdout_under_cap_has_no_truncation_marker() -> None:
+    result = await run_process_capped(
+        argv=["/bin/sh", "-c", "printf hello"],
+        config=SandboxConfig(timeout_seconds=5.0, maximum_stdout_bytes=1000),
+    )
+    assert result.stdout == "hello"
 
 
 @pytest.mark.asyncio
