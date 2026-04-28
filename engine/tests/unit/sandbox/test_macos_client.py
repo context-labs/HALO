@@ -30,9 +30,14 @@ def test_resolve_returns_none_when_sandbox_exec_missing(
     assert "sandbox-exec not found on PATH" in err
 
 
-def test_render_profile_exact_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(macos_client, "_home_dir", lambda: "/Users/tester")
-
+def test_render_profile_exact_shape(tmp_path: Path) -> None:
+    """Profile is default-deny + broad ``file-read-metadata`` for path
+    traversal + full read on a fixed set of SIP-protected system roots and
+    literals (mirrors Apple's ``system.sb``) + full read on each
+    readonly path (subpath for dirs, literal for files) + read+write on
+    each writable path. ``file-read-metadata`` does not include
+    ``file-read-data``, so listing arbitrary host directories or reading
+    arbitrary file contents remains denied."""
     trace = tmp_path / "t.jsonl"
     index = tmp_path / "t.idx.jsonl"
     runtime = tmp_path / "runtime"
@@ -48,31 +53,37 @@ def test_render_profile_exact_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         writable_paths=[work],
     )
 
-    assert profile == (
-        "(version 1)\n"
-        "(deny default)\n"
-        "(allow process*)\n"
-        "(allow mach-lookup)\n"
-        "(allow ipc-posix-shm)\n"
-        "(allow sysctl-read)\n"
-        "(allow signal)\n"
-        "(allow file-read*)\n"
-        '(deny file-read* (subpath "/Users/tester/.ssh"))\n'
-        '(deny file-read* (subpath "/Users/tester/.aws"))\n'
-        '(deny file-read* (subpath "/Users/tester/.gnupg"))\n'
-        '(deny file-read* (subpath "/Users/tester/.config"))\n'
-        '(deny file-read* (subpath "/Users/tester/.docker"))\n'
-        '(deny file-read* (subpath "/Users/tester/.kube"))\n'
-        '(deny file-read* (subpath "/Users/tester/.gcloud"))\n'
-        '(deny file-read* (subpath "/Users/tester/Documents"))\n'
-        '(deny file-read* (subpath "/Users/tester/Desktop"))\n'
-        '(deny file-read* (subpath "/Users/tester/Downloads"))\n'
-        f'(allow file-read* (literal "{trace}"))\n'
-        f'(allow file-read* (literal "{index}"))\n'
-        f'(allow file-read* (subpath "{runtime}"))\n'
-        f'(allow file-write* (subpath "{work}"))\n'
-        "(deny network*)\n"
-    )
+    expected_lines = [
+        "(version 1)",
+        "(deny default)",
+        "(allow process*)",
+        "(allow mach-lookup)",
+        "(allow ipc-posix-shm)",
+        "(allow sysctl-read)",
+        "(allow signal)",
+        "(allow file-read-metadata)",
+        '(allow file-read* file-map-executable (subpath "/usr/lib"))',
+        '(allow file-read* file-map-executable (subpath "/usr/share"))',
+        '(allow file-read* file-map-executable (subpath "/System"))',
+        '(allow file-read* file-map-executable (subpath "/Library/Apple"))',
+        '(allow file-read* file-map-executable (subpath "/private/var/db/timezone"))',
+        '(allow file-read* (literal "/"))',
+        '(allow file-read* (literal "/dev/random"))',
+        '(allow file-read* (literal "/dev/urandom"))',
+        '(allow file-read* (literal "/dev/null"))',
+        '(allow file-read* (literal "/private/etc/passwd"))',
+        '(allow file-read* (literal "/private/etc/protocols"))',
+        '(allow file-read* (literal "/private/etc/services"))',
+        '(allow file-read* (literal "/private/etc/localtime"))',
+        '(allow file-read* (subpath "/private/var/folders"))',
+        f'(allow file-read* (literal "{trace}"))',
+        f'(allow file-read* (literal "{index}"))',
+        f'(allow file-read* (subpath "{runtime}"))',
+        f'(allow file-read* (subpath "{work}"))',
+        f'(allow file-write* (subpath "{work}"))',
+        "(deny network*)",
+    ]
+    assert profile == "\n".join(expected_lines) + "\n"
 
 
 def test_build_argv_exact_shape(tmp_path: Path) -> None:
