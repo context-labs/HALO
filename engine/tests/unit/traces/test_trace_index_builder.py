@@ -339,7 +339,7 @@ def test_process_chunk_partial_chunk_only_sees_its_lines(
 
 
 def test_merge_accumulators_preserves_chunk_order_for_byte_offsets() -> None:
-    from engine.traces.trace_index_builder import _RowAccumulator, _merge_accumulators
+    from engine.traces.trace_index_builder import _merge_accumulators, _RowAccumulator
 
     chunk0_a = _RowAccumulator(trace_id="t-1")
     chunk0_a.byte_offsets = [0]
