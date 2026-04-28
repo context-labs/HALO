@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing as mp
 import os
 from dataclasses import dataclass, field
 from functools import partial
-from multiprocessing import Pool
 from pathlib import Path
 
 from engine.traces.models.canonical_span import SpanRecord
@@ -315,7 +315,8 @@ class TraceIndexBuilder:
         else:
             n_workers = os.cpu_count() or 1
             chunks = _split_into_chunks(line_offsets, n_workers)
-            with Pool(processes=len(chunks)) as pool:
+            ctx = mp.get_context("forkserver")
+            with ctx.Pool(processes=len(chunks)) as pool:
                 per_worker = pool.map(partial(_process_chunk, trace_path), chunks)
             merged = _merge_accumulators(per_worker)
 
