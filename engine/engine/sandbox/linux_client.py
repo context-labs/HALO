@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 from engine.sandbox.log import log_unavailable
@@ -29,14 +28,6 @@ _LINUX_NAMESPACE_REMEDIATION = (
 )
 
 
-@dataclass(frozen=True)
-class _Candidate:
-    """One bwrap candidate found during resolution: which path, where it came from."""
-
-    executable: Path
-    source: str
-
-
 class LinuxClient:
     """Bubblewrap-backed sandbox client.
 
@@ -51,56 +42,53 @@ class LinuxClient:
 
     @staticmethod
     def resolve() -> LinuxClient | None:
-        """Find a usable ``bwrap`` and verify it can create namespaces.
+        """Find the first bwrap candidate and verify it can create namespaces.
 
-        Resolution order:
-          1. ``HALO_BWRAP_PATH`` env override.
-          2. System ``bwrap`` on ``PATH``.
-          3. Packaged ``bwrap`` from the optional ``bubblewrap-bin`` dependency.
+        Resolution order: ``HALO_BWRAP_PATH`` env override → system ``bwrap``
+        on ``PATH`` → packaged ``bwrap`` from the optional ``bubblewrap-bin``
+        dependency. We pick the highest-priority candidate that exists and
+        probe only that one — if a user explicitly set ``HALO_BWRAP_PATH``
+        and it's broken, falling through to a different bwrap silently
+        would hide their misconfiguration; if the namespace probe fails,
+        every bwrap on this kernel will fail the same way.
 
-        On failure, logs a warning whose remediation distinguishes "binary
-        is missing entirely" from "binary exists but namespace probe failed",
-        then returns ``None``. Callers treat ``None`` as "sandbox unavailable
-        for this run" — there's no exception to catch.
+        On failure, logs a warning with a remediation distinguishing
+        "binary missing/broken" from "binary exists but namespace probe
+        failed", then returns ``None``.
         """
-        candidates = _candidates()
-        if not candidates:
+        env = os.environ.get(HALO_BWRAP_ENV_VAR)
+        if env:
+            executable = Path(env)
+            source = f"{HALO_BWRAP_ENV_VAR} override"
+        elif (system := shutil.which("bwrap")) is not None:
+            executable = Path(system)
+            source = "system PATH"
+        elif (packaged := _packaged_bwrap()) is not None:
+            executable = packaged
+            source = "bubblewrap-bin package"
+        else:
             log_unavailable(
-                diagnostic=(
-                    "bubblewrap (bwrap) not found via env, PATH, or bubblewrap-bin package"
-                ),
+                diagnostic="bubblewrap not found via env, PATH, or bubblewrap-bin package",
                 remediation=_LINUX_MISSING_REMEDIATION,
             )
             return None
 
-        missing: list[str] = []
-        probe_failures: list[str] = []
-        for candidate in candidates:
-            if not candidate.executable.exists():
-                missing.append(
-                    f"bwrap candidate from {candidate.source} does not exist: "
-                    f"{candidate.executable}"
-                )
-                continue
-            failure = _probe(candidate.executable)
-            if failure is None:
-                return LinuxClient(executable=candidate.executable)
-            probe_failures.append(
-                f"bwrap from {candidate.source} ({candidate.executable}) "
-                f"failed namespace probe: {failure}"
-            )
-
-        if probe_failures:
+        if not executable.exists():
             log_unavailable(
-                diagnostic="\n".join(probe_failures),
-                remediation=_LINUX_NAMESPACE_REMEDIATION,
-            )
-        else:
-            log_unavailable(
-                diagnostic="\n".join(missing),
+                diagnostic=f"{source} does not exist: {executable}",
                 remediation=_LINUX_MISSING_REMEDIATION,
             )
-        return None
+            return None
+
+        failure = _probe(executable)
+        if failure is not None:
+            log_unavailable(
+                diagnostic=f"{source} ({executable}) probe failed: {failure}",
+                remediation=_LINUX_NAMESPACE_REMEDIATION,
+            )
+            return None
+
+        return LinuxClient(executable=executable)
 
     def build_argv(
         self,
@@ -180,21 +168,6 @@ class LinuxClient:
             ]
         )
         return argv
-
-
-def _candidates() -> list[_Candidate]:
-    """Build the ordered list of bwrap candidates from env, PATH, and ``bubblewrap-bin``."""
-    out: list[_Candidate] = []
-    env_path = os.environ.get(HALO_BWRAP_ENV_VAR)
-    if env_path:
-        out.append(_Candidate(executable=Path(env_path), source=f"{HALO_BWRAP_ENV_VAR} override"))
-    system_bwrap = shutil.which("bwrap")
-    if system_bwrap is not None:
-        out.append(_Candidate(executable=Path(system_bwrap), source="system PATH"))
-    packaged = _packaged_bwrap()
-    if packaged is not None:
-        out.append(_Candidate(executable=packaged, source="bubblewrap-bin package"))
-    return out
 
 
 def _packaged_bwrap() -> Path | None:
