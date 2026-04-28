@@ -127,8 +127,9 @@ async def probe_invocation_returns_subagent_result_json() -> None:
         semaphores_by_depth=semaphore,
         parent_execution=root,
     )
-    ctx = _make_fake_tool_ctx(tool_call_id="parent-call-aaaa", tool_arguments="what is the answer?")
-    result_json = await subagent_tool.on_invoke_tool(ctx, "what is the answer?")
+    raw_args = json.dumps({"input": "what is the answer?"})
+    ctx = _make_fake_tool_ctx(tool_call_id="parent-call-aaaa", tool_arguments=raw_args)
+    result_json = await subagent_tool.on_invoke_tool(ctx, raw_args)
     parsed = json.loads(result_json)
 
     check(
@@ -170,7 +171,7 @@ async def probe_child_execution_registered_with_correct_metadata() -> None:
         parent_execution=root,
     )
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-bbbb")
-    await subagent_tool.on_invoke_tool(ctx, "delegate this")
+    await subagent_tool.on_invoke_tool(ctx, json.dumps({"input": "delegate this"}))
 
     children = [ex for aid, ex in state.executions_by_agent_id.items() if aid.startswith("sub-")]
     check(
@@ -225,7 +226,7 @@ async def probe_child_emits_items_at_depth_1() -> None:
         parent_execution=root,
     )
     ctx = _make_fake_tool_ctx(tool_call_id="parent-call-cccc")
-    await subagent_tool.on_invoke_tool(ctx, "ask the child")
+    await subagent_tool.on_invoke_tool(ctx, json.dumps({"input": "ask the child"}))
     events = await _drain_bus(state)
 
     depth_one_items = [ev for ev in events if isinstance(ev, AgentOutputItem) and ev.depth == 1]
@@ -278,7 +279,7 @@ async def probe_depth_guard_raises_before_any_sdk_call() -> None:
     )
 
     exc = await check_raises(
-        lambda: over_depth_tool.on_invoke_tool(None, "should not run"),
+        lambda: over_depth_tool.on_invoke_tool(None, json.dumps({"input": "should not run"})),
         EngineMaxDepthExceededError,
     )
     check(

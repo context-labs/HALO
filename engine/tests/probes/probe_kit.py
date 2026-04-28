@@ -31,6 +31,7 @@ from typing import Any
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
 
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_context import AgentContext
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.runner_protocol import RunnerProtocol
@@ -224,6 +225,25 @@ def make_default_config(
 def make_default_messages(content: str = "Probe.") -> list[AgentMessage]:
     """One user message; the engine prepends its own root system prompt."""
     return [AgentMessage(role="user", content=content)]
+
+
+def make_root_context(
+    cfg: EngineConfig,
+    *,
+    messages: list[AgentMessage] | None = None,
+) -> AgentContext:
+    """Build a root ``AgentContext`` the way ``stream_engine_async`` does.
+
+    Probes that bypass ``stream_engine_async`` to call ``build_root_sdk_agent``
+    or ``_child_tools_for_depth`` directly need an ``AgentContext`` to pass
+    through. Going through ``AgentContext.from_input_messages`` keeps the
+    probe consistent with production: same compaction settings, same root
+    system-prompt prepending. Defaults to ``make_default_messages()``.
+    """
+    return AgentContext.from_input_messages(
+        messages=messages or make_default_messages(),
+        engine_config=cfg,
+    )
 
 
 # --- Trace fixture isolation -------------------------------------------------
