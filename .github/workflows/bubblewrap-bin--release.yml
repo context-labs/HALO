@@ -28,11 +28,11 @@ env:
   BWRAP_SHA256: "988fd6b232dafa04b8b8198723efeaccdb3c6aa9c1c7936219d5791a8b7a8646"
   CI_BOT_GITHUB_APP_ID: "1281730"
 
-  INFISICAL_IDENTITY_ID: "46f034e9-14e7-49ad-b3f7-f0d8ad8a989f" # Github-Ci
+  INFISICAL_IDENTITY_ID: "dc1d9282-7640-471d-bc3e-926297a5ef85" # halo-github-ci
 
 permissions:
-  contents: write
-  id-token: write # Required for OIDC-based Infisical auth
+  contents: write # tag-and-push pushes the version commit + tag
+  id-token: write # Required for OIDC-based Infisical auth and PyPI trusted publishing
 
 jobs:
   checks:
@@ -44,36 +44,13 @@ jobs:
     name: Bump Version
     needs: [checks]
     runs-on: depot-ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write # Required for OIDC-based Infisical auth
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
     defaults:
       run:
         working-directory: bubblewrap-bin
     steps:
-      - name: Load Infisical secrets
-        uses: Infisical/secrets-action@v1.0.15
-        with:
-          method: "oidc"
-          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
-          project-slug: "monorepo"
-          env-slug: "dev"
-          secret-path: "/ci"
-          include-imports: true
-
-      - name: Mint CI Bot token
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ env.CI_BOT_GITHUB_APP_ID }}
-          private-key: ${{ env.CI_BOT_GITHUB_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -91,19 +68,6 @@ jobs:
           NEW_VERSION=$(uv version --bump "${{ inputs.semver_action }}" --short --no-sync)
           echo "Bumped bubblewrap-bin version to ${NEW_VERSION}"
           echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Commit, tag, and push version bump
-        if: ${{ inputs.dry_run == false }}
-        env:
-          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
-        run: |
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add pyproject.toml
-          git commit -m "Release bubblewrap-bin v${NEW_VERSION}"
-          git tag "bubblewrap-bin-v${NEW_VERSION}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "bubblewrap-bin-v${NEW_VERSION}"
 
       - name: Upload bumped manifest
         uses: actions/upload-artifact@v4
@@ -274,9 +238,61 @@ jobs:
       - name: Publish to PyPI
         run: uv publish --trusted-publishing always
 
+  tag-and-push:
+    name: Tag & Push Version Bump
+    needs: [bump-version, publish]
+    if: ${{ inputs.dry_run == false }}
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for OIDC-based Infisical auth
+    defaults:
+      run:
+        working-directory: bubblewrap-bin
+    steps:
+      - name: Load Infisical secrets
+        uses: Infisical/secrets-action@v1.0.15
+        with:
+          method: "oidc"
+          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
+          project-slug: "halo"
+          env-slug: "dev"
+          secret-path: "/ci"
+          include-imports: true
+
+      - name: Mint CI Bot token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ env.CI_BOT_GITHUB_APP_ID }}
+          private-key: ${{ env.CI_BOT_GITHUB_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download bumped manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: bubblewrap-bin-release-manifests
+          path: bubblewrap-bin/
+
+      - name: Commit, tag, and push version bump
+        env:
+          NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add pyproject.toml
+          git commit -m "Release bubblewrap-bin v${NEW_VERSION}"
+          git tag "bubblewrap-bin-v${NEW_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "bubblewrap-bin-v${NEW_VERSION}"
+
   summary:
     name: Release Summary
-    needs: [checks, bump-version, build-linux-wheel, build-sdist, publish]
+    needs: [checks, bump-version, build-linux-wheel, build-sdist, publish, tag-and-push]
     if: always()
     runs-on: depot-ubuntu-latest
     steps:
@@ -291,6 +307,7 @@ jobs:
           BUILD_LINUX_RESULT: ${{ needs.build-linux-wheel.result }}
           BUILD_SDIST_RESULT: ${{ needs.build-sdist.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          TAG_PUSH_RESULT: ${{ needs.tag-and-push.result }}
         run: |
           {
             echo "## bubblewrap-bin Release Summary"
@@ -305,4 +322,5 @@ jobs:
             echo "**Linux Wheel Build:** ${BUILD_LINUX_RESULT}"
             echo "**Sdist Build:**       ${BUILD_SDIST_RESULT}"
             echo "**Publish:**           ${PUBLISH_RESULT}"
+            echo "**Tag & Push:**        ${TAG_PUSH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"

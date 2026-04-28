@@ -29,9 +29,9 @@ env:
   INFISICAL_IDENTITY_ID: "dc1d9282-7640-471d-bc3e-926297a5ef85" # halo-github-ci
 
 permissions:
-  contents: write # bump-version pushes the version commit + tag
+  contents: write # tag-and-push pushes the version commit + tag
   checks: write # called workflows publish JUnit reports via checks API
-  id-token: write # Required for OIDC-based Infisical auth
+  id-token: write # Required for OIDC-based Infisical auth and PyPI trusted publishing
 
 jobs:
   lint-format-typecheck:
@@ -65,36 +65,13 @@ jobs:
     name: Bump Version
     needs: [e2e-tests]
     runs-on: depot-ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write # Required for OIDC-based Infisical auth
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
     defaults:
       run:
         working-directory: engine
     steps:
-      - name: Load Infisical secrets
-        uses: Infisical/secrets-action@v1.0.15
-        with:
-          method: "oidc"
-          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
-          project-slug: "halo"
-          env-slug: "dev"
-          secret-path: "/ci"
-          include-imports: true
-
-      - name: Mint CI Bot token
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ env.CI_BOT_GITHUB_APP_ID }}
-          private-key: ${{ env.CI_BOT_GITHUB_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -118,19 +95,6 @@ jobs:
           # skips the lock refresh — without this, the release commit
           # would push a uv.lock that lags pyproject.toml.
           uv lock
-
-      - name: Commit, tag, and push version bump
-        if: ${{ inputs.dry_run == false }}
-        env:
-          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
-        run: |
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add pyproject.toml uv.lock
-          git commit -m "Release engine v${NEW_VERSION}"
-          git tag "engine-v${NEW_VERSION}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "engine-v${NEW_VERSION}"
 
       - name: Upload bumped manifests
         uses: actions/upload-artifact@v4
@@ -215,6 +179,58 @@ jobs:
       - name: Publish to PyPI
         run: uv publish --trusted-publishing always
 
+  tag-and-push:
+    name: Tag & Push Version Bump
+    needs: [bump-version, publish]
+    if: ${{ inputs.dry_run == false }}
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for OIDC-based Infisical auth
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - name: Load Infisical secrets
+        uses: Infisical/secrets-action@v1.0.15
+        with:
+          method: "oidc"
+          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
+          project-slug: "halo"
+          env-slug: "dev"
+          secret-path: "/ci"
+          include-imports: true
+
+      - name: Mint CI Bot token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ env.CI_BOT_GITHUB_APP_ID }}
+          private-key: ${{ env.CI_BOT_GITHUB_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download bumped manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-release-manifests
+          path: engine/
+
+      - name: Commit, tag, and push version bump
+        env:
+          NEW_VERSION: ${{ needs.bump-version.outputs.new_version }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add pyproject.toml uv.lock
+          git commit -m "Release engine v${NEW_VERSION}"
+          git tag "engine-v${NEW_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "engine-v${NEW_VERSION}"
+
   summary:
     name: Release Summary
     needs:
@@ -226,6 +242,7 @@ jobs:
       - bump-version
       - build
       - publish
+      - tag-and-push
     if: always()
     runs-on: depot-ubuntu-latest
     steps:
@@ -242,6 +259,7 @@ jobs:
           BUMP_RESULT: ${{ needs.bump-version.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          TAG_PUSH_RESULT: ${{ needs.tag-and-push.result }}
         run: |
           {
             echo "## Engine Release Summary"
@@ -258,4 +276,5 @@ jobs:
             echo "**Version Bump:**           ${BUMP_RESULT}"
             echo "**Build:**                  ${BUILD_RESULT}"
             echo "**Publish:**                ${PUBLISH_RESULT}"
+            echo "**Tag & Push:**             ${TAG_PUSH_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
