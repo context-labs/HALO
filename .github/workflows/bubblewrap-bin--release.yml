@@ -26,9 +26,13 @@ env:
   PYTHON_VERSION: "3.12"
   BWRAP_VERSION: "0.11.0"
   BWRAP_SHA256: "988fd6b232dafa04b8b8198723efeaccdb3c6aa9c1c7936219d5791a8b7a8646"
+  CI_BOT_GITHUB_APP_ID: "1281730"
+
+  INFISICAL_IDENTITY_ID: "46f034e9-14e7-49ad-b3f7-f0d8ad8a989f" # Github-Ci
 
 permissions:
   contents: write
+  id-token: write # Required for OIDC-based Infisical auth
 
 jobs:
   checks:
@@ -42,16 +46,34 @@ jobs:
     runs-on: depot-ubuntu-latest
     permissions:
       contents: write
+      id-token: write # Required for OIDC-based Infisical auth
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
     defaults:
       run:
         working-directory: bubblewrap-bin
     steps:
+      - name: Load Infisical secrets
+        uses: Infisical/secrets-action@v1.0.15
+        with:
+          method: "oidc"
+          identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
+          project-slug: "monorepo"
+          env-slug: "dev"
+          secret-path: "/ci"
+          include-imports: true
+
+      - name: Mint CI Bot token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ env.CI_BOT_GITHUB_APP_ID }}
+          private-key: ${{ env.CI_BOT_GITHUB_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
