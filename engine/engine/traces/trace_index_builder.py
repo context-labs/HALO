@@ -67,6 +67,30 @@ class _RowAccumulator:
         if isinstance(proj, str) and self.project_id is None:
             self.project_id = proj
 
+    def merge_in(self, other: _RowAccumulator) -> None:
+        """Fold ``other`` into ``self`` for the same trace_id; caller iterates partials in file order."""
+        self.byte_offsets.extend(other.byte_offsets)
+        self.byte_lengths.extend(other.byte_lengths)
+        self.span_count += other.span_count
+
+        if not self.start_time or (other.start_time and other.start_time < self.start_time):
+            self.start_time = other.start_time
+        if not self.end_time or other.end_time > self.end_time:
+            self.end_time = other.end_time
+
+        if other.has_errors:
+            self.has_errors = True
+
+        self.service_names |= other.service_names
+        self.model_names |= other.model_names
+        self.agent_names |= other.agent_names
+
+        self.total_input_tokens += other.total_input_tokens
+        self.total_output_tokens += other.total_output_tokens
+
+        if self.project_id is None:
+            self.project_id = other.project_id
+
     def finalize(self) -> TraceIndexRow:
         """Snapshot the accumulated state into the immutable TraceIndexRow that gets written to the sidecar."""
         return TraceIndexRow(
