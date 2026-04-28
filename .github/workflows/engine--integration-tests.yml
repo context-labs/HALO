@@ -1,18 +1,25 @@
 name: "[Engine] Integration Tests"
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine--integration-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine--integration-tests.yml"
   workflow_dispatch:
   workflow_call:
-    secrets:
-      INFISICAL_CLIENT_ID:
-        required: true
-      INFISICAL_CLIENT_SECRET:
-        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: "3.12"
-  INFISICAL_CLI_VERSION: "0.41.2"
-  INFISICAL_PROJECT_ID: "822ab0ec-ad72-4b7d-9f49-93b43be4eda0"
 
 permissions:
   checks: write
@@ -22,7 +29,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: depot-ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: engine
@@ -47,28 +54,10 @@ jobs:
         with:
           version: 3.x
 
-      - name: Install Infisical CLI
-        run: |
-          curl -fsSL "https://github.com/Infisical/infisical/releases/download/infisical-cli%2Fv${INFISICAL_CLI_VERSION}/infisical_${INFISICAL_CLI_VERSION}_linux_amd64.deb" -o /tmp/infisical.deb
-          sudo dpkg -i /tmp/infisical.deb
-          rm /tmp/infisical.deb
-
       - name: Install engine dependencies
         run: task ci:setup
 
-      - name: Authenticate Infisical
-        env:
-          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
-          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-        run: |
-          TOKEN=$(infisical login --method=universal-auth \
-            --client-id="$INFISICAL_CLIENT_ID" \
-            --client-secret="$INFISICAL_CLIENT_SECRET" \
-            --silent --plain)
-          echo "::add-mask::$TOKEN"
-          echo "INFISICAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-
-      - name: Run integration tests
+      - name: Run integration tests (excludes ``-m live``)
         run: task test:integration
 
       - name: Publish Test Report

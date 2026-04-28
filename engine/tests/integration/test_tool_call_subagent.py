@@ -28,6 +28,7 @@ from tests.integration.tool_isolation_kit import (
 )
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_call_subagent_through_sdk_adapter_live(tmp_path: Path, fixtures_dir: Path) -> None:
     if not os.environ.get("OPENAI_API_KEY"):
