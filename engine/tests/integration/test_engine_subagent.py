@@ -19,7 +19,7 @@ from engine.tools.subagent_tool_factory import _build_subagent_as_tool
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
-from tests.unit.agents._sdk_events import assistant_message_event
+from tests._sdk_events import assistant_message_event
 
 
 class _FakeStream:

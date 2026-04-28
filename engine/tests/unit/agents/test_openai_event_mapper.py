@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.openai_event_mapper import OpenAiEventMapper
-from tests.unit.agents._sdk_events import (
+from tests._sdk_events import (
     assistant_message_event,
     text_delta_event,
     tool_call_event,

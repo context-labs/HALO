@@ -21,7 +21,7 @@ from engine.tools.subagent_tool_factory import (
     build_subagent_semaphores,
 )
 from engine.traces.trace_store import TraceStore
-from tests.unit.agents._sdk_events import assistant_message_event, tool_call_event
+from tests._sdk_events import assistant_message_event, tool_call_event
 
 
 def _engine_config(max_depth: int) -> EngineConfig:
