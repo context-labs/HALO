@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from engine.sandbox.pyodide_client import PyodideClient
-from engine.sandbox.sandbox import resolve_sandbox
+from engine.sandbox.sandbox import Sandbox
 
 
-def test_resolve_sandbox_returns_working_pyodide_client() -> None:
+def test_sandbox_resolve_returns_working_sandbox() -> None:
     """End-to-end probe must succeed; failure here is a release blocker.
 
     A successful resolve means: Deno is on PATH, the Pyodide npm package
@@ -16,10 +15,11 @@ def test_resolve_sandbox_returns_working_pyodide_client() -> None:
     permissions and ``run_code`` would silently disappear from the agent
     surface — exactly the kind of release blocker we want to catch in CI.
     """
-    sandbox = resolve_sandbox()
+    sandbox = Sandbox.resolve()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 
-    assert isinstance(sandbox.client, PyodideClient)
-    assert sandbox.client.deno_executable.is_file()
-    assert sandbox.client.assets.runner_path.is_file()
+    assert sandbox.deno_executable.is_file()
+    assert sandbox.runner_path.is_file()
+    assert sandbox.runtime_path.is_file()
+    assert sandbox.trace_compat_path.is_file()

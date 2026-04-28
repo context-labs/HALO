@@ -5,11 +5,19 @@ from pathlib import Path
 import pytest
 
 from engine.sandbox import sandbox as sandbox_module
-from engine.sandbox.pyodide_client import PyodideAssets, PyodideClient
-from engine.sandbox.sandbox import Sandbox, resolve_sandbox
+from engine.sandbox.models import CodeExecutionResult
+from engine.sandbox.sandbox import Sandbox
 
 
-def _fake_assets(tmp_path: Path) -> PyodideAssets:
+def _fake_sandbox(tmp_path: Path) -> Sandbox:
+    """Build a ``Sandbox`` with stub paths for argv-shape tests.
+
+    Bypasses the discovery path: tests at this level care about
+    ``run_python`` plumbing, not Deno detection. The actual subprocess
+    is replaced by stubbing ``_run_session`` in the test bodies.
+    """
+    deno = tmp_path / "deno"
+    deno.write_text("")
     runner = tmp_path / "runner.js"
     runner.write_text("// stub")
     runtime = tmp_path / "pyodide_runtime.py"
@@ -18,56 +26,43 @@ def _fake_assets(tmp_path: Path) -> PyodideAssets:
     trace_compat.write_text("# stub")
     deno_dir = tmp_path / "deno-cache"
     deno_dir.mkdir()
-    pyodide_dir = deno_dir / "npm" / "pyodide" / "0.29.3"
-    pyodide_dir.mkdir(parents=True)
-    return PyodideAssets(
+    return Sandbox(
+        deno_executable=deno,
         runner_path=runner,
         runtime_path=runtime,
         trace_compat_path=trace_compat,
         deno_dir=deno_dir,
-        pyodide_npm_dir=pyodide_dir,
     )
 
 
-# -- resolve_sandbox -----------------------------------------------------------
+# -- Sandbox.resolve -----------------------------------------------------------
 
 
-def test_resolve_sandbox_returns_none_when_client_resolve_returns_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``resolve_sandbox`` propagates ``None`` from the client without inspecting why.
+def test_resolve_returns_none_when_deno_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No Deno on PATH or via the PyPI dep → ``Sandbox.resolve`` returns ``None``.
 
-    The Pyodide client emits its own remediation warning before returning
-    ``None``. This test only checks that ``resolve_sandbox`` does not
-    fabricate a ``Sandbox`` when the client bails out.
+    Discovery emits its own remediation warning before bailing out;
+    ``Sandbox.resolve`` just propagates the ``None`` so callers can
+    silently drop ``run_code`` from the agent surface.
     """
-    monkeypatch.setattr(PyodideClient, "resolve", staticmethod(lambda: None))
-    assert resolve_sandbox() is None
+    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: None)
+    assert Sandbox.resolve() is None
 
 
-def test_resolve_sandbox_returns_sandbox_when_client_resolves(
+def test_resolve_returns_none_when_required_file_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """If runner.js or its sibling .py files vanish, resolve must refuse to fabricate a Sandbox."""
     deno = tmp_path / "deno"
     deno.write_text("")
-    assets = _fake_assets(tmp_path)
-    client = PyodideClient(deno_executable=deno, assets=assets)
-
-    monkeypatch.setattr(PyodideClient, "resolve", staticmethod(lambda: client))
-
-    sandbox = resolve_sandbox()
-
-    assert sandbox is not None
-    assert sandbox.client is client
+    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: deno)
+    # Point ``__file__``-derived parent at an empty dir so the required
+    # sibling files don't exist relative to it.
+    monkeypatch.setattr(sandbox_module, "__file__", str(tmp_path / "sandbox.py"))
+    assert Sandbox.resolve() is None
 
 
-# Compat-shim-missing case is now caught in ``_resolve_assets`` (one of
-# three required sandbox files); see test_pyodide_client.py for that
-# coverage. ``resolve_sandbox`` here trusts the client's ``None`` return
-# without inspecting why.
-
-
-# -- Sandbox.run_python: argv + mount routing ---------------------------------
+# -- Sandbox.run_python: argv shape -------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -76,17 +71,12 @@ async def test_run_python_includes_trace_and_index_in_allow_read(
 ) -> None:
     """``run_python`` adds the trace + index files to ``--allow-read``.
 
-    Permissions are scoped per-call: the runner script and Deno cache are
-    constants, but the trace/index files are caller-supplied. Both must
-    appear in the resolved Deno argv so the runner can read them once at
-    mount time.
+    Permissions are scoped per-call: the runner script and Deno cache
+    are constants, but the trace/index files are caller-supplied. Both
+    must appear in the resolved Deno argv so the runner can read them
+    once at mount time.
     """
-    deno = tmp_path / "deno"
-    deno.write_text("")
-    assets = _fake_assets(tmp_path)
-    client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, timeout_seconds=5.0)
-
+    sandbox = _fake_sandbox(tmp_path)
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
     index = tmp_path / "i.jsonl"
@@ -94,16 +84,11 @@ async def test_run_python_includes_trace_and_index_in_allow_read(
 
     captured: dict[str, list[str]] = {}
 
-    class _StubSession:
-        def __init__(self, *, argv, **_kwargs):
-            captured["argv"] = list(argv)
+    async def _stub_run_session(*, argv, **_kwargs):
+        captured["argv"] = list(argv)
+        return CodeExecutionResult(exit_code=0, stdout="ok", stderr="", timed_out=False)
 
-        async def run(self, **_kwargs):
-            from engine.sandbox.pyodide_client import _ExecutionOutcome
-
-            return _ExecutionOutcome(exit_code=0, stdout="ok", stderr="", timed_out=False)
-
-    monkeypatch.setattr(sandbox_module, "_RunnerSession", _StubSession)
+    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 0
@@ -125,12 +110,7 @@ async def test_run_python_does_not_pass_unsafe_flags(
     (network, host writes, host env vars, subprocess spawn). A regression
     that adds any of them silently weakens the sandbox.
     """
-    deno = tmp_path / "deno"
-    deno.write_text("")
-    assets = _fake_assets(tmp_path)
-    client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, timeout_seconds=5.0)
-
+    sandbox = _fake_sandbox(tmp_path)
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
     index = tmp_path / "i.jsonl"
@@ -138,16 +118,11 @@ async def test_run_python_does_not_pass_unsafe_flags(
 
     captured: dict[str, list[str]] = {}
 
-    class _StubSession:
-        def __init__(self, *, argv, **_kwargs):
-            captured["argv"] = list(argv)
+    async def _stub_run_session(*, argv, **_kwargs):
+        captured["argv"] = list(argv)
+        return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
 
-        async def run(self, **_kwargs):
-            from engine.sandbox.pyodide_client import _ExecutionOutcome
-
-            return _ExecutionOutcome(exit_code=0, stdout="", stderr="", timed_out=False)
-
-    monkeypatch.setattr(sandbox_module, "_RunnerSession", _StubSession)
+    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
 
     await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     forbidden = ("--allow-net", "--allow-write", "--allow-env", "--allow-run", "--allow-all")
@@ -158,39 +133,27 @@ async def test_run_python_does_not_pass_unsafe_flags(
 
 
 @pytest.mark.asyncio
-async def test_run_python_translates_runner_outcome_to_result(
+async def test_run_python_returns_runner_result_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A runner outcome with ``timed_out`` and a non-zero exit must round-trip into ``CodeExecutionResult``."""
-    deno = tmp_path / "deno"
-    deno.write_text("")
-    assets = _fake_assets(tmp_path)
-    client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, timeout_seconds=5.0)
-
+    """A runner result with ``timed_out`` and a non-zero exit must round-trip unchanged."""
+    sandbox = _fake_sandbox(tmp_path)
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
     index = tmp_path / "i.jsonl"
     index.write_text("")
 
-    class _StubSession:
-        def __init__(self, **_kwargs):
-            pass
+    expected = CodeExecutionResult(
+        exit_code=137,
+        stdout="partial",
+        stderr="boom",
+        timed_out=True,
+    )
 
-        async def run(self, **_kwargs):
-            from engine.sandbox.pyodide_client import _ExecutionOutcome
+    async def _stub_run_session(**_kwargs):
+        return expected
 
-            return _ExecutionOutcome(
-                exit_code=137,
-                stdout="partial",
-                stderr="boom",
-                timed_out=True,
-            )
-
-    monkeypatch.setattr(sandbox_module, "_RunnerSession", _StubSession)
+    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
-    assert result.exit_code == 137
-    assert result.stdout == "partial"
-    assert result.stderr == "boom"
-    assert result.timed_out is True
+    assert result == expected

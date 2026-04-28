@@ -15,7 +15,7 @@ from engine.agents.runner_protocol import RunnerProtocol
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
-from engine.sandbox.sandbox import resolve_sandbox
+from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
@@ -40,7 +40,7 @@ async def stream_engine_async(
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
     """
     configure_default_sdk_client(engine_config.model_provider)
-    sandbox = resolve_sandbox(timeout_seconds=engine_config.sandbox_timeout_seconds)
+    sandbox = Sandbox.resolve()
 
     # TODO: ensure_index_exists could return the trace itself so we dont need to re load it from file in TraceStore.load
     index_path = await TraceIndexBuilder.ensure_index_exists(

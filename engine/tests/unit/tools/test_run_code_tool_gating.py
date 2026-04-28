@@ -11,7 +11,6 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.sandbox.pyodide_client import PyodideAssets, PyodideClient
 from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
 
@@ -56,6 +55,7 @@ def _semaphores() -> dict[int, asyncio.Semaphore]:
 
 
 def _sandbox(tmp_path: Path) -> Sandbox:
+    """Stub Sandbox: this test only checks tool registration, never invokes the sandbox."""
     deno = tmp_path / "deno"
     deno.write_text("")
     runner = tmp_path / "runner.js"
@@ -66,18 +66,12 @@ def _sandbox(tmp_path: Path) -> Sandbox:
     trace_compat.write_text("")
     deno_dir = tmp_path / "deno-cache"
     deno_dir.mkdir()
-    pyodide_dir = tmp_path / "pyodide"
-    pyodide_dir.mkdir()
-    assets = PyodideAssets(
+    return Sandbox(
+        deno_executable=deno,
         runner_path=runner,
         runtime_path=runtime,
         trace_compat_path=trace_compat,
         deno_dir=deno_dir,
-        pyodide_npm_dir=pyodide_dir,
-    )
-    return Sandbox(
-        client=PyodideClient(deno_executable=deno, assets=assets),
-        timeout_seconds=10.0,
     )
 
 
