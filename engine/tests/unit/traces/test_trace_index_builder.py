@@ -262,3 +262,42 @@ def test_index_line_offsets_handles_missing_trailing_newline(tmp_path: Path) -> 
 
     offsets = _index_line_offsets(trace_path)
     assert offsets == [(0, 8), (8, 7)]
+
+
+def test_split_into_chunks_even_division() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(i, 1) for i in range(8)]
+    chunks = _split_into_chunks(items, 4)
+    assert chunks == [
+        [(0, 1), (1, 1)],
+        [(2, 1), (3, 1)],
+        [(4, 1), (5, 1)],
+        [(6, 1), (7, 1)],
+    ]
+
+
+def test_split_into_chunks_uneven_division_keeps_order() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(i, 1) for i in range(10)]
+    chunks = _split_into_chunks(items, 3)
+    flat = [t for c in chunks for t in c]
+    assert flat == items
+    assert all(len(c) > 0 for c in chunks)
+    assert sum(len(c) for c in chunks) == 10
+
+
+def test_split_into_chunks_caps_n_at_list_length() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(0, 1), (1, 1)]
+    chunks = _split_into_chunks(items, 8)
+    assert len(chunks) == 2
+    assert chunks == [[(0, 1)], [(1, 1)]]
+
+
+def test_split_into_chunks_empty_input_returns_empty_list() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    assert _split_into_chunks([], 4) == []
