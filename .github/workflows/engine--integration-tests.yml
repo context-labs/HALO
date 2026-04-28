@@ -121,18 +121,18 @@ jobs:
       - name: Install engine dependencies
         run: task ci:setup
 
-      - name: Allow unprivileged user namespaces to configure loopback
-        # Ubuntu 24.04 ships an AppArmor restriction that blocks
-        # unprivileged user namespaces from doing things like configuring
-        # the loopback interface inside a ``--unshare-net`` sandbox. Our
-        # sandbox stays fully locked down (still --unshare-all + --unshare-net,
-        # still no host network), but bwrap needs to be allowed to bring up
-        # ``lo`` inside its own namespace. Both sysctls only relax policy
-        # *for sandboxes the runner spawns* and have no effect outside the
-        # job. Tolerate missing keys so older Ubuntu releases don't fail.
+      - name: Install system bubblewrap
+        # Use the distro-shipped bwrap rather than the bundled
+        # bubblewrap-bin binary on Ubuntu 24.04 runners. The system package
+        # ships the AppArmor profile required for unprivileged user
+        # namespaces to configure loopback inside ``--unshare-net``
+        # sandboxes; the bundled binary doesn't. ``LinuxClient.resolve()``
+        # prefers system PATH over the packaged binary, so this is enough
+        # to exercise the supported "user runs ``apt install bubblewrap``"
+        # path end-to-end.
         run: |
-          sudo sysctl --write kernel.unprivileged_userns_clone=1 2>/dev/null || true
-          sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --no-install-recommends bubblewrap
 
       - name: Run Linux sandbox integration tests
         run: task test:integration-linux
