@@ -103,8 +103,6 @@ def _child_tools_for_depth(
     ``get_context_item`` can look up that agent's stored items.
     """
     engine_config = run_state.config
-    runtime_mounts = run_state.runtime_mounts
-    run_code_available = run_state.sandbox_status.available and runtime_mounts is not None
 
     # TODO: Simplify passing in callback funcs. Maybe we can pass in the run_state directly and let to_sdk_function_tool set everything up.
     def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
@@ -131,13 +129,12 @@ def _child_tools_for_depth(
         ),
     ]
 
-    if run_code_available and runtime_mounts is not None:
+    if run_state.sandbox is not None:
         leaf_tools.append(
             to_sdk_function_tool(
                 RunCodeTool(
                     sandbox_config=engine_config.sandbox,
-                    sandbox_status=run_state.sandbox_status,
-                    runtime_mounts=runtime_mounts,
+                    sandbox=run_state.sandbox,
                 ),
                 context_factory=make_ctx,
             )
@@ -175,8 +172,6 @@ def _build_subagent_as_tool(
         depth=child_depth,
         maximum_depth=engine_config.maximum_depth,
         maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
-        run_code_available=run_state.sandbox_status.available
-        and run_state.runtime_mounts is not None,
     )
     # ``as_tool()``'s schema is fixed (``AgentAsToolInput`` shape) and does not
     # depend on the wrapped agent's tool list, so this stub Agent is enough to

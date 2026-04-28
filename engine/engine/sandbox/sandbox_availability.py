@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import shutil
 import subprocess
+import sys
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from engine.sandbox.runtime_mounts import PythonRuntimeMounts, discover_python_runtime_mounts
 
 
 class SandboxBackend(str, Enum):
@@ -22,62 +25,19 @@ class SandboxBackend(str, Enum):
     LINUX_BWRAP_PACKAGED = "linux-bwrap-packaged"
 
 
-class SandboxUnavailableReason(str, Enum):
-    """Why ``run_code`` cannot run; drives the user-facing remediation text."""
+@dataclass(frozen=True)
+class SandboxRuntime:
+    """A fully-resolved sandbox: backend, executable, and the Python runtime mount manifest.
 
-    UNSUPPORTED_PLATFORM = "unsupported-platform"
-    MISSING_BACKEND = "missing-backend"
-    NAMESPACE_DENIED = "namespace-denied"
-    PROBE_FAILED = "probe-failed"
-
-
-class SandboxStatus(BaseModel):
-    """Result of probing the host for a working sandbox backend.
-
-    A status either resolves to a usable backend with an executable, or to a
-    typed unavailability reason with diagnostic + remediation text. Engine
-    startup uses this to decide whether to register the ``run_code`` tool and
-    what to print in the unavailability warning.
+    The presence of a ``SandboxRuntime`` is the single signal that ``run_code``
+    is usable for a run. Engine code stores ``SandboxRuntime | None`` and
+    treats ``None`` as "sandbox unavailable" — there is no half-initialized
+    state where the backend is known but mounts are missing.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    available: bool
-    backend: SandboxBackend | None
-    executable: Path | None
-    reason: SandboxUnavailableReason | None
-    diagnostic: str
-    remediation: str
-
-    @classmethod
-    def ok(cls, *, backend: SandboxBackend, executable: Path) -> "SandboxStatus":
-        """Build a status for a successfully-probed backend."""
-        return cls(
-            available=True,
-            backend=backend,
-            executable=executable,
-            reason=None,
-            diagnostic="",
-            remediation="",
-        )
-
-    @classmethod
-    def unavailable(
-        cls,
-        *,
-        reason: SandboxUnavailableReason,
-        diagnostic: str,
-        remediation: str,
-    ) -> "SandboxStatus":
-        """Build a status describing why no backend resolved."""
-        return cls(
-            available=False,
-            backend=None,
-            executable=None,
-            reason=reason,
-            diagnostic=diagnostic,
-            remediation=remediation,
-        )
+    backend: SandboxBackend
+    executable: Path
+    runtime_mounts: PythonRuntimeMounts
 
 
 HALO_BWRAP_ENV_VAR = "HALO_BWRAP_PATH"
@@ -100,38 +60,56 @@ _PROBE_INFO_FD_MARKER = b'"child-pid"'
 _PROBE_TIMEOUT_SECONDS = 5.0
 
 
-def resolve_sandbox_status() -> SandboxStatus:
-    """Resolve the sandbox backend for the current host.
+_logger = logging.getLogger(__name__)
 
-    Returns a status with ``available=True`` if a backend was found and probed
-    successfully, otherwise an unavailable status carrying the typed reason
-    and human-readable remediation. Never raises.
+
+def resolve_sandbox_runtime(*, python_executable: Path | None = None) -> SandboxRuntime | None:
+    """Probe the host once; return a ready ``SandboxRuntime`` or ``None``.
+
+    On unavailability, emits a multi-line warning describing the cause and
+    remediation through both ``logging`` and ``stderr`` so it is visible in
+    every common deployment (CLI, library import, container logs).
+
+    ``python_executable`` overrides the interpreter whose runtime is mounted
+    into the sandbox; ``None`` uses the active ``sys.executable``.
     """
+    runtime = _resolve(python_executable=python_executable)
+    if isinstance(runtime, SandboxRuntime):
+        return runtime
+    _emit_unavailable_warning(runtime)
+    return None
+
+
+def _resolve(*, python_executable: Path | None) -> SandboxRuntime | _SandboxUnavailable:
     system = platform.system()
     if system == "Darwin":
-        return _resolve_macos()
+        return _resolve_macos(python_executable=python_executable)
     if system == "Linux":
-        return _resolve_linux()
-    return SandboxStatus.unavailable(
-        reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
+        return _resolve_linux(python_executable=python_executable)
+    return _SandboxUnavailable(
+        reason=_Reason.UNSUPPORTED_PLATFORM,
         diagnostic=f"unsupported platform: {system}",
         remediation="run_code requires Linux (bubblewrap) or macOS (sandbox-exec).",
     )
 
 
-def _resolve_macos() -> SandboxStatus:
+def _resolve_macos(*, python_executable: Path | None) -> SandboxRuntime | _SandboxUnavailable:
     """Locate ``sandbox-exec`` on PATH; macOS ships it by default."""
     found = shutil.which("sandbox-exec")
     if found is None:
-        return SandboxStatus.unavailable(
-            reason=SandboxUnavailableReason.MISSING_BACKEND,
+        return _SandboxUnavailable(
+            reason=_Reason.MISSING_BACKEND,
             diagnostic="sandbox-exec not found on PATH",
-            remediation=("sandbox-exec ships with macOS by default. Ensure /usr/bin is on PATH."),
+            remediation="sandbox-exec ships with macOS by default. Ensure /usr/bin is on PATH.",
         )
-    return SandboxStatus.ok(backend=SandboxBackend.MACOS_SANDBOX_EXEC, executable=Path(found))
+    return SandboxRuntime(
+        backend=SandboxBackend.MACOS_SANDBOX_EXEC,
+        executable=Path(found),
+        runtime_mounts=discover_python_runtime_mounts(python_executable=python_executable),
+    )
 
 
-def _resolve_linux() -> SandboxStatus:
+def _resolve_linux(*, python_executable: Path | None) -> SandboxRuntime | _SandboxUnavailable:
     """Find a usable ``bwrap`` and verify it can create namespaces.
 
     Resolution order:
@@ -143,8 +121,7 @@ def _resolve_linux() -> SandboxStatus:
     - If no candidates are found, or every candidate path is missing on disk,
       report ``MISSING_BACKEND`` with install instructions.
     - If at least one candidate exists but its namespace probe failed, report
-      ``NAMESPACE_DENIED`` with the kernel/runtime remediation. Reaching the
-      probe means the binary is real; the failure is a host policy issue.
+      ``NAMESPACE_DENIED`` with the kernel/runtime remediation.
     """
     candidates: list[tuple[Path, SandboxBackend, str]] = []
 
@@ -163,8 +140,8 @@ def _resolve_linux() -> SandboxStatus:
         candidates.append((packaged, SandboxBackend.LINUX_BWRAP_PACKAGED, "bubblewrap-bin package"))
 
     if not candidates:
-        return SandboxStatus.unavailable(
-            reason=SandboxUnavailableReason.MISSING_BACKEND,
+        return _SandboxUnavailable(
+            reason=_Reason.MISSING_BACKEND,
             diagnostic="bubblewrap (bwrap) not found via env, PATH, or bubblewrap-bin package",
             remediation=_LINUX_MISSING_REMEDIATION,
         )
@@ -179,19 +156,23 @@ def _resolve_linux() -> SandboxStatus:
             continue
         ok, diagnostic = _probe_bwrap(executable)
         if ok:
-            return SandboxStatus.ok(backend=backend, executable=executable)
+            return SandboxRuntime(
+                backend=backend,
+                executable=executable,
+                runtime_mounts=discover_python_runtime_mounts(python_executable=python_executable),
+            )
         probe_diagnostics.append(
             f"bwrap from {source} ({executable}) failed namespace probe: {diagnostic}"
         )
 
     if probe_diagnostics:
-        return SandboxStatus.unavailable(
-            reason=SandboxUnavailableReason.NAMESPACE_DENIED,
+        return _SandboxUnavailable(
+            reason=_Reason.NAMESPACE_DENIED,
             diagnostic="\n".join(probe_diagnostics),
             remediation=_LINUX_NAMESPACE_REMEDIATION,
         )
-    return SandboxStatus.unavailable(
-        reason=SandboxUnavailableReason.MISSING_BACKEND,
+    return _SandboxUnavailable(
+        reason=_Reason.MISSING_BACKEND,
         diagnostic="\n".join(missing_diagnostics),
         remediation=_LINUX_MISSING_REMEDIATION,
     )
@@ -305,21 +286,38 @@ _LINUX_NAMESPACE_REMEDIATION = (
 )
 
 
-def render_unavailable_warning(status: SandboxStatus) -> str:
-    """Render a multi-line warning describing why ``run_code`` is disabled and how to fix it."""
-    if status.available:
-        raise ValueError("render_unavailable_warning called on an available SandboxStatus")
-    return (
+class _Reason(str, Enum):
+    """Internal reason taxonomy used only to compose the unavailability warning."""
+
+    UNSUPPORTED_PLATFORM = "unsupported-platform"
+    MISSING_BACKEND = "missing-backend"
+    NAMESPACE_DENIED = "namespace-denied"
+
+
+@dataclass(frozen=True)
+class _SandboxUnavailable:
+    """Internal carrier for the unavailability warning text; never escapes the module."""
+
+    reason: _Reason
+    diagnostic: str
+    remediation: str
+
+
+def _emit_unavailable_warning(unavailable: _SandboxUnavailable) -> None:
+    """Log + print the unavailability warning so it shows up everywhere users look."""
+    warning = (
         "HALO run_code disabled: sandbox unavailable.\n"
         "\n"
-        f"Reason ({status.reason.value if status.reason else 'unknown'}):\n"
-        f"  {status.diagnostic}\n"
+        f"Reason ({unavailable.reason.value}):\n"
+        f"  {unavailable.diagnostic}\n"
         "\n"
         "How to fix:\n"
-        f"{_indent(status.remediation, '  ')}\n"
+        f"{_indent(unavailable.remediation, '  ')}\n"
         "\n"
         "The engine will continue without exposing run_code to the agent."
     )
+    _logger.warning("\n%s", warning)
+    print(warning, file=sys.stderr, flush=True)
 
 
 def _indent(text: str, prefix: str) -> str:

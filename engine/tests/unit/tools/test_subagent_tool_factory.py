@@ -15,7 +15,6 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.sandbox.sandbox_availability import SandboxStatus, SandboxUnavailableReason
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.subagent_tool_factory import (
     _build_subagent_as_tool,
@@ -69,21 +68,17 @@ def _fake_tool_ctx(tool_call_id: str = "parent-call-x") -> SdkToolContext:
     )
 
 
-_DISABLED_SANDBOX_STATUS = SandboxStatus.unavailable(
-    reason=SandboxUnavailableReason.UNSUPPORTED_PLATFORM,
-    diagnostic="tests skip the real sandbox",
-    remediation="this is intentional in unit tests",
-)
+def _mock_run_state(*, max_depth: int) -> MagicMock:
+    run_state = MagicMock(spec=EngineRunState)
+    run_state.config = _engine_config(max_depth=max_depth)
+    run_state.output_bus = EngineOutputBus()
+    run_state.trace_store = MagicMock()
+    run_state.sandbox = None
+    return run_state
 
 
 def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
-    cfg = _engine_config(max_depth=2)
-    run_state = MagicMock(spec=EngineRunState)
-    run_state.config = cfg
-    run_state.output_bus = EngineOutputBus()
-    run_state.trace_store = MagicMock()
-    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
-    run_state.runtime_mounts = None
+    run_state = _mock_run_state(max_depth=2)
     sem = {d: asyncio.Semaphore(1) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=2,
@@ -97,13 +92,7 @@ def test_child_tools_at_max_depth_omits_subagent_tool() -> None:
 
 
 def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
-    cfg = _engine_config(max_depth=2)
-    run_state = MagicMock(spec=EngineRunState)
-    run_state.config = cfg
-    run_state.output_bus = EngineOutputBus()
-    run_state.trace_store = MagicMock()
-    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
-    run_state.runtime_mounts = None
+    run_state = _mock_run_state(max_depth=2)
     sem = {d: asyncio.Semaphore(4) for d in range(1, 4)}
     tools = _child_tools_for_depth(
         depth=1,
@@ -129,8 +118,7 @@ async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
     run_state.runner = MagicMock()
 
@@ -150,13 +138,7 @@ async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
 async def test_get_context_item_resolves_through_wired_agent_context() -> None:
     """``make_ctx`` must populate ``ToolContext.agent_context`` so ``get_context_item``
     can resolve item ids against the calling agent's stored items."""
-    cfg = _engine_config(max_depth=2)
-    run_state = MagicMock(spec=EngineRunState)
-    run_state.config = cfg
-    run_state.output_bus = EngineOutputBus()
-    run_state.trace_store = MagicMock()
-    run_state.sandbox_status = _DISABLED_SANDBOX_STATUS
-    run_state.runtime_mounts = None
+    run_state = _mock_run_state(max_depth=2)
 
     parent_context = _fake_parent_context()
     parent_context.append(AgentContextItem(item_id="ctx-42", role="user", content="stored content"))
@@ -196,8 +178,7 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
 
     class _ExplodingRunner:
@@ -238,8 +219,7 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
 
     events = [
@@ -314,8 +294,7 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
 
     captured_inputs: list[list[dict]] = []
@@ -370,8 +349,7 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
 
     message_item = SimpleNamespace(
@@ -439,8 +417,7 @@ async def test_depth_2_tool_runs_when_depth_1_slot_held() -> None:
         trace_store=fake_store,
         output_bus=EngineOutputBus(),
         config=cfg,
-        sandbox_status=_DISABLED_SANDBOX_STATUS,
-        runtime_mounts=None,
+        sandbox=None,
     )
 
     one_event = SimpleNamespace(

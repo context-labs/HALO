@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import sys
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -17,12 +15,7 @@ from engine.agents.runner_protocol import RunnerProtocol
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
-from engine.sandbox.runtime_mounts import PythonRuntimeMounts, discover_python_runtime_mounts
-from engine.sandbox.sandbox_availability import (
-    SandboxStatus,
-    render_unavailable_warning,
-    resolve_sandbox_status,
-)
+from engine.sandbox.sandbox_availability import resolve_sandbox_runtime
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
@@ -47,7 +40,9 @@ async def stream_engine_async(
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
     """
     configure_default_sdk_client(engine_config.model_provider)
-    sandbox_status, runtime_mounts = _resolve_sandbox_for_run(engine_config)
+    sandbox = resolve_sandbox_runtime(
+        python_executable=engine_config.sandbox.python_executable,
+    )
 
     # TODO: ensure_index_exists could return the trace itself so we dont need to re load it from file in TraceStore.load
     index_path = await TraceIndexBuilder.ensure_index_exists(
@@ -63,13 +58,11 @@ async def stream_engine_async(
         "trace_store": trace_store,
         "output_bus": output_bus,
         "config": engine_config,
-        "sandbox_status": sandbox_status,
-        "runtime_mounts": runtime_mounts,
+        "sandbox": sandbox,
     }
     if runner is not None:
         run_state_kwargs["runner"] = runner
     run_state = EngineRunState(**run_state_kwargs)
-    run_code_available = sandbox_status.available and runtime_mounts is not None
 
     root_execution = AgentExecution(
         agent_id=f"root-{uuid.uuid4().hex[:8]}",
@@ -81,9 +74,8 @@ async def stream_engine_async(
     run_state.register(root_execution)
 
     root_context = AgentContext.from_input_messages(
-        messages,
-        engine_config,
-        run_code_available=run_code_available,
+        messages=messages,
+        engine_config=engine_config,
     )
 
     sdk_agent = build_root_sdk_agent(
@@ -143,33 +135,6 @@ async def stream_engine_async(
         except BaseException:
             pass
         raise
-
-
-_logger = logging.getLogger(__name__)
-
-
-def _resolve_sandbox_for_run(
-    engine_config: EngineConfig,
-) -> tuple[SandboxStatus, PythonRuntimeMounts | None]:
-    """Probe the sandbox backend once per run; emit a prominent warning when unavailable.
-
-    When a backend resolves we also discover the Python runtime mount manifest
-    so the ``run_code`` tool can run without binding broad system directories.
-    When no backend resolves we emit the unavailability warning through the
-    stdlib logger and also print it directly to ``stderr`` so it is visible
-    even when logging is unconfigured (the typical pip-install scenario).
-    """
-    sandbox_status = resolve_sandbox_status()
-    if not sandbox_status.available:
-        warning = render_unavailable_warning(sandbox_status)
-        _logger.warning("\n%s", warning)
-        print(warning, file=sys.stderr, flush=True)
-        return sandbox_status, None
-
-    runtime_mounts = discover_python_runtime_mounts(
-        python_executable=engine_config.sandbox.python_executable,
-    )
-    return sandbox_status, runtime_mounts
 
 
 async def run_engine_async(
