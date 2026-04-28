@@ -196,7 +196,7 @@ jobs:
         with:
           method: "oidc"
           identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
-          project-slug: "halo"
+          project-slug: "halo-0ys-z"
           env-slug: "dev"
           secret-path: "/ci"
           include-imports: true

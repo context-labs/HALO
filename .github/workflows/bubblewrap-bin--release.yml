@@ -268,7 +268,7 @@ jobs:
         with:
           method: "oidc"
           identity-id: ${{ env.INFISICAL_IDENTITY_ID }}
-          project-slug: "halo"
+          project-slug: "halo-0ys-z"
           env-slug: "dev"
           secret-path: "/ci"
           include-imports: true
@@ -305,7 +305,15 @@ jobs:
 
   summary:
     name: Release Summary
-    needs: [checks, bump-version, build-linux-wheel, build-sdist, publish, tag-and-push]
+    needs:
+      [
+        checks,
+        bump-version,
+        build-linux-wheel,
+        build-sdist,
+        publish,
+        tag-and-push,
+      ]
     if: always()
     runs-on: depot-ubuntu-latest
     steps:
