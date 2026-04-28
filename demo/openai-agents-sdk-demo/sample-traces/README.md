@@ -4,7 +4,7 @@ Captured from running this demo against its own directory. Useful as reference f
 
 ## File
 
-**`traces.jsonl.gz`** — one JSON object per line, one line per span. Shape is the OTLP-compatible JSONL format defined by the inference.net export spec (`07-export.md` in the monorepo), produced directly by the `InferenceOtlpFileProcessor` in [`../tracing.py`](../tracing.py). This is the format the RLM consumes.
+**`traces.jsonl`** — one JSON object per line, one line per span. Shape is the OTLP-compatible JSONL format defined by the inference.net export spec, produced directly by the `InferenceOtlpFileProcessor` in [`../tracing.py`](../tracing.py). This is the format the Engine consumes.
 
 Each line carries:
 - OTLP span identity (`trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `start_time`, `end_time`, `status`).
