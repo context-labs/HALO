@@ -521,7 +521,15 @@ async def _drive(
 
     request_id += 1
     run = await _call(proc, "execute", {"code": user_code}, request_id)
-    await _send(proc, {"jsonrpc": "2.0", "method": "shutdown"})
+    # Shutdown is best-effort cleanup — the execute result is already in
+    # hand. A ``BrokenPipeError`` here means the runner exited between
+    # responding and reading our shutdown frame; the process is already
+    # gone, there's nothing to shut down, and propagating the OSError
+    # would discard a perfectly good ``CodeExecutionResult``.
+    try:
+        await _send(proc, {"jsonrpc": "2.0", "method": "shutdown"})
+    except (BrokenPipeError, ConnectionError):
+        pass
     try:
         await asyncio.wait_for(proc.wait(), timeout=5.0)
     except asyncio.TimeoutError:
@@ -716,7 +724,16 @@ def _format_rpc_error(context: str, error: dict) -> str:
 
 
 def _kill_process_group(pid: int) -> None:
-    """Send SIGKILL to ``pid``'s process group so any orphan Deno workers die with it."""
+    """Send SIGKILL to ``pid``'s process group so any orphan Deno workers die with it.
+
+    Refuses ``pid <= 0``: ``os.getpgid(0)`` returns the *caller's* group,
+    so passing a falsy stub pid would have us sending SIGKILL to our own
+    process group. Production never produces such a pid (asyncio
+    subprocesses always have valid > 0 pids); the guard exists to keep
+    test seams that fabricate a process object safe by default.
+    """
+    if pid <= 0:
+        return
     try:
         os.killpg(os.getpgid(pid), signal.SIGKILL)
     except ProcessLookupError:

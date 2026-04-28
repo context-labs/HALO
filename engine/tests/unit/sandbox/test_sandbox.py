@@ -342,7 +342,12 @@ async def test_run_python_surfaces_mount_file_error(
         stdin = object()
         stdout = object()
         stderr = None
-        pid = 0
+        # Non-zero, non-existent pid so the cleanup path's
+        # ``_kill_process_group`` raises ``ProcessLookupError`` (which it
+        # silently ignores) instead of nuking the test runner's own pgid
+        # — ``os.getpgid(0)`` returns the *caller's* group, so a stub of 0
+        # would have ``killpg`` sending SIGKILL to pytest itself.
+        pid = 2**31 - 1
         returncode = 0
 
         async def wait(self):
@@ -367,6 +372,89 @@ async def test_run_python_surfaces_mount_file_error(
     assert "Failed to mount file" in result.stderr
     # Driver stopped at the failed mount; bootstrap/execute never ran.
     assert captured["phases"] == ["mount_file"]
+
+
+@pytest.mark.asyncio
+async def test_run_python_preserves_result_when_shutdown_send_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``BrokenPipeError`` on the post-execute shutdown send must not discard the result.
+
+    Regression: the driver sends a ``shutdown`` JSON-RPC frame after
+    receiving the execute response, purely as cleanup. If the runner
+    exits between responding and reading our shutdown frame, ``_send``
+    raises ``BrokenPipeError`` (subclass of ``OSError``). Previously the
+    exception propagated through ``_run_session``'s ``except
+    BaseException`` and out of ``run_python``, which only catches
+    ``SandboxError`` — so the caller saw the ``OSError`` instead of the
+    perfectly valid ``CodeExecutionResult`` already in hand.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("")
+    index = tmp_path / "i.jsonl"
+    index.write_text("")
+
+    async def _stub_call(_proc, method, _params, _request_id):
+        if method == "mount_file":
+            return sandbox_module._RpcResult(result={"mounted": "/x"}, error=None)
+        if method == "bootstrap":
+            return sandbox_module._RpcResult(
+                result={"exit_code": 0, "stdout": "", "stderr": ""}, error=None
+            )
+        if method == "execute":
+            return sandbox_module._RpcResult(
+                result={"exit_code": 0, "stdout": "real result\n", "stderr": ""},
+                error=None,
+            )
+        raise AssertionError(f"unexpected method {method!r}")
+
+    async def _stub_read_ready(_stdout):
+        return None
+
+    sent: list[dict] = []
+
+    async def _stub_send(_proc, payload):
+        sent.append(payload)
+        if payload.get("method") == "shutdown":
+            raise BrokenPipeError("runner already exited")
+
+    class _StubProc:
+        stdin = object()
+        stdout = object()
+        stderr = None
+        # Non-zero, non-existent pid so the cleanup path's
+        # ``_kill_process_group`` raises ``ProcessLookupError`` (which it
+        # silently ignores) instead of nuking the test runner's own pgid
+        # — ``os.getpgid(0)`` returns the *caller's* group, so a stub of 0
+        # would have ``killpg`` sending SIGKILL to pytest itself.
+        pid = 2**31 - 1
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    async def _stub_create_subprocess(*_args, **_kwargs):
+        return _StubProc()
+
+    async def _stub_drain_capped(_stream, _cap):
+        return b""
+
+    monkeypatch.setattr(sandbox_module, "_call", _stub_call)
+    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
+    monkeypatch.setattr(sandbox_module, "_send", _stub_send)
+    monkeypatch.setattr(sandbox_module, "_drain_capped", _stub_drain_capped)
+    monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", _stub_create_subprocess)
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+
+    # The valid execute result must come through unchanged despite the
+    # broken-pipe on shutdown.
+    assert result.exit_code == 0
+    assert result.stdout == "real result\n"
+    assert result.timed_out is False
+    # Driver still attempted the shutdown — we just swallowed its failure.
+    assert any(p.get("method") == "shutdown" for p in sent)
 
 
 # -- _read_ready: tolerate unexpected JSON before sentinel --------------------
