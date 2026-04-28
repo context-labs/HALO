@@ -40,7 +40,6 @@ class AgentContext:
     @classmethod
     def from_input_messages(
         cls,
-        *,
         messages: list[AgentMessage],
         engine_config: "EngineConfig",
     ) -> "AgentContext":

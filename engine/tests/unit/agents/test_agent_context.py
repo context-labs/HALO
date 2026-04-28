@@ -188,7 +188,7 @@ def _expected_system(cfg: EngineConfig) -> str:
 def test_from_input_messages_no_system_prepends() -> None:
     cfg = _engine_config()
     messages = [AgentMessage(role="user", content="Find errors")]
-    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
+    ctx = AgentContext.from_input_messages(messages, cfg)
     assert ctx.items[0].role == "system"
     assert ctx.items[0].content == _expected_system(cfg)
     assert ctx.items[0].item_id == "sys-0"
@@ -205,7 +205,7 @@ def test_from_input_messages_continuation_passes_through() -> None:
         AgentMessage(role="assistant", content="Original A"),
         AgentMessage(role="user", content="Follow-up Q"),
     ]
-    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
+    ctx = AgentContext.from_input_messages(messages, cfg)
     systems = [i for i in ctx.items if i.role == "system"]
     assert len(systems) == 1
     assert systems[0].content == sys_text
@@ -223,7 +223,7 @@ def test_from_input_messages_caller_system_left_alone() -> None:
         AgentMessage(role="system", content=custom_system),
         AgentMessage(role="user", content="Hi"),
     ]
-    ctx = AgentContext.from_input_messages(messages=messages, engine_config=cfg)
+    ctx = AgentContext.from_input_messages(messages, cfg)
     # Caller's system preserved verbatim, engine does NOT replace it
     assert ctx.items[0].role == "system"
     assert ctx.items[0].content == custom_system

@@ -11,7 +11,7 @@ from bubblewrap_bin import BubblewrapNotBundledError, bwrap_path
 
 
 def _packaged_binary() -> Path:
-    return Path(__file__).resolve().parents[1] / "bubblewrap_bin" / "_bin" / "bwrap"
+    return Path(__file__).resolve().parents[1] / "src" / "bubblewrap_bin" / "_bin" / "bwrap"
 
 
 def test_bwrap_path_raises_when_binary_missing(

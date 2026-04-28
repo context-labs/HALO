@@ -71,10 +71,7 @@ async def stream_engine_async(
     )
     run_state.register(root_execution)
 
-    root_context = AgentContext.from_input_messages(
-        messages=messages,
-        engine_config=engine_config,
-    )
+    root_context = AgentContext.from_input_messages(messages, engine_config)
 
     sdk_agent = build_root_sdk_agent(
         engine_config=engine_config,

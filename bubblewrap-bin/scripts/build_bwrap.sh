@@ -2,7 +2,7 @@
 # Build a static-libcap bwrap binary from a pinned upstream tarball.
 #
 # Run on a Linux CI runner. Outputs the built binary at:
-#   bubblewrap_bin/_bin/bwrap
+#   src/bubblewrap_bin/_bin/bwrap
 #
 # Inputs:
 #   BWRAP_VERSION  upstream version tag (e.g. 0.11.0)
@@ -21,7 +21,7 @@ BWRAP_SHA256="${BWRAP_SHA256:?BWRAP_SHA256 must be set}"
 ARCH="${ARCH:?ARCH must be set (x86_64|aarch64)}"
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-out_dir="${repo_root}/bubblewrap_bin/_bin"
+out_dir="${repo_root}/src/bubblewrap_bin/_bin"
 work_dir="$(mktemp -d -t bubblewrap-bin-XXXXXX)"
 trap 'rm -rf "${work_dir}"' EXIT
 
