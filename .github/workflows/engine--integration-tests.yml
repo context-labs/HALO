@@ -121,27 +121,32 @@ jobs:
       - name: Install engine dependencies
         run: task ci:setup
 
+      - name: Run Linux sandbox integration tests with packaged bubblewrap
+        run: |
+          mkdir -p test-results .cache/pytest-integration-linux-packaged
+          PATH="$PWD/.venv/bin" .venv/bin/python -m pytest tests/integration-linux \
+            -o "cache_dir=.cache/pytest-integration-linux-packaged" \
+            --junitxml=test-results/integration-linux-packaged.xml \
+            -vv -s -rA
+
       - name: Install system bubblewrap
-        # Use the distro-shipped bwrap rather than the bundled
-        # bubblewrap-bin binary on Ubuntu 24.04 runners. The system package
-        # ships the AppArmor profile required for unprivileged user
-        # namespaces to configure loopback inside ``--unshare-net``
-        # sandboxes; the bundled binary doesn't. ``LinuxClient.resolve()``
-        # prefers system PATH over the packaged binary, so this is enough
-        # to exercise the supported "user runs ``apt install bubblewrap``"
-        # path end-to-end.
         run: |
           sudo apt-get update --quiet
           sudo apt-get install --yes --no-install-recommends bubblewrap
 
-      - name: Run Linux sandbox integration tests
-        run: task test:integration-linux
+      - name: Run Linux sandbox integration tests with system bubblewrap
+        run: |
+          mkdir -p test-results .cache/pytest-integration-linux-system
+          .venv/bin/python -m pytest tests/integration-linux \
+            -o "cache_dir=.cache/pytest-integration-linux-system" \
+            --junitxml=test-results/integration-linux-system.xml \
+            -vv -s -rA
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v5
         if: always()
         with:
-          report_paths: "engine/test-results/integration-linux.xml"
+          report_paths: "engine/test-results/integration-linux*.xml"
           update_check: true
           detailed_summary: true
           include_passed: true
