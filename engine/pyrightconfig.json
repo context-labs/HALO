@@ -3,7 +3,6 @@
     "engine",
     "tests/unit",
     "tests/integration",
-    "tests/integration-sandbox",
     "tests/e2e"
   ],
   "exclude": [

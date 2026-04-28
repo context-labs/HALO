@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from engine.sandbox import sandbox as sandbox_module
-from engine.sandbox.models import SandboxConfig
 from engine.sandbox.pyodide_client import PyodideAssets, PyodideClient
 from engine.sandbox.sandbox import Sandbox, resolve_sandbox
 
@@ -13,12 +12,18 @@ from engine.sandbox.sandbox import Sandbox, resolve_sandbox
 def _fake_assets(tmp_path: Path) -> PyodideAssets:
     runner = tmp_path / "runner.js"
     runner.write_text("// stub")
+    runtime = tmp_path / "pyodide_runtime.py"
+    runtime.write_text("# stub")
+    trace_compat = tmp_path / "pyodide_trace_compat.py"
+    trace_compat.write_text("# stub")
     deno_dir = tmp_path / "deno-cache"
     deno_dir.mkdir()
     pyodide_dir = deno_dir / "npm" / "pyodide" / "0.29.3"
     pyodide_dir.mkdir(parents=True)
     return PyodideAssets(
         runner_path=runner,
+        runtime_path=runtime,
+        trace_compat_path=trace_compat,
         deno_dir=deno_dir,
         pyodide_npm_dir=pyodide_dir,
     )
@@ -37,7 +42,7 @@ def test_resolve_sandbox_returns_none_when_client_resolve_returns_none(
     fabricate a ``Sandbox`` when the client bails out.
     """
     monkeypatch.setattr(PyodideClient, "resolve", staticmethod(lambda: None))
-    assert resolve_sandbox(config=SandboxConfig()) is None
+    assert resolve_sandbox() is None
 
 
 def test_resolve_sandbox_returns_sandbox_when_client_resolves(
@@ -50,33 +55,16 @@ def test_resolve_sandbox_returns_sandbox_when_client_resolves(
 
     monkeypatch.setattr(PyodideClient, "resolve", staticmethod(lambda: client))
 
-    sandbox = resolve_sandbox(config=SandboxConfig())
+    sandbox = resolve_sandbox()
 
     assert sandbox is not None
     assert sandbox.client is client
 
 
-def test_resolve_sandbox_returns_none_when_compat_shim_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """If the trace compat shim is missing from the package, sandboxing is unavailable.
-
-    The shim is shipped as package data; an absent file means a broken
-    install and we'd rather refuse to spin up a Sandbox that crashes on
-    first use than silently misbehave.
-    """
-    deno = tmp_path / "deno"
-    deno.write_text("")
-    assets = _fake_assets(tmp_path)
-    client = PyodideClient(deno_executable=deno, assets=assets)
-    missing_path = tmp_path / "nope.py"
-
-    monkeypatch.setattr(PyodideClient, "resolve", staticmethod(lambda: client))
-    monkeypatch.setattr(sandbox_module, "_TRACE_COMPAT_HOST_PATH", missing_path)
-
-    assert resolve_sandbox(config=SandboxConfig()) is None
-    err = capsys.readouterr().err
-    assert "trace compat shim missing" in err
+# Compat-shim-missing case is now caught in ``_resolve_assets`` (one of
+# three required sandbox files); see test_pyodide_client.py for that
+# coverage. ``resolve_sandbox`` here trusts the client's ``None`` return
+# without inspecting why.
 
 
 # -- Sandbox.run_python: argv + mount routing ---------------------------------
@@ -97,7 +85,7 @@ async def test_run_python_includes_trace_and_index_in_allow_read(
     deno.write_text("")
     assets = _fake_assets(tmp_path)
     client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, config=SandboxConfig(timeout_seconds=5.0))
+    sandbox = Sandbox(client=client, timeout_seconds=5.0)
 
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
@@ -141,7 +129,7 @@ async def test_run_python_does_not_pass_unsafe_flags(
     deno.write_text("")
     assets = _fake_assets(tmp_path)
     client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, config=SandboxConfig(timeout_seconds=5.0))
+    sandbox = Sandbox(client=client, timeout_seconds=5.0)
 
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
@@ -178,7 +166,7 @@ async def test_run_python_translates_runner_outcome_to_result(
     deno.write_text("")
     assets = _fake_assets(tmp_path)
     client = PyodideClient(deno_executable=deno, assets=assets)
-    sandbox = Sandbox(client=client, config=SandboxConfig(timeout_seconds=5.0))
+    sandbox = Sandbox(client=client, timeout_seconds=5.0)
 
     trace = tmp_path / "t.jsonl"
     trace.write_text("")

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from engine.sandbox.bootstrap import render_bootstrap_script
-from engine.sandbox.log import log_unavailable
-from engine.sandbox.models import CodeExecutionResult, SandboxConfig
+from engine.sandbox.models import CodeExecutionResult
 from engine.sandbox.pyodide_client import (
     PyodideClient,
     PyodideError,
@@ -12,14 +10,19 @@ from engine.sandbox.pyodide_client import (
     _RunnerSession,
 )
 
-# Where the trace, index, and trace compat shim live inside the Pyodide FS.
-# Hardcoded so the bootstrap script and Sandbox stay in lock-step without
+# Where the trace and index files live inside the Pyodide FS. Hardcoded so
+# the sandbox and the in-Pyodide ``halo_bootstrap`` stay aligned without
 # leaking host paths through the WASM filesystem.
 _TRACE_VIRTUAL_PATH = "/input/traces.jsonl"
 _INDEX_VIRTUAL_PATH = "/input/index.jsonl"
-_TRACE_COMPAT_VIRTUAL_PATH = "/halo/pyodide_trace_compat.py"
 
-_TRACE_COMPAT_HOST_PATH = (Path(__file__).parent / "pyodide_trace_compat.py").resolve()
+# Defensive caps on captured output. Constants rather than per-call config:
+# the agent should not be able to provoke arbitrarily large prompt growth by
+# emitting a multi-megabyte stdout from inside the sandbox, and there's no
+# realistic use case for a caller wanting to *raise* the cap (any analysis
+# that needs more than this should be summarizing in code, not in stdout).
+_MAX_STDOUT_BYTES = 64_000
+_MAX_STDERR_BYTES = 64_000
 
 
 class Sandbox:
@@ -27,20 +30,26 @@ class Sandbox:
 
     A ``Sandbox`` always represents a working backend: ``resolve_sandbox()``
     is the only blessed factory and returns ``None`` when the host cannot
-    provide one (e.g., Deno not installed or wheels can't be pre-cached).
-    Holds the resolved client and the run config; each ``run_python`` call
-    spawns a fresh subprocess so WASM filesystem state does not leak between
-    runs.
+    provide one. Holds the resolved client and the per-run timeout; each
+    ``run_python`` call spawns a fresh subprocess so WASM filesystem state
+    does not leak between runs.
     """
 
-    def __init__(self, *, client: PyodideClient, config: SandboxConfig) -> None:
+    def __init__(self, *, client: PyodideClient, timeout_seconds: float) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError(f"timeout_seconds must be > 0, got {timeout_seconds!r}")
         self._client = client
-        self._config = config
+        self._timeout_seconds = timeout_seconds
 
     @property
     def client(self) -> PyodideClient:
         """Return the underlying Pyodide client (read-only test seam)."""
         return self._client
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Wall-clock budget for one ``run_python`` call."""
+        return self._timeout_seconds
 
     async def run_python(
         self,
@@ -52,30 +61,23 @@ class Sandbox:
         """Run ``code`` in the WASM sandbox; returns a typed result regardless of pass/fail/timeout.
 
         Mounting policy:
-          - The runner's runner.js + the Deno cache are read-only (covered
-            by the client's ``--allow-read`` set).
+          - The runner.js + its sibling Python files + the Deno cache are
+            read-only (covered by the client's ``--allow-read`` set).
           - The host trace + index are added to ``--allow-read`` for this
             invocation only, so Deno can read them once to copy bytes into
             Pyodide's virtual FS.
-          - Inside Pyodide, files are visible at fixed virtual paths so the
-            bootstrap script can find them without leaking host paths.
+          - Inside Pyodide, files are visible at fixed virtual paths. The
+            runner stages the trace compat shim itself; the host only
+            tells the bootstrap which mount points to load.
         """
         argv = self._client.build_argv(
             extra_read_paths=[trace_path.resolve(), index_path.resolve()],
         )
-
-        bootstrap_code = render_bootstrap_script(
-            trace_virtual_path=_TRACE_VIRTUAL_PATH,
-            index_virtual_path=_INDEX_VIRTUAL_PATH,
-        )
-
-        compat_text = _TRACE_COMPAT_HOST_PATH.read_text()
-
         session = _RunnerSession(
             argv=argv,
-            timeout_seconds=self._config.timeout_seconds,
-            max_stdout=self._config.maximum_stdout_bytes,
-            max_stderr=self._config.maximum_stderr_bytes,
+            timeout_seconds=self._timeout_seconds,
+            max_stdout=_MAX_STDOUT_BYTES,
+            max_stderr=_MAX_STDERR_BYTES,
         )
         try:
             outcome = await session.run(
@@ -83,8 +85,7 @@ class Sandbox:
                     (trace_path.resolve(), _TRACE_VIRTUAL_PATH),
                     (index_path.resolve(), _INDEX_VIRTUAL_PATH),
                 ],
-                injects=[(_TRACE_COMPAT_VIRTUAL_PATH, compat_text)],
-                bootstrap_code=bootstrap_code,
+                bootstrap_paths=(_TRACE_VIRTUAL_PATH, _INDEX_VIRTUAL_PATH),
                 user_code=code,
             )
         except PyodideError as exc:
@@ -98,25 +99,19 @@ class Sandbox:
         return _outcome_to_result(outcome)
 
 
-def resolve_sandbox(*, config: SandboxConfig) -> Sandbox | None:
+def resolve_sandbox(*, timeout_seconds: float = 10.0) -> Sandbox | None:
     """Probe the host once; return a ready ``Sandbox`` or ``None``.
 
-    The Pyodide client logs its own unavailability warning before returning
-    ``None``; this function just propagates that ``None`` back to the caller
-    without inspecting why.
+    ``timeout_seconds`` is the only per-run knob — output caps are fixed
+    module constants and Deno discovery is fully encapsulated by
+    ``PyodideClient.resolve()``. The client logs its own unavailability
+    warning before returning ``None``; this function just propagates that
+    ``None`` back without inspecting why.
     """
     client = PyodideClient.resolve()
     if client is None:
         return None
-    if not _TRACE_COMPAT_HOST_PATH.is_file():
-        # Should never happen: the file ships with the package. Log and bail
-        # so we don't silently produce a Sandbox that crashes on first use.
-        log_unavailable(
-            diagnostic=f"trace compat shim missing at {_TRACE_COMPAT_HOST_PATH}",
-            remediation="Reinstall halo-engine; the package is missing required data files.",
-        )
-        return None
-    return Sandbox(client=client, config=config)
+    return Sandbox(client=client, timeout_seconds=timeout_seconds)
 
 
 def _outcome_to_result(outcome: _ExecutionOutcome) -> CodeExecutionResult:
@@ -137,6 +132,5 @@ def _outcome_to_result(outcome: _ExecutionOutcome) -> CodeExecutionResult:
 
 __all__ = [
     "Sandbox",
-    "SandboxConfig",
     "resolve_sandbox",
 ]

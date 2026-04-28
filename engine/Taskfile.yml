@@ -186,17 +186,6 @@ tasks:
             -o "cache_dir=.cache/pytest-integration-live" \
             --junitxml=test-results/integration-live.xml
 
-  test:integration-sandbox:
-    desc: "Run Deno+Pyodide sandbox integration tests (requires Deno on PATH)"
-    deps: [_require-python]
-    cmds:
-      - mkdir -p test-results .cache/pytest-integration-sandbox
-      - |
-        {{.PYTHON_BIN}} -m pytest tests/integration-sandbox \
-          -o "cache_dir=.cache/pytest-integration-sandbox" \
-          --junitxml=test-results/integration-sandbox.xml \
-          -vv -s -rA {{.CLI_ARGS}}
-
   test:e2e:
     desc: "Run engine E2E tests (secrets via Infisical; pass pytest target after --)"
     deps: [_require-python]

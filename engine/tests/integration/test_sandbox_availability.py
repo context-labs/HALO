@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from engine.sandbox.models import SandboxConfig
 from engine.sandbox.pyodide_client import PyodideClient
 from engine.sandbox.sandbox import resolve_sandbox
 
@@ -17,7 +16,7 @@ def test_resolve_sandbox_returns_working_pyodide_client() -> None:
     permissions and ``run_code`` would silently disappear from the agent
     surface — exactly the kind of release blocker we want to catch in CI.
     """
-    sandbox = resolve_sandbox(config=SandboxConfig())
+    sandbox = resolve_sandbox()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 

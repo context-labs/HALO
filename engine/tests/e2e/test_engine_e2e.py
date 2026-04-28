@@ -13,7 +13,6 @@ from engine.main import run_engine_async, stream_engine_async
 from engine.model_config import ModelConfig
 from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage
-from engine.sandbox.models import SandboxConfig
 from engine.sandbox.sandbox import resolve_sandbox
 
 E2E_MODEL = os.environ.get("HALO_E2E_MODEL", "gpt-5.4-mini")
@@ -171,7 +170,7 @@ async def test_engine_run_code_executes_in_sandbox(tmp_path: Path, fixtures_dir:
     """
     if not os.environ.get("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
-    if resolve_sandbox(config=SandboxConfig()) is None:
+    if resolve_sandbox() is None:
         pytest.skip("sandbox unavailable on this host; run_code is not registered without Deno")
 
     trace_path = _trace_path(tmp_path, fixtures_dir)

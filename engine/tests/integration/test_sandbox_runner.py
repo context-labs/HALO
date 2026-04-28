@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from engine.sandbox.models import SandboxConfig
 from engine.sandbox.pyodide_client import PyodideClient
 from engine.sandbox.sandbox import Sandbox, resolve_sandbox
 from engine.traces.models.trace_index_config import TraceIndexConfig
@@ -12,7 +11,7 @@ from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
 async def _ready(tmp_path: Path, fixtures_dir: Path) -> tuple[Sandbox, Path, Path]:
-    sandbox = resolve_sandbox(config=SandboxConfig(timeout_seconds=60.0))
+    sandbox = resolve_sandbox(timeout_seconds=60.0)
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 
@@ -153,7 +152,7 @@ async def test_sandbox_handles_multibyte_utf8_across_chunk_boundary(
 @pytest.mark.asyncio
 async def test_sandbox_timeout_kills_process(tmp_path: Path, fixtures_dir: Path) -> None:
     """Long-running user code must trip the timeout and report ``timed_out=True``."""
-    sandbox = resolve_sandbox(config=SandboxConfig(timeout_seconds=1.0))
+    sandbox = resolve_sandbox(timeout_seconds=1.0)
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 
