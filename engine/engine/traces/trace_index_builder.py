@@ -70,9 +70,7 @@ def _merge_accumulators(
     return merged
 
 
-def _process_chunk(
-    trace_path: Path, chunk: list[tuple[int, int]]
-) -> dict[str, _RowAccumulator]:
+def _process_chunk(trace_path: Path, chunk: list[tuple[int, int]]) -> dict[str, _RowAccumulator]:
     """Stage 2 worker: read each (offset, length) from the file, parse, and accumulate locally.
 
     Top-level so it pickles cleanly for ``multiprocessing.Pool.map``. Each worker

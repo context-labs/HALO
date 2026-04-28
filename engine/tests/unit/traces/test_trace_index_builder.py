@@ -422,10 +422,7 @@ async def test_byte_offsets_within_trace_are_in_file_order(
         config=TraceIndexConfig(),
     )
 
-    rows = [
-        TraceIndexRow.model_validate_json(line)
-        for line in index_path.read_text().splitlines()
-    ]
+    rows = [TraceIndexRow.model_validate_json(line) for line in index_path.read_text().splitlines()]
     for row in rows:
         assert row.byte_offsets == sorted(row.byte_offsets), (
             f"byte_offsets out of file order for trace {row.trace_id}: {row.byte_offsets}"
@@ -433,9 +430,7 @@ async def test_byte_offsets_within_trace_are_in_file_order(
 
 
 @pytest.mark.asyncio
-async def test_merge_rollups_across_chunks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_merge_rollups_across_chunks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Trace ``t-split`` has 4 spans deliberately scattered across the file.
 
     With ``SMALL_FILE_THRESHOLD = 0`` and 4 cpus, the four lines belonging to
