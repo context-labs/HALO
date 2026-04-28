@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import platform
 import signal
-import sys
 import tempfile
 from pathlib import Path
 
 from engine.sandbox.bootstrap import render_bootstrap_script
-from engine.sandbox.linux_client import LinuxClient, SandboxNotAvailable
+from engine.sandbox.linux_client import LinuxClient
+from engine.sandbox.log import log_unavailable
 from engine.sandbox.macos_client import MacosClient
 from engine.sandbox.models import (
     CodeExecutionResult,
@@ -19,7 +18,6 @@ from engine.sandbox.models import (
 )
 from engine.sandbox.runtime_mounts import discover_python_runtime_mounts
 
-_logger = logging.getLogger(__name__)
 _TRUNCATION_MARKER = b"\n[... output truncated ...]\n"
 
 
@@ -173,50 +171,29 @@ class Sandbox:
 def resolve_sandbox(*, config: SandboxConfig) -> Sandbox | None:
     """Probe the host once; return a ready ``Sandbox`` or ``None``.
 
-    On unavailability, emits a multi-line warning describing the cause and
-    remediation through both ``logging`` and ``stderr`` so it is visible in
-    every common deployment (CLI, library import, container logs).
+    The platform clients log their own unavailability warning before
+    returning ``None``; this function just propagates that ``None`` back to
+    the caller without inspecting why.
     """
-    try:
-        client = _resolve_client()
-    except SandboxNotAvailable as exc:
-        _emit_unavailable_warning(diagnostic=exc.diagnostic, remediation=exc.remediation)
+    client = _resolve_client()
+    if client is None:
         return None
     runtime_mounts = discover_python_runtime_mounts(python_executable=config.python_executable)
     return Sandbox(client=client, runtime_mounts=runtime_mounts, config=config)
 
 
-def _resolve_client() -> LinuxClient | MacosClient:
-    """Pick the platform client; raise ``SandboxNotAvailable`` for unsupported platforms."""
+def _resolve_client() -> LinuxClient | MacosClient | None:
+    """Pick the platform client. Logs + returns ``None`` on unsupported platforms."""
     system = platform.system()
     if system == "Linux":
         return LinuxClient.resolve()
     if system == "Darwin":
         return MacosClient.resolve()
-    raise SandboxNotAvailable(
+    log_unavailable(
         diagnostic=f"unsupported platform: {system}",
         remediation="run_code requires Linux (bubblewrap) or macOS (sandbox-exec).",
     )
-
-
-def _emit_unavailable_warning(*, diagnostic: str, remediation: str) -> None:
-    """Build the unavailability warning text and emit it to logger + stderr."""
-    indented_remediation = "\n".join(
-        f"  {line}" if line else line for line in remediation.splitlines()
-    )
-    warning = (
-        "HALO run_code disabled: sandbox unavailable.\n"
-        "\n"
-        "Reason:\n"
-        f"  {diagnostic}\n"
-        "\n"
-        "How to fix:\n"
-        f"{indented_remediation}\n"
-        "\n"
-        "The engine will continue without exposing run_code to the agent."
-    )
-    _logger.warning("\n%s", warning)
-    print(warning, file=sys.stderr, flush=True)
+    return None
 
 
 def _kill_process_group(pid: int) -> None:
@@ -231,6 +208,5 @@ def _kill_process_group(pid: int) -> None:
 __all__ = [
     "Sandbox",
     "SandboxConfig",
-    "SandboxNotAvailable",
     "resolve_sandbox",
 ]

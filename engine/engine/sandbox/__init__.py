@@ -4,11 +4,10 @@ Public surface:
     - ``Sandbox``: front-door class; one instance per run when sandboxing is available.
     - ``resolve_sandbox(config=...)``: probe the host; return ``Sandbox | None``.
     - ``SandboxConfig``: caller-tunable timeouts/output caps/python-executable override.
-    - ``SandboxNotAvailable``: typed exception clients raise when the host can't sandbox.
     - ``CodeExecutionResult`` / ``RunCodeArguments``: run-time IO models for ``run_code``.
 """
 
-from engine.sandbox.linux_client import LinuxClient, SandboxNotAvailable
+from engine.sandbox.linux_client import LinuxClient
 from engine.sandbox.macos_client import MacosClient
 from engine.sandbox.models import (
     CodeExecutionResult,
@@ -26,6 +25,5 @@ __all__ = [
     "RunCodeArguments",
     "Sandbox",
     "SandboxConfig",
-    "SandboxNotAvailable",
     "resolve_sandbox",
 ]

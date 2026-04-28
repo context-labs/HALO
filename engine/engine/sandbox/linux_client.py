@@ -6,21 +6,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from engine.sandbox.log import log_unavailable
+
 HALO_BWRAP_ENV_VAR = "HALO_BWRAP_PATH"
-
-
-class SandboxNotAvailable(Exception):
-    """Raised when the host cannot provide a working sandbox.
-
-    Carries the human-readable diagnostic and remediation strings that
-    ``resolve_sandbox()`` formats into the unavailability warning shown to
-    operators.
-    """
-
-    def __init__(self, *, diagnostic: str, remediation: str) -> None:
-        super().__init__(diagnostic)
-        self.diagnostic = diagnostic
-        self.remediation = remediation
 
 
 _LINUX_MISSING_REMEDIATION = (
@@ -54,15 +42,15 @@ class LinuxClient:
 
     Wraps a single resolved ``bwrap`` executable. Build platform-specific
     argv via :meth:`build_argv`. Resolve a working client (binary present +
-    namespace probe passes) via :meth:`resolve`; failures raise
-    ``SandboxNotAvailable`` with operator-facing remediation text.
+    namespace probe passes) via :meth:`resolve`; on failure the resolver
+    logs a remediation warning and returns ``None``.
     """
 
     def __init__(self, *, executable: Path) -> None:
         self.executable = executable
 
     @staticmethod
-    def resolve() -> LinuxClient:
+    def resolve() -> LinuxClient | None:
         """Find a usable ``bwrap`` and verify it can create namespaces.
 
         Resolution order:
@@ -70,18 +58,20 @@ class LinuxClient:
           2. System ``bwrap`` on ``PATH``.
           3. Packaged ``bwrap`` from the optional ``bubblewrap-bin`` dependency.
 
-        Raises ``SandboxNotAvailable`` when no candidate exists, or when at
-        least one exists but the namespace probe fails — the two cases get
-        different remediation strings (install vs. enable user namespaces).
+        On failure, logs a warning whose remediation distinguishes "binary
+        is missing entirely" from "binary exists but namespace probe failed",
+        then returns ``None``. Callers treat ``None`` as "sandbox unavailable
+        for this run" — there's no exception to catch.
         """
         candidates = _candidates()
         if not candidates:
-            raise SandboxNotAvailable(
+            log_unavailable(
                 diagnostic=(
                     "bubblewrap (bwrap) not found via env, PATH, or bubblewrap-bin package"
                 ),
                 remediation=_LINUX_MISSING_REMEDIATION,
             )
+            return None
 
         missing: list[str] = []
         probe_failures: list[str] = []
@@ -101,14 +91,16 @@ class LinuxClient:
             )
 
         if probe_failures:
-            raise SandboxNotAvailable(
+            log_unavailable(
                 diagnostic="\n".join(probe_failures),
                 remediation=_LINUX_NAMESPACE_REMEDIATION,
             )
-        raise SandboxNotAvailable(
-            diagnostic="\n".join(missing),
-            remediation=_LINUX_MISSING_REMEDIATION,
-        )
+        else:
+            log_unavailable(
+                diagnostic="\n".join(missing),
+                remediation=_LINUX_MISSING_REMEDIATION,
+            )
+        return None
 
     def build_argv(
         self,

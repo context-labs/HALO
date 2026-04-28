@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from engine.sandbox.linux_client import SandboxNotAvailable
+from engine.sandbox.log import log_unavailable
 
 
 class MacosClient:
@@ -18,16 +18,17 @@ class MacosClient:
         self.executable = executable
 
     @staticmethod
-    def resolve() -> MacosClient:
-        """Locate ``sandbox-exec`` on PATH; raise ``SandboxNotAvailable`` if missing."""
+    def resolve() -> MacosClient | None:
+        """Locate ``sandbox-exec`` on PATH; log + return ``None`` when missing."""
         found = shutil.which("sandbox-exec")
         if found is None:
-            raise SandboxNotAvailable(
+            log_unavailable(
                 diagnostic="sandbox-exec not found on PATH",
                 remediation=(
                     "sandbox-exec ships with macOS by default. Ensure /usr/bin is on PATH."
                 ),
             )
+            return None
         return MacosClient(executable=Path(found))
 
     def render_profile(

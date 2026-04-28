@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from engine.sandbox import sandbox as sandbox_module
-from engine.sandbox.linux_client import LinuxClient, SandboxNotAvailable
+from engine.sandbox.linux_client import LinuxClient
 from engine.sandbox.macos_client import MacosClient
 from engine.sandbox.models import PythonRuntimeMounts, SandboxConfig
 from engine.sandbox.sandbox import Sandbox, resolve_sandbox
@@ -39,25 +39,20 @@ def test_resolve_sandbox_returns_none_on_unsupported_platform(
     assert "How to fix:" in err
 
 
-def test_resolve_sandbox_returns_none_when_client_resolve_raises(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_resolve_sandbox_returns_none_when_client_resolve_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """``resolve_sandbox`` propagates ``None`` from the platform client without inspecting why.
+
+    The platform client is responsible for emitting the unavailability
+    warning before returning ``None``. This test only verifies that
+    ``resolve_sandbox`` does not produce a ``Sandbox`` when the client
+    resolver bails out.
+    """
     monkeypatch.setattr(sandbox_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(LinuxClient, "resolve", staticmethod(lambda: None))
 
-    def _raise() -> LinuxClient:
-        raise SandboxNotAvailable(
-            diagnostic="bwrap missing",
-            remediation="install bubblewrap",
-        )
-
-    monkeypatch.setattr(LinuxClient, "resolve", staticmethod(_raise))
-
-    sandbox = resolve_sandbox(config=SandboxConfig())
-
-    assert sandbox is None
-    err = capsys.readouterr().err
-    assert "bwrap missing" in err
-    assert "install bubblewrap" in err
+    assert resolve_sandbox(config=SandboxConfig()) is None
 
 
 def test_resolve_sandbox_returns_sandbox_when_client_resolves(
