@@ -24,9 +24,9 @@ class GetDatasetOverviewTool:
     name = "get_dataset_overview"
     description = (
         "Dataset rollup: counts, services, models, totals, `raw_jsonl_bytes`, and "
-        "`sample_trace_ids` (real ids to pass to view/search tools). "
-        "`filters.regex_pattern` is opt-in raw-span scanning; expensive on large "
-        "datasets — narrow with indexed filter fields first."
+        "`sample_trace_ids` (real ids to pass to view/search tools). Call this first "
+        "to size the dataset. `filters.regex_pattern` is opt-in raw-span scanning; "
+        "narrow with indexed filter fields first."
     )
     arguments_model = DatasetOverviewArguments
     result_model = DatasetOverviewResult
@@ -45,8 +45,9 @@ class QueryTracesTool:
     name = "query_traces"
     description = (
         "Paginated trace summaries; each carries `raw_jsonl_bytes` so you can size "
-        "traces before calling `view_trace`. `filters.regex_pattern` is opt-in "
-        "raw-span scanning; narrow with indexed filter fields first."
+        "traces before calling `view_trace`. Before adding `filters.regex_pattern` "
+        "(opt-in raw-span scanning), narrow with indexed filter fields and confirm "
+        "the candidate count via `get_dataset_overview`/`count_traces`."
     )
     arguments_model = QueryTracesArguments
     result_model = QueryTracesResult
@@ -71,8 +72,9 @@ class CountTracesTool:
 
     name = "count_traces"
     description = (
-        "Count traces matching `filters`. `filters.regex_pattern` is opt-in "
-        "raw-span scanning; narrow with indexed filter fields first."
+        "Count traces matching `filters`. Use to size a candidate set (e.g. via "
+        "indexed filters) before adding `filters.regex_pattern` (opt-in raw-span "
+        "scanning)."
     )
     arguments_model = CountTracesArguments
     result_model = CountTracesResult
