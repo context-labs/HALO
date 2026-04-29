@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -295,48 +296,61 @@ def test_truncate_drops_partial_utf8_at_cut() -> None:
     assert not result.startswith("ééé")
 
 
-# -- mount_file error surface --------------------------------------------------
+# -- _run_session lifecycle: every drive return path must shut down the runner ---
 
 
-@pytest.mark.asyncio
-async def test_run_python_surfaces_mount_file_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A ``mount_file`` JSON-RPC error must surface immediately, not be swallowed.
+# Sentinel ``_RpcResult`` factories — short builders for the test responses below.
+def _rpc_ok(result: dict) -> "sandbox_module._RpcResult":
+    return sandbox_module._RpcResult(result=result, error=None)
 
-    Regression: ``_drive`` discarded the result of every ``mount_file``
-    call. A failed mount (host file missing, Deno --allow-read denial)
-    would let bootstrap run anyway, where the absent file produced a
-    confusing ``FileNotFoundError`` deep inside Pyodide. The fix returns
-    early with a clear ``mount_file`` error.
+
+def _rpc_error(message: str, code: int = -32008) -> "sandbox_module._RpcResult":
+    return sandbox_module._RpcResult(result=None, error={"code": code, "message": message})
+
+
+class _DriveCapture:
+    """Records every ``_call`` method and every ``_send`` payload through one session."""
+
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+        self.sent: list[dict] = []
+
+    def shutdown_was_sent(self) -> bool:
+        return any(p.get("method") == "shutdown" for p in self.sent)
+
+
+def _install_drive_stubs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    rpc_responder,
+    send_failure_for: str | None = None,
+) -> _DriveCapture:
+    """Wire the standard unit-level stubs around ``_run_session``.
+
+    ``rpc_responder(method)`` returns the ``_RpcResult`` to use for that
+    JSON-RPC method call. Reaching an un-handled method is a test bug
+    (the responder should ``raise AssertionError`` to surface that).
+
+    ``send_failure_for`` (optional): the ``method`` whose ``_send`` call
+    should raise ``BrokenPipeError`` — used to simulate a runner that
+    exits between responding and reading the next frame.
     """
-    sandbox = _fake_sandbox(tmp_path)
-    trace = tmp_path / "t.jsonl"
-    trace.write_text("")
-    index = tmp_path / "i.jsonl"
-    index.write_text("")
-
-    captured: dict[str, list[str]] = {"phases": []}
+    capture = _DriveCapture()
 
     async def _stub_call(_proc, method, _params, _request_id):
-        captured["phases"].append(method)
-        if method == "mount_file":
-            return sandbox_module._RpcResult(
-                result=None,
-                error={"code": -32008, "message": "Failed to mount file: missing"},
-            )
-        # If the driver kept going past the mount error, bootstrap would
-        # be the next call — fail loud here so the test can assert that
-        # the early return prevented it.
-        raise AssertionError(
-            f"driver should have returned after mount_file error; reached {method!r}"
-        )
+        capture.phases.append(method)
+        return rpc_responder(method)
+
+    async def _stub_send(_proc, payload):
+        capture.sent.append(payload)
+        if send_failure_for is not None and payload.get("method") == send_failure_for:
+            raise BrokenPipeError(f"runner already exited (simulated for {send_failure_for})")
 
     async def _stub_read_ready(_stdout):
         return None
 
-    async def _stub_send(_proc, _payload):
-        return None
+    async def _stub_drain_capped(_stream, _cap):
+        return b""
 
     class _StubProc:
         stdin = object()
@@ -345,8 +359,8 @@ async def test_run_python_surfaces_mount_file_error(
         # Non-zero, non-existent pid so the cleanup path's
         # ``_kill_process_group`` raises ``ProcessLookupError`` (which it
         # silently ignores) instead of nuking the test runner's own pgid
-        # — ``os.getpgid(0)`` returns the *caller's* group, so a stub of 0
-        # would have ``killpg`` sending SIGKILL to pytest itself.
+        # — ``os.getpgid(0)`` returns the *caller's* group, so a stub of
+        # 0 would have ``killpg`` sending SIGKILL to pytest itself.
         pid = 2**31 - 1
         returncode = 0
 
@@ -356,105 +370,256 @@ async def test_run_python_surfaces_mount_file_error(
     async def _stub_create_subprocess(*_args, **_kwargs):
         return _StubProc()
 
-    async def _stub_drain_capped(_stream, _cap):
-        return b""
-
     monkeypatch.setattr(sandbox_module, "_call", _stub_call)
-    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
     monkeypatch.setattr(sandbox_module, "_send", _stub_send)
+    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
     monkeypatch.setattr(sandbox_module, "_drain_capped", _stub_drain_capped)
     monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", _stub_create_subprocess)
+    return capture
+
+
+def _trace_and_index(tmp_path: Path) -> tuple[Path, Path]:
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("")
+    index = tmp_path / "i.jsonl"
+    index.write_text("")
+    return trace, index
+
+
+@pytest.mark.asyncio
+async def test_run_python_sends_shutdown_after_mount_file_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``mount_file`` JSON-RPC error must surface AND the runner must be shut down.
+
+    Regression for two bugs:
+
+    1. The driver previously discarded the result of every ``mount_file``
+       call. A failed mount (host file missing, Deno --allow-read denial)
+       let bootstrap run anyway and crash with a confusing
+       ``FileNotFoundError`` deep inside Pyodide. The fix returns early
+       with a clear ``mount_file`` error.
+
+    2. The early-return path skipped the shutdown send, leaving the
+       Deno subprocess alive and blocking ``stderr_task``'s drain (which
+       waits for the subprocess to close stderr on exit). The fix
+       relocates the shutdown send into ``_run_session`` so every
+       successful ``_drive`` return triggers cleanup uniformly.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace, index = _trace_and_index(tmp_path)
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_error("Failed to mount file: missing")
+        raise AssertionError(f"_drive must return after mount_file error; reached {method!r}")
+
+    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 1
     assert result.timed_out is False
     assert "mount_file" in result.stderr
     assert "Failed to mount file" in result.stderr
-    # Driver stopped at the failed mount; bootstrap/execute never ran.
-    assert captured["phases"] == ["mount_file"]
+    assert capture.phases == ["mount_file"], (
+        f"only mount_file should have been attempted; got {capture.phases}"
+    )
+    assert capture.shutdown_was_sent(), (
+        "early return after mount_file error must still send shutdown — "
+        "without it the subprocess orphans and stderr_task hangs"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_python_sends_shutdown_after_bootstrap_rpc_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bootstrap JSON-RPC error must surface AND the runner must be shut down.
+
+    Bootstrap RPC errors come from runner.js itself (e.g., the runner
+    rejected the request before halo_bootstrap ran). Same lifecycle
+    requirement as mount errors: the runner is alive and waiting; we
+    must shut it down.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace, index = _trace_and_index(tmp_path)
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_ok({"mounted": "/x"})
+        if method == "bootstrap":
+            return _rpc_error("runner rejected bootstrap")
+        raise AssertionError(f"_drive must return after bootstrap RPC error; reached {method!r}")
+
+    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+    assert result.exit_code == 1
+    assert "bootstrap" in result.stderr
+    assert "runner rejected bootstrap" in result.stderr
+    # Two mounts then bootstrap; execute never reached.
+    assert capture.phases == ["mount_file", "mount_file", "bootstrap"]
+    assert capture.shutdown_was_sent(), (
+        "early return after bootstrap RPC error must still send shutdown"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_python_sends_shutdown_after_bootstrap_python_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bootstrap that returned ``exit_code != 0`` must shut the runner down.
+
+    This is the in-Pyodide path: ``halo_bootstrap`` caught a Python
+    exception (e.g., a malformed index, missing wheel), captured the
+    traceback, and returned a non-zero exit_code. The runner is healthy
+    — Python caught the error — so shutdown is the correct cleanup.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace, index = _trace_and_index(tmp_path)
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_ok({"mounted": "/x"})
+        if method == "bootstrap":
+            return _rpc_ok(
+                {
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": "Traceback (most recent call last):\n  ...\nValueError: bad index\n",
+                }
+            )
+        raise AssertionError(f"_drive must return after bootstrap python error; reached {method!r}")
+
+    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+    assert result.exit_code == 1
+    assert "ValueError: bad index" in result.stderr
+    assert capture.phases == ["mount_file", "mount_file", "bootstrap"]
+    assert capture.shutdown_was_sent(), (
+        "early return after bootstrap exit_code != 0 must still send shutdown"
+    )
 
 
 @pytest.mark.asyncio
 async def test_run_python_preserves_result_when_shutdown_send_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``BrokenPipeError`` on the post-execute shutdown send must not discard the result.
+    """A ``BrokenPipeError`` on the shutdown send must not discard the result.
 
-    Regression: the driver sends a ``shutdown`` JSON-RPC frame after
-    receiving the execute response, purely as cleanup. If the runner
-    exits between responding and reading our shutdown frame, ``_send``
-    raises ``BrokenPipeError`` (subclass of ``OSError``). Previously the
-    exception propagated through ``_run_session``'s ``except
-    BaseException`` and out of ``run_python``, which only catches
-    ``SandboxError`` — so the caller saw the ``OSError`` instead of the
-    perfectly valid ``CodeExecutionResult`` already in hand.
+    Regression: the post-execute shutdown send is best-effort cleanup —
+    the result is already in hand. If the runner exits between
+    responding and reading our shutdown frame, ``_send`` raises
+    ``BrokenPipeError`` (subclass of ``OSError``). Previously that
+    propagated through ``_run_session``'s ``except BaseException`` and
+    out of ``run_python``, which only catches ``SandboxError`` — so the
+    caller saw the ``OSError`` instead of the valid result.
     """
     sandbox = _fake_sandbox(tmp_path)
-    trace = tmp_path / "t.jsonl"
-    trace.write_text("")
-    index = tmp_path / "i.jsonl"
-    index.write_text("")
+    trace, index = _trace_and_index(tmp_path)
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_ok({"mounted": "/x"})
+        if method == "bootstrap":
+            return _rpc_ok({"exit_code": 0, "stdout": "", "stderr": ""})
+        if method == "execute":
+            return _rpc_ok({"exit_code": 0, "stdout": "real result\n", "stderr": ""})
+        raise AssertionError(f"unexpected method {method!r}")
+
+    capture = _install_drive_stubs(
+        monkeypatch, rpc_responder=_responder, send_failure_for="shutdown"
+    )
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+    assert result.exit_code == 0
+    assert result.stdout == "real result\n"
+    assert result.timed_out is False
+    # The driver attempted shutdown — we just swallowed its failure.
+    assert capture.shutdown_was_sent()
+
+
+@pytest.mark.asyncio
+async def test_run_python_does_not_hang_when_drive_returns_early(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end behavior check: no early-return path may leave the session hanging.
+
+    The other tests in this section verify the structural contract
+    (shutdown was sent). This test exercises the *symptom* the contract
+    prevents: under the bug, ``stderr_task`` (which drains until the
+    subprocess closes stderr on exit) and ``proc.wait`` would block
+    forever because the runner was alive waiting for stdin. Stub
+    semantics:
+
+      * ``_drain_capped`` only resolves once the runner is "dead".
+      * ``proc.wait`` only resolves once the runner is "dead".
+      * ``_send(method=shutdown)`` flips the runner to "dead".
+      * ``_kill_process_group`` also flips it to "dead" (the bug-free
+        timeout/exception paths still cover us — but here we assert the
+        *normal* early-return path does it on its own).
+
+    Wrapped in a 2-second deadline; the bug presents as ``TimeoutError``.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace, index = _trace_and_index(tmp_path)
+
+    proc_dead = asyncio.Event()
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_error("Failed to mount file: missing")
+        raise AssertionError(f"reached {method!r}")
 
     async def _stub_call(_proc, method, _params, _request_id):
-        if method == "mount_file":
-            return sandbox_module._RpcResult(result={"mounted": "/x"}, error=None)
-        if method == "bootstrap":
-            return sandbox_module._RpcResult(
-                result={"exit_code": 0, "stdout": "", "stderr": ""}, error=None
-            )
-        if method == "execute":
-            return sandbox_module._RpcResult(
-                result={"exit_code": 0, "stdout": "real result\n", "stderr": ""},
-                error=None,
-            )
-        raise AssertionError(f"unexpected method {method!r}")
+        return _responder(method)
+
+    async def _stub_send(_proc, payload):
+        if payload.get("method") == "shutdown":
+            proc_dead.set()
 
     async def _stub_read_ready(_stdout):
         return None
 
-    sent: list[dict] = []
+    async def _stub_drain_capped(_stream, _cap):
+        await proc_dead.wait()
+        return b""
 
-    async def _stub_send(_proc, payload):
-        sent.append(payload)
-        if payload.get("method") == "shutdown":
-            raise BrokenPipeError("runner already exited")
+    def _stub_kill(_pid):
+        # If the bug-free shutdown path didn't fire, the
+        # outer-exception / timeout path would still set this — but for
+        # the normal early-return path we never want to rely on it.
+        proc_dead.set()
 
     class _StubProc:
         stdin = object()
         stdout = object()
         stderr = None
-        # Non-zero, non-existent pid so the cleanup path's
-        # ``_kill_process_group`` raises ``ProcessLookupError`` (which it
-        # silently ignores) instead of nuking the test runner's own pgid
-        # — ``os.getpgid(0)`` returns the *caller's* group, so a stub of 0
-        # would have ``killpg`` sending SIGKILL to pytest itself.
         pid = 2**31 - 1
         returncode = 0
 
         async def wait(self):
+            await proc_dead.wait()
             return 0
 
     async def _stub_create_subprocess(*_args, **_kwargs):
         return _StubProc()
 
-    async def _stub_drain_capped(_stream, _cap):
-        return b""
-
     monkeypatch.setattr(sandbox_module, "_call", _stub_call)
-    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
     monkeypatch.setattr(sandbox_module, "_send", _stub_send)
+    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
     monkeypatch.setattr(sandbox_module, "_drain_capped", _stub_drain_capped)
+    monkeypatch.setattr(sandbox_module, "_kill_process_group", _stub_kill)
     monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", _stub_create_subprocess)
 
-    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
-
-    # The valid execute result must come through unchanged despite the
-    # broken-pipe on shutdown.
-    assert result.exit_code == 0
-    assert result.stdout == "real result\n"
-    assert result.timed_out is False
-    # Driver still attempted the shutdown — we just swallowed its failure.
-    assert any(p.get("method") == "shutdown" for p in sent)
+    result = await asyncio.wait_for(
+        sandbox.run_python(code="x=1", trace_path=trace, index_path=index),
+        timeout=2.0,
+    )
+    assert result.exit_code == 1
+    assert "mount_file" in result.stderr
+    assert proc_dead.is_set()
 
 
 # -- _read_ready: tolerate unexpected JSON before sentinel --------------------
