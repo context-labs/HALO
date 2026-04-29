@@ -506,15 +506,7 @@ class _RunnerSession:
         rpc = await self._request("execute", {"code": code})
         if rpc.error is not None:
             raise SandboxError(_format_rpc_error("execute", rpc.error))
-        result = _result_from_rpc(rpc.result)
-        # Honor the byte-named caps. Multi-byte content is sliced safely
-        # (no U+FFFD smearing) — see ``_truncate_to_bytes``.
-        return CodeExecutionResult(
-            exit_code=result.exit_code,
-            stdout=_truncate_to_bytes(result.stdout, _MAX_STDOUT_BYTES),
-            stderr=_truncate_to_bytes(result.stderr, _MAX_STDERR_BYTES),
-            timed_out=False,
-        )
+        return _result_from_rpc(rpc.result)
 
     # -- private wire helpers -------------------------------------------------
 
@@ -614,12 +606,19 @@ class _RunnerSession:
 
 
 def _result_from_rpc(rpc_result: dict | None) -> CodeExecutionResult:
-    """Coerce a ``halo_bootstrap`` / ``halo_execute`` dict into a result model."""
+    """Coerce a ``halo_bootstrap`` / ``halo_execute`` dict into a result model.
+
+    Both phases route through here, so byte-cap truncation lives here
+    too — a recursive-import traceback from bootstrap can be just as
+    big as a chatty execute, and either one bloats the agent's prompt
+    if it flows back uncapped. ``_truncate_to_bytes`` slices safely on
+    UTF-8 boundaries.
+    """
     rpc_result = rpc_result or {}
     return CodeExecutionResult(
         exit_code=int(rpc_result.get("exit_code", 1)),
-        stdout=str(rpc_result.get("stdout", "")),
-        stderr=str(rpc_result.get("stderr", "")),
+        stdout=_truncate_to_bytes(str(rpc_result.get("stdout", "")), _MAX_STDOUT_BYTES),
+        stderr=_truncate_to_bytes(str(rpc_result.get("stderr", "")), _MAX_STDERR_BYTES),
         timed_out=False,
     )
 
