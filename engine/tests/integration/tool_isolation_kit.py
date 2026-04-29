@@ -123,6 +123,6 @@ def wired_tools(
 def fake_sandbox() -> Sandbox:
     """A no-op ``Sandbox`` stand-in for tests that only need ``run_code`` to be *registered*.
 
-    Tests that actually invoke ``run_code`` must use ``Sandbox.resolve()`` instead.
+    Tests that actually invoke ``run_code`` must use ``Sandbox.get()`` instead.
     """
     return MagicMock(spec=Sandbox)

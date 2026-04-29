@@ -10,7 +10,7 @@ from engine.traces.trace_index_builder import TraceIndexBuilder
 
 
 async def _ready(tmp_path: Path, fixtures_dir: Path) -> tuple[Sandbox, Path, Path]:
-    sandbox = Sandbox.resolve()
+    sandbox = Sandbox.get()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 

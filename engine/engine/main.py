@@ -40,7 +40,7 @@ async def stream_engine_async(
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
     """
     configure_default_sdk_client(engine_config.model_provider)
-    sandbox = Sandbox.resolve()
+    sandbox = Sandbox.get()
 
     # TODO: ensure_index_exists could return the trace itself so we dont need to re load it from file in TraceStore.load
     index_path = await TraceIndexBuilder.ensure_index_exists(

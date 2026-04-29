@@ -40,7 +40,7 @@ permission layer, which is just process-level argv flags.
 │  Sandbox.run_python(code, trace_path, index_path)          │
 │       │                                                    │
 │       ▼                                                    │
-│  _run_session ── spawn ──► deno run --allow-read=...       │
+│  _RunnerSession ── spawn ──► deno run --allow-read=...     │
 │       │                          │                         │
 │       │                          ▼                         │
 │       │      ┌──── runner.js (in Deno) ─────┐              │
@@ -73,7 +73,7 @@ calls — different from DSPy's persistent-process model (see below).
 
 | File | Role |
 |------|------|
-| `sandbox.py` | Whole host-side surface: discovery, argv build, JSON-RPC driver, subprocess lifecycle. Public: `Sandbox`, `Sandbox.resolve()`. |
+| `sandbox.py` | Whole host-side surface. Public: `Sandbox` (cached `Sandbox.get()` factory + `run_python`). Private: `_RunnerSession` (one subprocess + JSON-RPC roundtrip per call), discovery + Pyodide-asset helpers, lockfile-driven wheel resolution. |
 | `runner.js` | The Deno-side entry point. Boots Pyodide, stages the engine package + runtime into the WASM FS, runs the JSON-RPC main loop. |
 | `pyodide_runtime.py` | Loaded **inside** Pyodide. Defines `halo_bootstrap(trace_path, index_path)` and `halo_execute(code)`. |
 | `models.py` | Public IO models: `CodeExecutionResult`, `RunCodeArguments`. |
@@ -140,30 +140,36 @@ actually has to handle across stdin chunk boundaries).
 
 ## Subprocess lifecycle
 
-`_run_session` owns it; `_drive` is pure protocol.
+`_RunnerSession` owns the subprocess + RPC; `Sandbox.run_python` orchestrates.
 
 ```
-_run_session
-├── spawn deno  +  start stderr_task (drains capped)
+Sandbox.run_python
+├── session = _RunnerSession(argv)
+├── await session.start()        # spawn + stderr drain + await ready sentinel
 ├── try
-│   ├── result = wait_for(_drive(proc), TIMEOUT)
+│   ├── result = wait_for(_run_protocol(session, ...), TIMEOUT)
 │   │    │
-│   │    └── _drive: read ready ▸ mount* ▸ bootstrap ▸ execute
-│   │              returns CodeExecutionResult on any exit path
-│   │              (no shutdown / wait responsibility)
+│   │    └── _run_protocol: mount* ▸ bootstrap ▸ execute
+│   │           - mount/bootstrap/execute RPC errors raise SandboxError
+│   │           - bootstrap returning exit_code != 0 returns the result
+│   │           - execute always returns the result
 │   │
-│   ├── on TimeoutError: kill pgid, await wait, drain, return timed_out
-│   │
-│   └── _drive returned: send shutdown (best-effort), wait, drain, return
-└── except BaseException: kill pgid, await wait, drain, raise
+│   ├── on TimeoutError: session.stop(hard=True) → return timed_out result
+│   └── on success:      session.stop(hard=False) → return result + deno stderr
+├── except SandboxError: session.stop(hard=False) → return runner-failure result
+└── except BaseException: session.stop(hard=True) → re-raise
 ```
 
-Cleanup ownership is critical. Earlier shapes had `_drive` send shutdown only
-on the execute happy path, which left the runner orphaned on every early-
-return path (mount-error, bootstrap-error, bootstrap-Python-error) — `proc.wait`
-and `stderr_task` waited forever for an exit that never happened. The current
-shape runs the post-drive cleanup block exactly once per session no matter
-which `_drive` exit path produced the result.
+`_RunnerSession.stop` is idempotent and self-cleaning: graceful path sends a
+shutdown frame then waits with a 5s grace before escalating to SIGKILL; hard
+path goes straight to SIGKILL. Both paths drain the captured stderr task.
+
+Cleanup ownership is critical. Earlier shapes had the protocol code itself
+send shutdown only on the execute happy path, which left the runner orphaned
+on every early-return path (mount-error, bootstrap-error, bootstrap-Python-
+error) — `proc.wait` and `stderr_task` waited forever for an exit that never
+happened. The current shape runs `session.stop` from `Sandbox.run_python`'s
+exception handlers regardless of which protocol exit path produced the result.
 
 ## Differences from DSPy
 
@@ -209,9 +215,12 @@ deliberate — see the original brief. Concretely:
 **Added** (production hardening with no DSPy equivalent):
 - The locked-down permission model — `--allow-read` enumerated, all others
   forbidden
-- Pyodide wheel pre-cache (`_ensure_pyodide_wheels`) via host-side `urllib`,
-  so the locked-down `deno run` never needs network
-- `Sandbox.resolve()` with module-level memoization (avoids the `deno info`
+- Pyodide wheel pre-cache (`_ensure_wheels`) via host-side `urllib`, so the
+  locked-down `deno run` never needs network. Wheel set is resolved from
+  `pyodide-lock.json` (already in the Deno cache) starting from
+  `_REQUIRED_PACKAGES = ("numpy", "pandas", "pydantic")` — no hardcoded
+  filename list to drift on Pyodide bumps.
+- `Sandbox.get()` with class-level memoization (avoids the `deno info`
   subprocess + file-existence checks on every engine call)
 - Wall-clock budget (`_TIMEOUT_SECONDS`) with kill-process-group on overrun
 - UTF-8 chunk-boundary handling (`{stream: true}` decoder)
@@ -242,9 +251,9 @@ point.
 
 | File | What it covers |
 |------|------|
-| `tests/unit/sandbox/test_sandbox.py` | Resolve, argv shape, byte-aware truncation, RPC error surfacing, lifecycle (mount/bootstrap/execute/shutdown), no-hang regression, `_read_ready` JSON tolerance |
+| `tests/unit/sandbox/test_sandbox.py` | `Sandbox.get` (success cache, failure no-cache), argv shape, byte-aware truncation, RPC error surfacing, lifecycle (mount/bootstrap/execute/shutdown), no-hang regression, `_await_ready` JSON tolerance, lockfile-driven wheel resolution |
 | `tests/unit/sandbox/test_models.py` | `CodeExecutionResult` / `RunCodeArguments` shape |
-| `tests/integration/test_sandbox_availability.py` | Real `Sandbox.resolve()` against installed Deno + cached Pyodide |
+| `tests/integration/test_sandbox_availability.py` | Real `Sandbox.get()` against installed Deno + cached Pyodide |
 | `tests/integration/test_sandbox_runner.py` | Real Pyodide running real `engine.traces.TraceStore`; numpy/pandas aliases; tracebacks; UTF-8 across chunk boundaries; timeout |
 | `tests/integration/test_sandbox_policy_denials.py` | All five denial axes (host write, host read, network, subprocess, env) end-to-end |
 
