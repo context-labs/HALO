@@ -1,0 +1,132 @@
+# Source: https://api-docs.deepseek.com/quick_start/pricing
+# https://www.together.ai/models/deepseek-v3
+# https://www.together.ai/models/deepseek-r1
+MODEL_INFOS = [
+    {
+        "model_name": "deepseek-v3.2-terminus-exp-with-reasoning",
+        "client_name": "openai",
+        "model_id": "deepseek-reasoner",  # currently it points to 3.2-exp, but it may change in future
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key_env_name": "DEEPSEEK_API_KEY",
+            "reasoning_effort": "high",  # NOTE: It produces reasoning, but not along with function calls.
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "drop_reasoning_content": True,
+            "cost_per_token": {
+                "input_cache_miss": 0.28 / 1e6,
+                "input_cache_hit": 0.028 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 0.42 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["v2"],
+        "provider": "deepseek",
+    },
+    {
+        "model_name": "deepseek-v3.2-terminus-exp-without-reasoning",
+        "client_name": "openai",
+        "model_id": "deepseek-chat",  # currently it points to 3.2-exp, but it may change in future
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key_env_name": "DEEPSEEK_API_KEY",
+            "reasoning_effort": None,
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "drop_reasoning_content": False,
+            "cost_per_token": {
+                "input_cache_miss": 0.28 / 1e6,
+                "input_cache_hit": 0.028 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 0.42 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["v2"],
+        "provider": "deepseek",
+    },
+    {
+        "model_name": "deepseek-v3-0324_together",
+        "client_name": "litellm",
+        "model_id": "together_ai/deepseek-ai/DeepSeek-V3",  # Worked on together_ai more reliably than openrouter.
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "drop_reasoning_content": False,
+            "cost_per_token": {
+                "input_cache_miss": 1.25 / 1e6,
+                "input_cache_hit": 1.25 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 1.25 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["vn", "hal"],
+        "provider": "together",
+    },
+    {
+        "model_name": "deepseek-r1-0528_openrouter",
+        "client_name": "litellm",
+        "model_id": "openrouter/deepseek/deepseek-r1-0528",
+        "model_kwargs": {  # This only worked on openrouter, not on together_ai
+            "api_type": "chat_completions",
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "drop_reasoning_content": False,
+            "cost_per_token": {
+                "input_cache_miss": 0.4 / 1e6,
+                "input_cache_hit": 0.4 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 1.75 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["vn", "hal"],
+        "provider": "openrouter",
+    },
+    {
+        "model_name": "deepseek-coder-33b-instruct_together",
+        "client_name": "litellm",
+        "model_id": "together_ai/deepseek-coder-33b-instruct",
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "stop": ["<|endoftext|>", "<|EOT|>"],
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "drop_reasoning_content": False,
+            "cost_per_token": {
+                "input_cache_miss": 0.0,
+                "input_cache_hit": 0.0,
+                "input_cache_write": 0.0,
+                "output": 0.0,
+            },  # Not available anymore.
+        },
+        "function_calling": False,
+        "tool_choice": "none",
+        "function_calling_demos": True,
+        "part_of": ["v1", "deprecated"],
+        "provider": "together",
+    },
+]

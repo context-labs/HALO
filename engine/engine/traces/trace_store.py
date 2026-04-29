@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from engine.traces.models.canonical_span import SpanRecord
 from engine.traces.models.trace_index_models import TraceIndexRow
 
 if TYPE_CHECKING:
@@ -14,6 +17,106 @@ if TYPE_CHECKING:
         TraceSearchResult,
         TraceView,
     )
+
+
+_OVERVIEW_SAMPLE_TRACE_IDS = 20
+
+# Cap per-attribute payload size when returning spans to the LLM. Large fields
+# like input.value / output.value / llm.input_messages can be tens of KB each
+# and easily blow the model's context window when many spans come back at once.
+#
+# Two caps, by tool:
+#   - ``_DISCOVERY_ATTR_TRUNCATION_BYTES`` (4 KB) is the cheap-discovery cap used by
+#     ``view_trace`` (which can pull every span of a trace) and ``search_trace``
+#     (which can match many spans at once). It preserves enough head-of-payload
+#     for the model to see what was called and roughly what came back, without
+#     the long tail.
+#   - ``_SURGICAL_ATTR_TRUNCATION_BYTES`` (16 KB) is the surgical-read cap used by
+#     ``view_spans``. The agent has explicitly named the spans it wants, capped
+#     to 200 ids, so a higher per-attribute budget is appropriate — that's what
+#     makes ``view_spans`` genuinely complementary to ``search_trace`` rather
+#     than a duplicate.
+_DISCOVERY_ATTR_TRUNCATION_BYTES = 4096
+_SURGICAL_ATTR_TRUNCATION_BYTES = 16384
+
+# Per-call total size budget for ``view_trace``. When a trace's truncated serialized
+# size exceeds this, ``view_trace`` returns metadata + statistics instead of the
+# spans, and the agent is told to use ``search_trace`` / ``view_spans`` for surgical
+# reads. 150_000 chars is a comfortable fraction of even modest context windows
+# (~37K tokens) and leaves headroom for conversation history.
+_VIEW_TRACE_CHAR_BUDGET = 150_000
+
+# How many top-frequency span names to surface in the oversized summary.
+_OVERSIZED_TOP_SPAN_NAMES = 10
+
+
+def _truncate_attribute_value(value: Any, cap: int) -> Any:
+    """Cap a single attribute value at ``cap`` bytes of its JSON form.
+
+    Strings beyond the threshold get a head slice plus a marker. Non-string values
+    only get truncated if their JSON serialization exceeds the threshold (in which
+    case they're replaced by the truncated JSON string with a marker). Small values
+    pass through untouched.
+    """
+    if isinstance(value, str):
+        if len(value) <= cap:
+            return value
+        return f"{value[:cap]}... [HALO truncated: original {len(value)} chars]"
+    try:
+        serialized = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return value
+    if len(serialized) <= cap:
+        return value
+    return (
+        f"{serialized[:cap]}"
+        f"... [HALO truncated: original {len(serialized)} chars; non-string attribute serialized for truncation]"
+    )
+
+
+# OpenInference instrumentations emit per-message flat projections under keys
+# like ``llm.input_messages.0.message.contents.0.message_content.text``. A single
+# LLM span in a long agent trace can have 400+ such keys totaling 60+ KB even
+# though most individual values are tiny (so the per-attribute truncation
+# doesn't catch them). The JSON-blob equivalents — ``llm.input_messages`` and
+# ``llm.output_messages`` — carry the same content and ARE caught by the per-
+# attribute truncation, so we drop the flat projections to keep the per-span
+# size bounded. The string ``__halo_dropped_flat_projections`` is added to
+# preserve discoverability when the model needs to know what's missing.
+_NOISY_FLAT_PROJECTION_RE = re.compile(
+    r"^(?:llm\.(?:input|output)_messages|mcp\.tools)\.\d+\."
+)
+
+
+def _is_noisy_flat_projection(key: str) -> bool:
+    """True for OpenInference flat-projection keys (per-message / per-tool fan-outs)."""
+    return bool(_NOISY_FLAT_PROJECTION_RE.match(key))
+
+
+def _truncate_span_attributes(span: SpanRecord, cap: int) -> SpanRecord:
+    """Return a copy of ``span`` whose oversized attribute values are head-capped
+    at ``cap`` bytes and whose noisy OpenInference flat projections are dropped.
+
+    The ``attributes`` dict on ``SpanRecord`` is ``dict[str, Any]`` and the model
+    is ``extra="allow"``, so replacing dict/list values with truncated strings
+    is schema-safe.
+    """
+    new_attrs: dict[str, Any] = {}
+    dropped = 0
+    for k, v in span.attributes.items():
+        if _is_noisy_flat_projection(k):
+            dropped += 1
+            continue
+        new_attrs[k] = _truncate_attribute_value(v, cap)
+    if dropped:
+        cap_kb = cap // 1024
+        new_attrs["__halo_dropped_flat_projections"] = (
+            f"{dropped} llm.input_messages.<i>.* / llm.output_messages.<i>.* / "
+            "mcp.tools.<i>.* projection keys dropped to keep span size bounded. "
+            "The JSON-blob attributes llm.input_messages / llm.output_messages / "
+            f"mcp.tools.listed (head-capped at ~{cap_kb}KB) carry the same content."
+        )
+    return span.model_copy(update={"attributes": new_attrs})
 
 
 class TraceStore:
@@ -54,9 +157,19 @@ class TraceStore:
         return self._index_path
 
     def view_trace(self, trace_id: str) -> "TraceView":
-        """Read all spans of one trace by seeking to each indexed byte offset and parsing as SpanRecord."""
-        from engine.traces.models.canonical_span import SpanRecord
-        from engine.traces.models.trace_query_models import TraceView
+        """Read all spans of one trace by seeking to each indexed byte offset and parsing as SpanRecord.
+
+        Per-attribute payloads are head-capped at ``_DISCOVERY_ATTR_TRUNCATION_BYTES``
+        (4 KB) so a single big trace can't blow the model's context window. If the
+        truncated serialized size still exceeds ``_VIEW_TRACE_CHAR_BUDGET``, the spans
+        are dropped and an ``OversizedTraceSummary`` is returned in their place — the
+        agent should switch to ``search_trace`` for discovery and ``view_spans`` for
+        surgical reads at a higher per-attribute budget (16 KB).
+        """
+        from engine.traces.models.trace_query_models import (
+            OversizedTraceSummary,
+            TraceView,
+        )
 
         if trace_id not in self._rows_by_id:
             raise KeyError(trace_id)
@@ -67,7 +180,83 @@ class TraceStore:
             for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
                 fh.seek(offset)
                 blob = fh.read(length)
-                spans.append(SpanRecord.model_validate_json(blob))
+                spans.append(
+                    _truncate_span_attributes(
+                        SpanRecord.model_validate_json(blob),
+                        _DISCOVERY_ATTR_TRUNCATION_BYTES,
+                    )
+                )
+
+        # Total-size guard: if the truncated spans collectively exceed the budget,
+        # don't return the spans — return a summary that lets the agent plan smaller
+        # follow-up calls without blowing context.
+        per_span_sizes = [len(s.model_dump_json()) for s in spans]
+        total_chars = sum(per_span_sizes)
+        if total_chars > _VIEW_TRACE_CHAR_BUDGET:
+            sorted_sizes = sorted(per_span_sizes)
+            mid = sorted_sizes[len(sorted_sizes) // 2] if sorted_sizes else 0
+            from collections import Counter
+            name_counts = Counter(s.name for s in spans)
+            error_spans = sum(1 for s in spans if s.status.code == "STATUS_CODE_ERROR")
+            recommendation = (
+                f"This trace exceeds the per-call view budget "
+                f"({total_chars:,} chars > {_VIEW_TRACE_CHAR_BUDGET:,}). "
+                "Do not retry view_trace. Instead: "
+                "(1) call search_trace(trace_id, pattern) with a specific substring "
+                "(error string, tool name, attribute key) to surface the spans you "
+                "actually need; or (2) call view_spans(trace_id, span_ids=[...]) with "
+                "specific span ids you've already seen in search_trace results or "
+                "in another tool's output. The top_span_names below give you a sense "
+                "of what's in the trace."
+            )
+            summary = OversizedTraceSummary(
+                trace_id=trace_id,
+                span_count=len(spans),
+                total_serialized_chars=total_chars,
+                char_budget=_VIEW_TRACE_CHAR_BUDGET,
+                span_size_min=sorted_sizes[0] if sorted_sizes else 0,
+                span_size_median=mid,
+                span_size_max=sorted_sizes[-1] if sorted_sizes else 0,
+                top_span_names=name_counts.most_common(_OVERSIZED_TOP_SPAN_NAMES),
+                error_span_count=error_spans,
+                recommendation=recommendation,
+            )
+            return TraceView(trace_id=trace_id, spans=[], oversized=summary)
+
+        return TraceView(trace_id=trace_id, spans=spans)
+
+    def view_spans(self, trace_id: str, span_ids: list[str]) -> "TraceView":
+        """Read only the named ``span_ids`` from ``trace_id`` at the surgical-read cap.
+
+        Surgical follow-up to ``search_trace`` (or any other source of span ids the
+        agent has on hand). Per-attribute payloads are head-capped at
+        ``_SURGICAL_ATTR_TRUNCATION_BYTES`` (16 KB) — 4× higher than the discovery
+        cap used by ``view_trace`` and ``search_trace`` — so re-fetching a span the
+        agent already saw via ``search_trace`` actually returns more bytes for any
+        attribute that was head-capped on the discovery path.
+
+        Walks the trace's byte offsets and returns spans whose ``span_id`` is in
+        ``span_ids``; ids that don't match any span are silently skipped.
+        """
+        from engine.traces.models.trace_query_models import TraceView
+
+        if trace_id not in self._rows_by_id:
+            raise KeyError(trace_id)
+        row = self._rows_by_id[trace_id]
+        wanted = set(span_ids)
+        if not wanted:
+            return TraceView(trace_id=trace_id, spans=[])
+
+        spans: list[SpanRecord] = []
+        with self._trace_path.open("rb") as fh:
+            for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
+                fh.seek(offset)
+                blob = fh.read(length)
+                span = SpanRecord.model_validate_json(blob)
+                if span.span_id in wanted:
+                    spans.append(
+                        _truncate_span_attributes(span, _SURGICAL_ATTR_TRUNCATION_BYTES)
+                    )
         return TraceView(trace_id=trace_id, spans=spans)
 
     def query_traces(
@@ -142,10 +331,19 @@ class TraceStore:
             error_trace_count=sum(1 for r in rows if r.has_errors),
             total_input_tokens=sum(r.total_input_tokens for r in rows),
             total_output_tokens=sum(r.total_output_tokens for r in rows),
+            sample_trace_ids=[r.trace_id for r in rows[:_OVERVIEW_SAMPLE_TRACE_IDS]],
         )
 
     def search_trace(self, trace_id: str, pattern: str) -> "TraceSearchResult":
-        """Substring search on raw JSON span text within one trace; returns matching span lines verbatim."""
+        """Substring search on raw JSON span text within one trace.
+
+        Pattern matching is done against the raw on-disk JSON (so the pattern can
+        target keys inside large attribute values). Returned matches are re-serialized
+        with attribute payloads head-capped at ``_DISCOVERY_ATTR_TRUNCATION_BYTES``
+        (4 KB) to keep the per-call response size bounded — the agent should follow
+        up with ``view_spans`` (16 KB cap) if any matched span was truncated and the
+        agent needs more of its payload.
+        """
         from engine.traces.models.trace_query_models import TraceSearchResult
 
         if trace_id not in self._rows_by_id:
@@ -158,7 +356,12 @@ class TraceStore:
                 fh.seek(offset)
                 blob = fh.read(length).decode("utf-8", errors="replace")
                 if pattern in blob:
-                    matches.append(blob)
+                    span = SpanRecord.model_validate_json(blob)
+                    matches.append(
+                        _truncate_span_attributes(
+                            span, _DISCOVERY_ATTR_TRUNCATION_BYTES
+                        ).model_dump_json()
+                    )
         return TraceSearchResult(trace_id=trace_id, match_count=len(matches), matches=matches)
 
     def render_trace(self, trace_id: str, budget: int) -> str:
