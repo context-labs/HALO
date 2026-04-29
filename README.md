@@ -47,7 +47,7 @@ This repository also contains benchmarking examples that apply HALO to popular a
 
 ## HALO Loop
 
-The core HALO loop is suprising simple:
+The core HALO loop is suprisingly simple:
 1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing. See [here](/demo/openai-agents-sdk-demo/) for an example using the OpenAI Agents SDK. 
 2. Feed traces in the HALO RLM as a .jsonl file. We recomend starting with at least 100 traces; HALO RLM can support up to 100k traces per execution. See the [CLI Guide](get-started) for instuctions.
 3. The RLM decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
@@ -74,18 +74,7 @@ We applied HALO to the [AppWorld](https://appworld.dev/) benchmark, a set of age
 
 The feedback from HALO Engine surfaced failures in the harnesses such as hallucinated tool calls, redundant arguments in tools, refusal loops, and semantic correctness issues. Each issue mapped cleanly to a direct prompt edit. HALO’s claims were independently verified from the source trace files with the findings holding up under scrutiny. 
 
-<!-- 
-  GitHub markdown does not support custom CSS styles in <div> tags, 
-  so to give the image a black background, you can create a PNG with padding and a black background,
-  or (for a "good enough" effect) you can use a table with a single cell.
--->
-<table>
-  <tr>
-    <td style="background-color:black;padding:16px;border-radius:8px;">
-      <img src="./assets//appworld-sgc.png" alt="rlm">
-    </td>
-  </tr>
-</table>
+<img src="./assets//halo-app-world-sgc.png" alt="app-world-sgc"  style="border-radius:8px;">
 <!-- 
   Note: Table cell styling is still limited in GitHub Markdown rendering,
   and border-radius is not supported, but background color and padding usually work.
