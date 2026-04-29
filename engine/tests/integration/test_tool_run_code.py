@@ -1,11 +1,11 @@
 """Isolated integration test for ``run_code`` (live sandbox).
 
-Resolves whatever sandbox backend the host provides (bubblewrap on Linux,
-``sandbox-exec`` on macOS) and invokes the registered SDK ``FunctionTool``
-with a tiny script that confirms the sandbox bootstrap preloaded
-``trace_store`` correctly. Skips when no sandbox backend is available — the
-platform-specific sandbox suites under ``tests/integration-{linux,macos}/``
-are responsible for deeper coverage of policy denials and output capping.
+Resolves the Deno+Pyodide WASM sandbox and invokes the registered SDK
+``FunctionTool`` with a tiny script that confirms the sandbox bootstrap
+preloaded ``trace_store`` correctly. Skips when no Deno binary is available
+on the host — the dedicated suite under ``tests/integration-sandbox/`` is
+responsible for deeper coverage of policy denials, output capping, and
+timeout handling.
 """
 
 from __future__ import annotations
@@ -17,8 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from agents.tool_context import ToolContext as SdkToolContext
 
-from engine.sandbox.models import SandboxConfig
-from engine.sandbox.sandbox import resolve_sandbox
+from engine.sandbox.sandbox import Sandbox
 from tests.integration.tool_isolation_kit import (
     engine_config,
     load_store,
@@ -30,9 +29,11 @@ from tests.integration.tool_isolation_kit import (
 
 @pytest.mark.asyncio
 async def test_run_code_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
-    sandbox = resolve_sandbox(config=SandboxConfig(timeout_seconds=20.0))
+    sandbox = Sandbox.get()
     if sandbox is None:
-        pytest.skip("no sandbox backend available on this host")
+        pytest.skip(
+            "Deno binary not available on this host (install the `deno` extra or place deno on PATH)"
+        )
 
     cfg = engine_config()
     store = await load_store(tmp_path, fixtures_dir)
