@@ -41,6 +41,7 @@
 ## What is this?
 
 HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains:
+
 - Information on HALO methodology.
 - A Python package that implements the core HALO-RLM engine. [View on PyPI](https://pypi.org/project/halo-engine/)
 - A demo project that shows how to build HALO loops for your agents using the Python package. [View demo](/demo/openai-agents-sdk-demo/)
@@ -82,9 +83,11 @@ halo --help
 1. [Integrate Tracing](docs/integrations/openai-agents-sdk.md)
 2. Collect traces by running your agent
 3. Run the HALO engine, see the [CLI](/halo_cli/README.md) docs for more info
+
 ```bash
 export OPENAI_API_KEY=...
-halo path_to_your_traces.jsonl -p "Diagnose the errors you find and suggest fixes"
+
+halo path_to_your_traces.jsonl -p "Diagnose errors you find and suggest fixes"
 ```
 
 We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
