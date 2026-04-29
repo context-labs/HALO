@@ -74,9 +74,24 @@ We applied HALO to the [AppWorld](https://appworld.dev/) benchmark, a set of age
 
 The feedback from HALO Engine surfaced failures in the harnesses such as hallucinated tool calls, redundant arguments in tools, refusal loops, and semantic correctness issues. Each issue mapped cleanly to a direct prompt edit. HALO’s claims were independently verified from the source trace files with the findings holding up under scrutiny. 
 
-<div style="border-radius:8px;background-color:black;padding:16px">
-  <img src="./assets//appworld-sgc.png" alt="rlm">
-</div>  
+<!-- 
+  GitHub markdown does not support custom CSS styles in <div> tags, 
+  so to give the image a black background, you can create a PNG with padding and a black background,
+  or (for a "good enough" effect) you can use a table with a single cell.
+-->
+<table>
+  <tr>
+    <td style="background-color:black;padding:16px;border-radius:8px;">
+      <img src="./assets//appworld-sgc.png" alt="rlm">
+    </td>
+  </tr>
+</table>
+<!-- 
+  Note: Table cell styling is still limited in GitHub Markdown rendering,
+  and border-radius is not supported, but background color and padding usually work.
+  If this does not display as desired, you will need to update the image asset itself
+  to include padding and a black background.
+-->
 The peak improvements over baseline were substantial for both models. For Gemini 3 Flash, dev SGC went from 36.8% to 52.6% (+15.8 points) and test_normal SGC went from 37.5% to 48.2% (+10.7 points). For Sonnet 4.6, dev SGC went from 73.7% to 89.5% (+15.8 points) and test_normal SGC went from 62.5% to 73.2% (+10.7 points). 
 
 
