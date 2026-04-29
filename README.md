@@ -47,7 +47,7 @@ This repository also contains benchmarking examples that apply HALO to popular a
 
 The core HALO loop is suprisingly simple:
 1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing. See [here](/demo/openai-agents-sdk-demo/) for an example using the OpenAI Agents SDK. 
-2. Feed traces in the HALO RLM as a .jsonl file. We recomend starting with at least 100 traces; HALO RLM can support up to 100k traces per execution. See the [CLI Guide](get-started) for instuctions.
+2. Feed traces in the HALO RLM as a .jsonl file. We recomend starting with at least 100 traces; HALO RLM can support up to 100k traces per execution. See the [CLI Guide](/cli/README.md) for instuctions.
 3. The RLM decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
 4. This report is then fed to a coding agent like Cursor or Claude Code, which is responsible for generating and applying a set of changes to your harness to improve performance.
 5. The harness is then re-deployed, more traces are gathered, and the cycle repeats again. 
