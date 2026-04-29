@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import multiprocessing as mp
 import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from functools import partial
-from multiprocessing import Pool
 from pathlib import Path
 
 from engine.traces.models.canonical_span import SpanRecord
@@ -54,9 +55,9 @@ def _merge_accumulators(
 ) -> dict[str, _RowAccumulator]:
     """Stage 3: merge per-worker partials by trace_id; chunk-order traversal preserves file order.
 
-    Iterating ``per_worker`` in order — and ``Pool.map`` returns results in input
-    order — is what guarantees ``byte_offsets`` within a trace stays sorted by
-    file position. No explicit sort step is needed.
+    Iterating ``per_worker`` in order — and ``asyncio.gather`` returns results
+    in argument order — is what guarantees ``byte_offsets`` within a trace stays
+    sorted by file position. No explicit sort step is needed.
     """
     merged: dict[str, _RowAccumulator] = {}
     for worker_dict in per_worker:
@@ -69,12 +70,45 @@ def _merge_accumulators(
     return merged
 
 
+def _write_atomic(
+    *,
+    index_path: Path,
+    meta_path: Path,
+    rows: list[TraceIndexRow],
+    schema_version: int,
+    source_size: int,
+    source_mtime_ns: int,
+) -> None:
+    """Serialize rows + meta and atomically replace the sidecar files.
+
+    Synchronous on purpose — callers run this via ``asyncio.to_thread`` so the
+    event loop is not blocked while serializing potentially hundreds of MB of
+    JSON or writing large files to disk.
+    """
+    tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
+    tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
+
+    tmp_index.write_text("\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else ""))
+    tmp_meta.write_text(
+        TraceIndexMeta(
+            schema_version=schema_version,
+            trace_count=len(rows),
+            source_size=source_size,
+            source_mtime_ns=source_mtime_ns,
+        ).model_dump_json()
+    )
+
+    tmp_index.replace(index_path)
+    tmp_meta.replace(meta_path)
+
+
 def _process_chunk(trace_path: Path, chunk: list[tuple[int, int]]) -> dict[str, _RowAccumulator]:
     """Stage 2 worker: read each (offset, length) from the file, parse, and accumulate locally.
 
-    Top-level so it pickles cleanly for ``multiprocessing.Pool.map``. Each worker
-    opens the file independently and seeks to its tuples — the OS page cache makes
-    repeated reads of nearby bytes essentially free after the stage-1 scan.
+    Top-level so it pickles cleanly for ``ProcessPoolExecutor`` dispatch. Each
+    worker opens the file independently and seeks to its tuples — the OS page
+    cache makes repeated reads of nearby bytes essentially free after the
+    stage-1 scan.
     """
     rows: dict[str, _RowAccumulator] = {}
     with trace_path.open("rb") as fh:
@@ -266,13 +300,16 @@ class TraceIndexBuilder:
     ) -> None:
         """Two-pass parallel scan over the JSONL, grouping by trace_id and writing the sidecars atomically.
 
-        Stage 1 (sequential) records ``(byte_offset, byte_length)`` per non-empty
-        line. Stage 2 splits that list into N=cpu_count worker chunks dispatched
-        via ``multiprocessing.Pool.map`` to parallel pydantic parse + accumulate.
-        Stage 3 merges per-worker partials by ``trace_id`` in chunk order — which
-        equals file order, preserving today's byte-exact output. Below
-        ``SMALL_FILE_THRESHOLD`` non-empty lines we run inline (no Pool) to avoid
-        fork+pickle overhead dominating on small files.
+        Stage 1 (sequential, in a thread) records ``(byte_offset, byte_length)``
+        per non-empty line. Stage 2 splits that list into N=cpu_count worker
+        chunks dispatched via ``ProcessPoolExecutor`` + ``asyncio.gather`` to
+        parallel pydantic parse + accumulate. Stage 3 merges per-worker partials
+        by ``trace_id`` in chunk order — which equals file order, preserving
+        today's byte-exact output. Below ``SMALL_FILE_THRESHOLD`` non-empty
+        lines we run inline (no executor) to avoid fork+pickle overhead
+        dominating on small files. The atomic write block runs in a thread so
+        the event loop is not blocked while serializing/writing potentially
+        large index files.
         """
         if schema_version != 1:
             raise ValueError(f"unsupported trace index schema_version={schema_version}")
@@ -280,40 +317,36 @@ class TraceIndexBuilder:
         if source_size is None or source_mtime_ns is None:
             source_size, source_mtime_ns = cls._fingerprint_trace_file(trace_path)
 
-        rows = cls._run_build(trace_path)
+        rows = await cls._run_build(trace_path)
 
-        tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
-        tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
-
-        tmp_index.write_text(
-            "\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else "")
+        await asyncio.to_thread(
+            _write_atomic,
+            index_path=index_path,
+            meta_path=meta_path,
+            rows=rows,
+            schema_version=schema_version,
+            source_size=source_size,
+            source_mtime_ns=source_mtime_ns,
         )
-        tmp_meta.write_text(
-            TraceIndexMeta(
-                schema_version=schema_version,
-                trace_count=len(rows),
-                source_size=source_size,
-                source_mtime_ns=source_mtime_ns,
-            ).model_dump_json()
-        )
-
-        tmp_index.replace(index_path)
-        tmp_meta.replace(meta_path)
 
     @classmethod
-    def _run_build(cls, trace_path: Path) -> list[TraceIndexRow]:
-        """Synchronous staged pipeline: index lines, parse in parallel, merge, finalize."""
-        line_offsets = _index_line_offsets(trace_path)
+    async def _run_build(cls, trace_path: Path) -> list[TraceIndexRow]:
+        """Async staged pipeline: index lines (in a thread), parse via ProcessPoolExecutor, merge, finalize."""
+        line_offsets = await asyncio.to_thread(_index_line_offsets, trace_path)
         if not line_offsets:
             return []
 
         if len(line_offsets) < cls.SMALL_FILE_THRESHOLD:
-            merged = _process_chunk(trace_path, line_offsets)
-        else:
-            n_workers = os.cpu_count() or 1
-            chunks = _split_into_chunks(line_offsets, n_workers)
-            with Pool(processes=len(chunks)) as pool:
-                per_worker = pool.map(partial(_process_chunk, trace_path), chunks)
-            merged = _merge_accumulators(per_worker)
+            merged = await asyncio.to_thread(_process_chunk, trace_path, line_offsets)
+            return [acc.finalize() for acc in merged.values()]
 
+        n_workers = os.cpu_count() or 1
+        chunks = _split_into_chunks(line_offsets, n_workers)
+        loop = asyncio.get_running_loop()
+        ctx = mp.get_context("forkserver")
+        with ProcessPoolExecutor(max_workers=len(chunks), mp_context=ctx) as ex:
+            per_worker = await asyncio.gather(
+                *(loop.run_in_executor(ex, _process_chunk, trace_path, c) for c in chunks)
+            )
+        merged = _merge_accumulators(per_worker)
         return [acc.finalize() for acc in merged.values()]
