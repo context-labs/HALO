@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from engine.traces.models.canonical_span import SpanRecord
 from engine.traces.models.trace_index_models import TraceIndexRow
@@ -602,27 +602,32 @@ class TraceStore:
 
         Indexed predicates run first (cheap, in-memory). ``filters.regex_pattern``
         runs last because it requires reading the JSONL — early-exits per trace
-        on the first matching span so a typical match stays cheap.
+        on the first matching span so a typical match stays cheap. The JSONL is
+        opened once for the whole regex scan and the same handle is reused across
+        every candidate row, mirroring how ``view_trace``/``search_trace`` handle
+        per-span seeks within a single open file.
         """
         rows = [r for r in self._rows if _matches_indexed_filters(r, filters)]
         if filters.regex_pattern is None:
             return rows
         pattern = _compile_regex_or_raise(filters.regex_pattern)
-        return [r for r in rows if self._row_has_content_match(r, pattern)]
-
-    def _row_has_content_match(self, row: TraceIndexRow, pattern: re.Pattern[str]) -> bool:
-        """True iff at least one span of ``row`` has a regex match in its raw JSON.
-
-        Stops at the first hit per trace so a typical match is cheap; only forces a
-        full read when the trace doesn't match.
-        """
         with self._trace_path.open("rb") as fh:
-            for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
-                fh.seek(offset)
-                blob = fh.read(length)
-                if pattern.search(blob.decode("utf-8", errors="replace")):
-                    return True
-        return False
+            return [r for r in rows if _row_has_content_match(fh, r, pattern)]
+
+
+def _row_has_content_match(fh: IO[bytes], row: TraceIndexRow, pattern: re.Pattern[str]) -> bool:
+    """True iff at least one span of ``row`` has a regex match in its raw JSON.
+
+    Takes an already-open file handle so the caller can amortize the open/close
+    cost across many rows in a single scan. Stops at the first hit per trace so
+    a typical match stays cheap.
+    """
+    for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
+        fh.seek(offset)
+        blob = fh.read(length)
+        if pattern.search(blob.decode("utf-8", errors="replace")):
+            return True
+    return False
 
 
 def _matches_indexed_filters(row: TraceIndexRow, filters: "TraceFilters") -> bool:
