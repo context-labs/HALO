@@ -15,4 +15,4 @@ cp .env.example .env                # fill in OPENAI_API_KEY
 uv run main.py "Where is tracing configured in this repo?" --root ../..
 ```
 
-Traces land in `./traces.jsonl`. For integration into your own app, trace shape, and the RLM handoff, see [`docs/integrations/openai-agents-sdk.md`](../../docs/integrations/openai-agents-sdk.md).
+Traces land in `./traces.jsonl`. For integration into your own app, trace shape, and the RLM handoff, see the [integration guide](../../docs/integrations/openai-agents-sdk.md).
