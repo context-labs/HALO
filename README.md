@@ -85,8 +85,6 @@ The feedback from HALO Engine surfaced failures in the harnesses such as halluci
 -->
 The peak improvements over baseline were substantial for both models. For Gemini 3 Flash, dev SGC went from 36.8% to 52.6% (+15.8 points) and test_normal SGC went from 37.5% to 48.2% (+10.7 points). For Sonnet 4.6, dev SGC went from 73.7% to 89.5% (+15.8 points) and test_normal SGC went from 62.5% to 73.2% (+10.7 points). 
 
-## 
-
 ## License
 
 [MIT](LICENSE)
