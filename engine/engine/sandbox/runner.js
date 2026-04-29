@@ -171,8 +171,6 @@ function executeCode(params) {
 // Main loop
 // =============================================================================
 
-// Preload numpy + pandas so user code can rely on them without a per-execute
-// load delay. These are the only data libraries HALO supports.
 // Preload numpy + pandas (user analysis surface) and pydantic (which
 // the staged ``engine.traces`` package imports). Pyodide resolves
 // transitive dependencies from its lockfile, so listing ``pydantic`` is
