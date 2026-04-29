@@ -77,7 +77,6 @@ calls — different from DSPy's persistent-process model (see below).
 | `runner.js` | The Deno-side entry point. Boots Pyodide, stages the engine package + runtime into the WASM FS, runs the JSON-RPC main loop. |
 | `pyodide_runtime.py` | Loaded **inside** Pyodide. Defines `halo_bootstrap(trace_path, index_path)` and `halo_execute(code)`. |
 | `models.py` | Public IO models: `CodeExecutionResult`, `RunCodeArguments`. |
-| `log.py` | `log_unavailable(diagnostic, remediation)` — single helper for "sandbox not usable" warnings. |
 | `__init__.py` | Re-exports `Sandbox`, `CodeExecutionResult`, `RunCodeArguments`. |
 
 `pyodide_trace_compat.py` no longer exists — the in-Pyodide bootstrap imports

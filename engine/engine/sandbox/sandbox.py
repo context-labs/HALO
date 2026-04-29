@@ -17,16 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import signal
 import subprocess
+import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from engine.sandbox.log import log_unavailable
 from engine.sandbox.models import CodeExecutionResult
+
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -88,15 +91,6 @@ _TRUNCATION_MARKER = "\n[... output truncated ...]\n"
 # Cold-boot of npm:pyodide on a fresh Deno cache can take ~10s.
 _READY_TIMEOUT_SECONDS = 30.0
 
-_DENO_MISSING_REMEDIATION = (
-    "The ``deno`` PyPI dependency normally ships a per-platform binary.\n"
-    "If it failed to provide one (uncommon platform like musl Linux, or a\n"
-    "broken install), reinstall the engine env (``task env:setup``) or\n"
-    "drop a Deno >=2.7 binary on PATH:\n"
-    "  curl -fsSL https://deno.land/install.sh | sh"
-)
-
-
 # ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
@@ -104,6 +98,33 @@ _DENO_MISSING_REMEDIATION = (
 
 class SandboxError(RuntimeError):
     """Raised when the Deno/Pyodide subprocess returns a JSON-RPC error or dies."""
+
+
+def _log_unavailable(diagnostic: str) -> None:
+    """Emit the sandbox-unavailable warning to logging and stderr.
+
+    Called when the host can't produce a working sandbox (Deno binary
+    missing, Pyodide assets missing, wheel pre-cache failed). The
+    warning is intentionally visible in every common deployment surface
+    — CLI, library import, container logs — so operators see why
+    ``run_code`` is missing from the agent's tool list. The remediation
+    is hardcoded here rather than passed in: the failure modes all have
+    the same fix path (the ``deno`` PyPI dep ships a binary; if it
+    failed, reinstall or fall back to a system Deno).
+    """
+    warning = (
+        "HALO run_code disabled: sandbox unavailable.\n\n"
+        f"Reason:\n  {diagnostic}\n\n"
+        "How to fix:\n"
+        "  The ``deno`` PyPI dependency normally ships a per-platform binary\n"
+        "  alongside the engine. If it didn't (uncommon platforms like musl\n"
+        "  Linux or FreeBSD, or a broken install), reinstall the engine\n"
+        "  package or drop a Deno >=2.7 binary on PATH:\n"
+        "    curl -fsSL https://deno.land/install.sh | sh\n\n"
+        "The engine will continue without exposing run_code to the agent."
+    )
+    _logger.warning(warning)
+    print(warning, file=sys.stderr, flush=True)
 
 
 # Successful resolves are memoized at module level. Resolution work is
@@ -151,14 +172,13 @@ class Sandbox:
 
         Resolution order for ``deno``:
           1. ``deno.find_deno_bin()`` from the ``deno`` PyPI dependency —
-             the normal path, the binary ships with ``pip install`` /
-             ``uv sync``.
+             the normal path, the binary ships with ``pip install``.
           2. ``shutil.which("deno")`` — fallback for unsupported platforms
              (musl Linux, FreeBSD) or system-managed Deno installs.
 
         On any failure (binary missing, ``deno info`` failing, sibling
         files missing, wheel download failing) a remediation warning is
-        emitted via :func:`log_unavailable` and ``None`` is returned so
+        emitted via :func:`_log_unavailable` and ``None`` is returned so
         ``run_code`` is silently dropped from the agent's tool surface
         rather than registered with broken plumbing.
 
@@ -173,9 +193,8 @@ class Sandbox:
 
         deno = _locate_deno_executable()
         if deno is None:
-            log_unavailable(
+            _log_unavailable(
                 diagnostic="deno binary not found (expected from `deno` PyPI dep or PATH)",
-                remediation=_DENO_MISSING_REMEDIATION,
             )
             return None
         try:
@@ -194,7 +213,7 @@ class Sandbox:
             pyodide_dir = _ensure_pyodide_npm_cache(deno, deno_dir)
             _ensure_pyodide_wheels(pyodide_dir)
         except _ResolutionError as exc:
-            log_unavailable(diagnostic=str(exc), remediation=_DENO_MISSING_REMEDIATION)
+            _log_unavailable(diagnostic=str(exc))
             return None
         sandbox = cls(
             deno_executable=deno,
