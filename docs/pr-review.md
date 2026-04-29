@@ -110,8 +110,9 @@ class QueryTracesArguments(BaseModel):
 
 Render / synthesis path (keep separate from span viewing changes):
 
-- [ ] Better understand and update `render_trace`, which is currently used by `synthesize_traces` rather than as a user-facing trace-view primitive
-- [ ] `render_trace` should not depend on `view_trace`, because `view_trace` can intentionally return `spans=[]` with an oversized summary. That makes synthesis incorrectly see oversized traces as empty.
-- [ ] `render_trace` should render a budgeted, metadata-first trace outline directly: trace_id, real span_count, total_serialized_bytes, status/error counts, then compact per-span lines as budget allows
-- [ ] Per-span render lines should include span_id, parent_span_id, span_name, kind, status_code, model/tool/agent hints, and short error/status/input/output snippets only when useful and within budget
-- [ ] If the trace is too large, `render_trace` should still report the real counts and clearly say the outline was truncated after the budget, not report zero spans
+- [ ] Remove `synthesize_traces`
+- [ ] Remove `render_trace`
+- [ ] Prefer subagent-driven synthesis: the root agent should delegate focused trace-gathering or summarization tasks to a subagent, and that subagent should use `query_traces`, `search_trace`, `search_span`, and `view_spans` directly
+- [ ] Add root/subagent instructions for when to delegate synthesis work, e.g. when comparing multiple traces, gathering evidence from large traces, or producing a concise summary from several search results
+- [ ] Subagent summaries should cite concrete trace ids, span ids, status/error patterns, model/tool names, and relevant token/count metadata from the trace tools
+- [ ] Do not keep a dedicated synthesis tool; it duplicates the interactive trace primitives and risks hidden lossy rendering
