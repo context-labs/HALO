@@ -5,7 +5,7 @@ import pytest
 from engine.sandbox.sandbox import Sandbox
 
 
-def test_sandbox_resolve_returns_working_sandbox() -> None:
+def test_sandbox_get_returns_working_sandbox() -> None:
     """End-to-end probe must succeed; failure here is a release blocker.
 
     A successful resolve means: Deno is on PATH, the Pyodide npm package
@@ -15,7 +15,7 @@ def test_sandbox_resolve_returns_working_sandbox() -> None:
     permissions and ``run_code`` would silently disappear from the agent
     surface — exactly the kind of release blocker we want to catch in CI.
     """
-    sandbox = Sandbox.resolve()
+    sandbox = Sandbox.get()
     if sandbox is None:
         pytest.fail("Pyodide sandbox unavailable in CI; this must work for release.")
 

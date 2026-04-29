@@ -1,11 +1,10 @@
-"""HALO Deno+Pyodide WASM sandbox: discovery, argv build, subprocess driver.
+"""HALO Deno+Pyodide WASM sandbox.
 
-One module owns the whole sandbox lifecycle so callers see exactly two
-public names: the :class:`Sandbox` value object that holds the resolved
-paths, and its :meth:`Sandbox.resolve` factory. Everything else —
-``deno`` discovery, Pyodide wheel pre-cache, the JSON-RPC subprocess
-driver, the per-run ``--allow-read`` set — is private machinery in this
-file.
+One ``Sandbox`` class owns the host-side surface: discovery, asset prep,
+the Deno argv, and ``run_python``. A private ``_RunnerSession`` owns one
+subprocess + JSON-RPC roundtrip. Pyodide-specific knobs (version pin,
+required packages, lockfile-driven wheel resolution) live as module
+constants and helpers in this same file.
 
 The single per-process knob (``_TIMEOUT_SECONDS``) is a module constant
 rather than a config field. Production runs all want the same wall-clock
@@ -19,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -26,6 +26,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from engine.sandbox.models import CodeExecutionResult
 
@@ -44,25 +45,14 @@ _RUNTIME_FILENAME = "pyodide_runtime.py"
 # ``<deno_dir>/npm/registry.npmjs.org/pyodide/<version>/`` and the wheel
 # filenames are ABI-tied to that release.
 _PYODIDE_VERSION = "0.29.3"
-_REQUIRED_WHEELS = (
-    # numpy + pandas + their transitive deps — preloaded for user analysis code.
-    "numpy-2.2.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
-    "pandas-2.3.3-cp313-cp313-pyodide_2025_0_wasm32.whl",
-    "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
-    "pytz-2025.2-py2.py3-none-any.whl",
-    "six-1.17.0-py2.py3-none-any.whl",
-    # pydantic + transitive deps. Required so the in-Pyodide bootstrap can
-    # import the real ``engine.traces.trace_store`` (and its models) rather
-    # than maintain a duplicate stdlib-only shim. Versions are whatever
-    # Pyodide 0.29.3's lockfile ships; the host pins a slightly newer
-    # pydantic but the API surface ``TraceStore`` uses (``BaseModel``,
-    # ``ConfigDict``, ``Field``, ``model_validate_json``) is stable.
-    "pydantic-2.12.5-py3-none-any.whl",
-    "pydantic_core-2.41.5-cp313-cp313-pyodide_2025_0_wasm32.whl",
-    "typing_extensions-4.15.0-py3-none-any.whl",
-    "annotated_types-0.7.0-py3-none-any.whl",
-    "typing_inspection-0.4.2-py3-none-any.whl",
-)
+
+# Top-level Pyodide packages we need at boot. The transitive closure (numpy
+# pulls nothing extra; pandas pulls dateutil/pytz/six; pydantic pulls
+# pydantic_core/typing_extensions/annotated_types/typing_inspection) is
+# resolved from ``pyodide-lock.json`` at wheel-cache time, so a Pyodide
+# bump moves the resolved filenames automatically without a code change here.
+_REQUIRED_PACKAGES: tuple[str, ...] = ("numpy", "pandas", "pydantic")
+
 _WHEEL_BASE_URL = f"https://cdn.jsdelivr.net/pyodide/v{_PYODIDE_VERSION}/full/"
 
 # Where the trace and index files live inside the Pyodide FS. Hardcoded so
@@ -91,8 +81,14 @@ _TRUNCATION_MARKER = "\n[... output truncated ...]\n"
 # Cold-boot of npm:pyodide on a fresh Deno cache can take ~10s.
 _READY_TIMEOUT_SECONDS = 30.0
 
+# How long the graceful-shutdown send is given to flush before we escalate
+# to SIGKILL. The runner exits immediately on the shutdown frame; this
+# only matters if the runner is already wedged.
+_SHUTDOWN_GRACE_SECONDS = 5.0
+
+
 # ---------------------------------------------------------------------------
-# Public surface
+# Errors
 # ---------------------------------------------------------------------------
 
 
@@ -100,59 +96,37 @@ class SandboxError(RuntimeError):
     """Raised when the Deno/Pyodide subprocess returns a JSON-RPC error or dies."""
 
 
-def _log_unavailable(diagnostic: str) -> None:
-    """Emit the sandbox-unavailable warning to logging and stderr.
-
-    Called when the host can't produce a working sandbox (Deno binary
-    missing, Pyodide assets missing, wheel pre-cache failed). The
-    warning is intentionally visible in every common deployment surface
-    — CLI, library import, container logs — so operators see why
-    ``run_code`` is missing from the agent's tool list. The remediation
-    is hardcoded here rather than passed in: the failure modes all have
-    the same fix path (the ``deno`` PyPI dep ships a binary; if it
-    failed, reinstall or fall back to a system Deno).
-    """
-    warning = (
-        "HALO run_code disabled: sandbox unavailable.\n\n"
-        f"Reason:\n  {diagnostic}\n\n"
-        "How to fix:\n"
-        "  The ``deno`` PyPI dependency normally ships a per-platform binary\n"
-        "  alongside the engine. If it didn't (uncommon platforms like musl\n"
-        "  Linux or FreeBSD, or a broken install), reinstall the engine\n"
-        "  package or drop a Deno >=2.7 binary on PATH:\n"
-        "    curl -fsSL https://deno.land/install.sh | sh\n\n"
-        "The engine will continue without exposing run_code to the agent."
-    )
-    _logger.warning(warning)
-    print(warning, file=sys.stderr, flush=True)
+class _ResolutionError(Exception):
+    """Internal: any failure during Deno + wheel pre-cache resolution."""
 
 
-# Successful resolves are memoized at module level. Resolution work is
-# deterministic in a given process — same Deno binary, same sibling files,
-# same Deno cache — and shells out to ``deno info`` plus does file-existence
-# checks on every call, which adds noticeable per-call latency on a server
-# handling many requests. Failed resolves are *not* cached: a transient
-# failure (e.g., wheel download blip) shouldn't poison the rest of the
-# process. Tests that need a fresh resolve clear via
-# ``monkeypatch.setattr(sandbox_module, "_RESOLVED_SANDBOX", None)``.
-_RESOLVED_SANDBOX: "Sandbox | None" = None
+# ---------------------------------------------------------------------------
+# Public class
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, kw_only=True)
 class Sandbox:
     """Resolved Deno+Pyodide WASM sandbox: paths to read + binary to spawn.
 
-    Construct via :meth:`resolve` — that's the only path that does Deno
-    discovery and Pyodide pre-cache work. Frozen dataclass because every
-    field is a value computed at resolve time and never mutated.
+    Construct via :meth:`get` — that's the only path that does Deno
+    discovery and Pyodide pre-cache work, and it caches the result on
+    the class so repeated calls don't reshell out to ``deno info``.
 
-    Each :meth:`run_python` call spawns a fresh ``deno run`` subprocess so
-    the WASM filesystem cannot leak between runs. The subprocess is
+    Each :meth:`run_python` call spawns a fresh ``deno run`` subprocess
+    so the WASM filesystem cannot leak between runs. The subprocess is
     launched with the locked-down permission set (``--allow-read`` only,
-    scoped to runner + sibling .py files + Deno cache + the per-run trace
-    and index files; never ``--allow-net`` / ``--allow-write`` /
+    scoped to runner + sibling .py files + Deno cache + the per-run
+    trace and index files; never ``--allow-net`` / ``--allow-write`` /
     ``--allow-env`` / ``--allow-run``).
     """
+
+    # Successful resolves are memoized so a long-lived process (e.g., a
+    # server handling many engine runs) doesn't pay the ``deno info``
+    # subprocess + file-existence checks on every request. Failed resolves
+    # are deliberately not cached: a transient failure (e.g., wheel download
+    # blip) shouldn't poison the rest of the process.
+    _cached: ClassVar["Sandbox | None"] = None
 
     deno_executable: Path
     runner_path: Path
@@ -167,7 +141,7 @@ class Sandbox:
     deno_dir: Path
 
     @classmethod
-    def resolve(cls) -> "Sandbox | None":
+    def get(cls) -> "Sandbox | None":
         """Find ``deno``, verify sibling files, pre-cache Pyodide wheels.
 
         Resolution order for ``deno``:
@@ -181,17 +155,11 @@ class Sandbox:
         emitted via :func:`_log_unavailable` and ``None`` is returned so
         ``run_code`` is silently dropped from the agent's tool surface
         rather than registered with broken plumbing.
-
-        Successful results are memoized in ``_RESOLVED_SANDBOX`` so a
-        long-lived process (e.g., a server handling many engine runs)
-        doesn't pay the ``deno info`` subprocess + file-existence checks
-        on every request. Failures are deliberately not cached.
         """
-        global _RESOLVED_SANDBOX
-        if _RESOLVED_SANDBOX is not None:
-            return _RESOLVED_SANDBOX
+        if cls._cached is not None:
+            return cls._cached
 
-        deno = _locate_deno_executable()
+        deno = _locate_deno()
         if deno is None:
             _log_unavailable(
                 diagnostic="deno binary not found (expected from `deno` PyPI dep or PATH)",
@@ -210,11 +178,12 @@ class Sandbox:
             if not traces_pkg_dir.is_dir():
                 raise _ResolutionError(f"engine.traces package missing at {traces_pkg_dir}")
             deno_dir = _query_deno_dir(deno)
-            pyodide_dir = _ensure_pyodide_npm_cache(deno, deno_dir)
-            _ensure_pyodide_wheels(pyodide_dir)
+            pyodide_dir = _ensure_npm_cache(deno, deno_dir)
+            _ensure_wheels(pyodide_dir)
         except _ResolutionError as exc:
             _log_unavailable(diagnostic=str(exc))
             return None
+
         sandbox = cls(
             deno_executable=deno,
             runner_path=runner_path,
@@ -223,7 +192,7 @@ class Sandbox:
             traces_pkg_dir=traces_pkg_dir,
             deno_dir=deno_dir,
         )
-        _RESOLVED_SANDBOX = sandbox
+        cls._cached = sandbox
         return sandbox
 
     async def run_python(
@@ -244,24 +213,43 @@ class Sandbox:
             runner stages the trace compat shim itself; the host only
             tells the bootstrap which mount points to load.
         """
+        trace = trace_path.resolve()
+        index = index_path.resolve()
+        session = _RunnerSession(argv=self._build_argv(extra_read_paths=[trace, index]))
         try:
-            return await _run_session(
-                argv=self._build_argv(
-                    extra_read_paths=[trace_path.resolve(), index_path.resolve()],
-                ),
-                mounts=[
-                    (trace_path.resolve(), _TRACE_VIRTUAL_PATH),
-                    (index_path.resolve(), _INDEX_VIRTUAL_PATH),
-                ],
-                user_code=code,
-            )
+            await session.start()
+            try:
+                result = await asyncio.wait_for(
+                    _run_protocol(session, trace=trace, index=index, code=code),
+                    timeout=_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                stderr = await session.stop(hard=True)
+                return CodeExecutionResult(
+                    exit_code=session.returncode if session.returncode is not None else -1,
+                    stdout="",
+                    stderr=stderr.decode("utf-8", errors="replace"),
+                    timed_out=True,
+                )
+            stderr = await session.stop(hard=False)
+            return _attach_deno_stderr(result, stderr)
         except SandboxError as exc:
+            # Most ``SandboxError`` causes (RPC error responses) leave the
+            # runner alive and responsive, so graceful shutdown is correct.
+            # On the rarer flavors (premature stdout EOF, ready-timeout)
+            # the runner is already dead — graceful stop degrades to a
+            # best-effort write that ``BrokenPipeError``s, then ``proc.wait``
+            # resolves immediately. Either way, no orphan.
+            await session.stop(hard=False)
             return CodeExecutionResult(
                 exit_code=1,
                 stdout="",
                 stderr=f"sandbox runner failure: {exc}",
                 timed_out=False,
             )
+        except BaseException:
+            await session.stop(hard=True)
+            raise
 
     def _build_argv(self, *, extra_read_paths: list[Path]) -> list[str]:
         """Build the ``deno run`` argv with HALO's locked-down permission set.
@@ -299,16 +287,280 @@ class Sandbox:
         ]
 
 
+async def _run_protocol(
+    session: "_RunnerSession",
+    *,
+    trace: Path,
+    index: Path,
+    code: str,
+) -> CodeExecutionResult:
+    """Mount → bootstrap → execute against a started session.
+
+    Pure protocol: takes a session that's already passed its ready
+    sentinel and runs the deterministic JSON-RPC sequence. Lifecycle
+    (spawn, shutdown, kill, drain) belongs to ``Sandbox.run_python``
+    and the session itself.
+    """
+    await session.mount(trace, _TRACE_VIRTUAL_PATH)
+    await session.mount(index, _INDEX_VIRTUAL_PATH)
+    boot = await session.bootstrap(_TRACE_VIRTUAL_PATH, _INDEX_VIRTUAL_PATH)
+    if boot.exit_code != 0:
+        return boot
+    return await session.execute(code)
+
+
 # ---------------------------------------------------------------------------
-# Discovery helpers
+# _RunnerSession: subprocess + JSON-RPC for one run_python call
 # ---------------------------------------------------------------------------
 
 
-class _ResolutionError(Exception):
-    """Internal: any failure during Deno + wheel pre-cache resolution."""
+@dataclass
+class _RpcResult:
+    """One JSON-RPC response line, parsed for the caller."""
+
+    result: dict | None
+    error: dict | None
 
 
-def _locate_deno_executable() -> Path | None:
+class _RunnerSession:
+    """One Deno subprocess + JSON-RPC roundtrip for a single ``run_python`` call.
+
+    Lifecycle:
+      ``start()``  → spawn, begin draining stderr, wait for ready sentinel
+      ``mount()`` / ``bootstrap()`` / ``execute()`` → JSON-RPC roundtrips
+      ``stop(hard=False)`` → graceful shutdown frame, wait, drain (returns stderr)
+      ``stop(hard=True)``  → SIGKILL the pgroup, wait, drain (returns stderr)
+
+    Fresh per call. No state carried between calls; that's the whole
+    point of the per-call subprocess design (vs DSPy's long-lived one).
+    """
+
+    def __init__(self, *, argv: list[str]) -> None:
+        self._argv = argv
+        self._proc: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task[bytes] | None = None
+        self._next_id = 0
+        self._stopped = False
+
+    @property
+    def returncode(self) -> int | None:
+        return self._proc.returncode if self._proc is not None else None
+
+    async def start(self) -> None:
+        """Spawn the deno subprocess and block until it signals ready."""
+        self._proc = await asyncio.create_subprocess_exec(
+            *self._argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        self._stderr_task = asyncio.create_task(_drain_capped(self._proc.stderr, _MAX_STDERR_BYTES))
+        await self._await_ready()
+
+    async def stop(self, *, hard: bool) -> bytes:
+        """Tear down the subprocess and return whatever stderr was captured.
+
+        Idempotent — calling twice (e.g., once on the happy path, once
+        from an outer exception handler) is harmless. The first call
+        does the work; subsequent calls return the same captured stderr.
+        """
+        if self._stopped:
+            # Already stopped: stderr_task has resolved, just return its
+            # value. ``await``ing a completed task returns its result.
+            if self._stderr_task is not None:
+                try:
+                    return await self._stderr_task
+                except Exception:
+                    return b""
+            return b""
+        self._stopped = True
+
+        if self._proc is None:
+            return b""
+
+        if hard:
+            _kill_process_group(self._proc.pid)
+            await self._proc.wait()
+        else:
+            try:
+                await self._write_message({"jsonrpc": "2.0", "method": "shutdown"})
+            except (BrokenPipeError, ConnectionError):
+                # Runner already gone — that's fine, we have whatever
+                # result it sent before exiting.
+                pass
+            try:
+                await asyncio.wait_for(self._proc.wait(), timeout=_SHUTDOWN_GRACE_SECONDS)
+            except asyncio.TimeoutError:
+                _kill_process_group(self._proc.pid)
+                await self._proc.wait()
+
+        if self._stderr_task is not None:
+            try:
+                return await self._stderr_task
+            except Exception:
+                return b""
+        return b""
+
+    # -- public RPC methods ---------------------------------------------------
+
+    async def mount(self, host_path: Path, virtual_path: str) -> None:
+        """Copy a host file into Pyodide's virtual FS at ``virtual_path``.
+
+        Raises ``SandboxError`` on RPC failure (host file missing, Deno
+        --allow-read denial). Without this surfacing, a denied mount
+        would let bootstrap run anyway and crash with a confusing
+        ``FileNotFoundError`` deep inside Pyodide.
+        """
+        rpc = await self._request(
+            "mount_file",
+            {"host_path": str(host_path), "virtual_path": virtual_path},
+        )
+        if rpc.error is not None:
+            raise SandboxError(_format_rpc_error(f"mount_file({virtual_path})", rpc.error))
+
+    async def bootstrap(
+        self, trace_virtual_path: str, index_virtual_path: str
+    ) -> CodeExecutionResult:
+        """Load the trace + index inside Pyodide and prepare ``user_globals``.
+
+        Returns a ``CodeExecutionResult``: the runner's ``halo_bootstrap``
+        wraps the load in stdout/stderr capture, so a Python-level
+        failure (malformed index, missing wheel) returns a result with
+        ``exit_code != 0`` and the traceback in stderr. RPC-level
+        failures (runner rejected the request) raise ``SandboxError``.
+        """
+        rpc = await self._request(
+            "bootstrap",
+            {"trace_path": trace_virtual_path, "index_path": index_virtual_path},
+        )
+        if rpc.error is not None:
+            raise SandboxError(_format_rpc_error("bootstrap", rpc.error))
+        return _result_from_rpc(rpc.result)
+
+    async def execute(self, code: str) -> CodeExecutionResult:
+        """Run ``code`` in Pyodide and return its captured stdout/stderr/exit_code."""
+        rpc = await self._request("execute", {"code": code})
+        if rpc.error is not None:
+            raise SandboxError(_format_rpc_error("execute", rpc.error))
+        result = _result_from_rpc(rpc.result)
+        # Honor the byte-named caps. Multi-byte content is sliced safely
+        # (no U+FFFD smearing) — see ``_truncate_to_bytes``.
+        return CodeExecutionResult(
+            exit_code=result.exit_code,
+            stdout=_truncate_to_bytes(result.stdout, _MAX_STDOUT_BYTES),
+            stderr=_truncate_to_bytes(result.stderr, _MAX_STDERR_BYTES),
+            timed_out=False,
+        )
+
+    # -- private wire helpers -------------------------------------------------
+
+    async def _request(self, method: str, params: dict) -> _RpcResult:
+        """Send one JSON-RPC request, await the matching response."""
+        self._next_id += 1
+        request_id = self._next_id
+        await self._write_message(
+            {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        )
+        return await self._read_until_id(request_id, method)
+
+    async def _write_message(self, payload: dict) -> None:
+        """Serialize ``payload`` as one JSON-RPC line and write it to the runner's stdin.
+
+        ``ensure_ascii=False`` keeps non-ASCII content as raw UTF-8 rather
+        than ``\\uXXXX`` escapes — smaller wire, and (more importantly)
+        the path the runner's ``TextDecoder`` actually has to handle
+        across chunk boundaries. With ASCII escaping every byte on stdin
+        is single-byte, so the multi-byte decode path would never be
+        exercised in production.
+        """
+        assert self._proc is not None and self._proc.stdin is not None
+        data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+        self._proc.stdin.write(data)
+        await self._proc.stdin.drain()
+
+    async def _read_until_id(self, expected_id: int, method: str) -> _RpcResult:
+        """Read JSON-RPC lines from stdout until the matching id arrives.
+
+        Pyodide's package loader emits status lines ("Loading numpy, ...")
+        before/between JSON responses. Skip those; only treat lines starting
+        with '{' as JSON-RPC.
+        """
+        assert self._proc is not None and self._proc.stdout is not None
+        max_skip = 200
+        for _ in range(max_skip):
+            line = await self._proc.stdout.readline()
+            if not line:
+                raise SandboxError(f"runner closed stdout before responding to {method!r}")
+            text = line.decode("utf-8", errors="replace").strip()
+            if not text or not text.startswith("{"):
+                continue
+            try:
+                msg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("id") != expected_id:
+                continue
+            return _RpcResult(result=msg.get("result"), error=msg.get("error"))
+        raise SandboxError(f"too many non-JSON lines while waiting for {method!r} response")
+
+    async def _await_ready(self) -> None:
+        """Wait for the ``{"result": {"ready": true}}`` sentinel from runner.js.
+
+        Pyodide's package loader prints non-JSON status lines (``Loading
+        numpy, pandas, ...``) to stdout before the runner emits its first
+        JSON message, so we skip non-JSON / non-id-zero lines until the
+        sentinel arrives. A blank stdout (process exited) is fatal.
+        """
+        assert self._proc is not None and self._proc.stdout is not None
+        deadline = asyncio.get_event_loop().time() + _READY_TIMEOUT_SECONDS
+        max_lines = 200
+        for _ in range(max_lines):
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise SandboxError("Pyodide runner did not become ready in time")
+            try:
+                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise SandboxError("Pyodide runner did not become ready in time") from exc
+            if not line:
+                raise SandboxError("Pyodide runner exited before signalling ready")
+            text = line.decode("utf-8", errors="replace").strip()
+            if not text or not text.startswith("{"):
+                continue
+            try:
+                msg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("error") is not None:
+                raise SandboxError(f"runner failed at startup: {msg['error']}")
+            if msg.get("id") == 0 and msg.get("result", {}).get("ready") is True:
+                return
+            # Future Pyodide / Deno releases could emit JSON diagnostics on
+            # stdout during boot. Skip-and-keep-looking matches what
+            # ``_read_until_id`` does for non-matching ids; raising here
+            # would kill the session for nothing.
+            continue
+        raise SandboxError("too many non-JSON lines while waiting for ready sentinel")
+
+
+def _result_from_rpc(rpc_result: dict | None) -> CodeExecutionResult:
+    """Coerce a ``halo_bootstrap`` / ``halo_execute`` dict into a result model."""
+    rpc_result = rpc_result or {}
+    return CodeExecutionResult(
+        exit_code=int(rpc_result.get("exit_code", 1)),
+        stdout=str(rpc_result.get("stdout", "")),
+        stderr=str(rpc_result.get("stderr", "")),
+        timed_out=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Discovery + Pyodide asset preparation
+# ---------------------------------------------------------------------------
+
+
+def _locate_deno() -> Path | None:
     """Resolve the Deno binary, preferring the bundled PyPI wheel over PATH.
 
     The ``deno`` PyPI package ships ``deno`` as a per-platform binary in
@@ -365,7 +617,7 @@ def _query_deno_dir(deno_path: Path) -> Path:
     return Path(deno_dir)
 
 
-def _ensure_pyodide_npm_cache(deno_path: Path, deno_dir: Path) -> Path:
+def _ensure_npm_cache(deno_path: Path, deno_dir: Path) -> Path:
     """Return the Deno-cached ``pyodide@<version>`` directory; warm it via ``deno cache``."""
     target = deno_dir / "npm" / "registry.npmjs.org" / "pyodide" / _PYODIDE_VERSION
     if (target / "pyodide.asm.wasm").is_file():
@@ -394,7 +646,65 @@ def _ensure_pyodide_npm_cache(deno_path: Path, deno_dir: Path) -> Path:
     return target
 
 
-def _ensure_pyodide_wheels(pyodide_dir: Path) -> None:
+def _normalize_pkg_name(name: str) -> str:
+    """PEP 503 distribution-name normalization: lowercase, ``-``/``_``/``.`` → ``-``.
+
+    Pyodide's lockfile keys ``packages`` by the normalized form
+    (``"pydantic-core"``, ``"python-dateutil"``) but its ``depends``
+    lists sometimes leak the importable underscore form
+    (``"pydantic_core"``). Normalizing both sides lets the graph walk
+    follow either spelling without a hand-maintained alias table.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _resolve_required_wheels(pyodide_dir: Path) -> tuple[str, ...]:
+    """Walk ``pyodide-lock.json`` from ``_REQUIRED_PACKAGES`` to wheel filenames.
+
+    The lockfile lists every package Pyodide ships with its WASM build,
+    keyed by PEP 503-normalized distribution name (``"numpy"``,
+    ``"python-dateutil"``, ``"pydantic-core"``). Each entry has a
+    ``"file_name"`` (the wheel) and ``"depends"`` (a list of names —
+    same form, with the occasional underscore leak). BFS the graph
+    from ``_REQUIRED_PACKAGES`` and collect every transitively-required
+    wheel filename. On a Pyodide bump, the package names stay stable
+    but the resolved filenames update automatically — no human
+    bookkeeping per release.
+    """
+    lockfile = pyodide_dir / "pyodide-lock.json"
+    if not lockfile.is_file():
+        raise _ResolutionError(f"pyodide-lock.json missing at {lockfile}")
+    try:
+        lock = json.loads(lockfile.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise _ResolutionError(f"failed to read {lockfile}: {exc}") from exc
+    packages = lock.get("packages")
+    if not isinstance(packages, dict):
+        raise _ResolutionError(f"{lockfile} has no 'packages' table")
+    by_norm = {_normalize_pkg_name(k): v for k, v in packages.items()}
+
+    seen: set[str] = set()
+    queue = [_normalize_pkg_name(p) for p in _REQUIRED_PACKAGES]
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        entry = by_norm.get(name)
+        if entry is None:
+            raise _ResolutionError(f"{lockfile} has no entry for required package {name!r}")
+        seen.add(name)
+        for dep in entry.get("depends", []):
+            dep_norm = _normalize_pkg_name(dep)
+            if dep_norm not in seen:
+                queue.append(dep_norm)
+
+    wheels = tuple(sorted(by_norm[name]["file_name"] for name in seen))
+    if not wheels:
+        raise _ResolutionError("resolved an empty wheel set — _REQUIRED_PACKAGES misconfigured")
+    return wheels
+
+
+def _ensure_wheels(pyodide_dir: Path) -> None:
     """Backfill the wheels Pyodide needs at boot from the public Pyodide CDN.
 
     The Pyodide loader looks for these next to ``pyodide.asm.wasm``. When a
@@ -403,7 +713,8 @@ def _ensure_pyodide_wheels(pyodide_dir: Path) -> None:
     granted. Downloading them here (Python-side, no Deno permission scope
     involved) is a one-time setup cost on a fresh machine.
     """
-    missing = [w for w in _REQUIRED_WHEELS if not (pyodide_dir / w).is_file()]
+    wheels = _resolve_required_wheels(pyodide_dir)
+    missing = [w for w in wheels if not (pyodide_dir / w).is_file()]
     if not missing:
         return
     for wheel in missing:
@@ -421,272 +732,35 @@ def _ensure_pyodide_wheels(pyodide_dir: Path) -> None:
             ) from exc
 
 
-# ---------------------------------------------------------------------------
-# Subprocess + JSON-RPC driver
-# ---------------------------------------------------------------------------
+def _log_unavailable(diagnostic: str) -> None:
+    """Emit the sandbox-unavailable warning to logging and stderr.
 
-
-@dataclass
-class _RpcResult:
-    """One JSON-RPC response line, parsed for the caller."""
-
-    result: dict | None
-    error: dict | None
-
-
-async def _run_session(
-    *,
-    argv: list[str],
-    mounts: list[tuple[Path, str]],
-    user_code: str,
-) -> CodeExecutionResult:
-    """Spawn one Deno subprocess and drive the full mount/bootstrap/execute cycle.
-
-    A single function rather than a class because the subprocess is
-    one-shot per ``run_python`` call: every call opens a fresh process,
-    sends a deterministic sequence, collects the result, shuts the
-    runner down, drains stderr, waits. No state worth carrying between
-    calls.
-
-    Cleanup ownership: ``_drive`` is pure protocol — it returns a result
-    or raises. This function owns the subprocess lifecycle, so the
-    shutdown frame and ``proc.wait`` / ``stderr_task`` reaping happen
-    here exactly once per session, regardless of which ``_drive`` exit
-    path produced the result. Doing this inside ``_drive`` left the
-    runner orphaned on early-return paths (mount RPC error, bootstrap
-    error, bootstrap exit_code != 0): the process stayed alive waiting
-    for stdin, ``stderr_task`` waited forever for EOF, and the call
-    hung.
+    Called when the host can't produce a working sandbox (Deno binary
+    missing, Pyodide assets missing, wheel pre-cache failed). The
+    warning is intentionally visible in every common deployment surface
+    — CLI, library import, container logs — so operators see why
+    ``run_code`` is missing from the agent's tool list. The remediation
+    is hardcoded here rather than passed in: the failure modes all have
+    the same fix path (the ``deno`` PyPI dep ships a binary; if it
+    failed, reinstall or fall back to a system Deno).
     """
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
+    warning = (
+        "HALO run_code disabled: sandbox unavailable.\n\n"
+        f"Reason:\n  {diagnostic}\n\n"
+        "How to fix:\n"
+        "  The ``deno`` PyPI dependency normally ships a per-platform binary\n"
+        "  alongside the engine. If it didn't (uncommon platforms like musl\n"
+        "  Linux or FreeBSD, or a broken install), reinstall the engine\n"
+        "  package or drop a Deno >=2.7 binary on PATH:\n"
+        "    curl -fsSL https://deno.land/install.sh | sh\n\n"
+        "The engine will continue without exposing run_code to the agent."
     )
-    stderr_task = asyncio.create_task(_drain_capped(proc.stderr, _MAX_STDERR_BYTES))
-    try:
-        try:
-            result = await asyncio.wait_for(
-                _drive(proc, mounts, user_code),
-                timeout=_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            _kill_process_group(proc.pid)
-            await proc.wait()
-            stderr_bytes = await stderr_task
-            return CodeExecutionResult(
-                exit_code=proc.returncode if proc.returncode is not None else -1,
-                stdout="",
-                stderr=stderr_bytes.decode("utf-8", errors="replace"),
-                timed_out=True,
-            )
-        # _drive returned a result by any path (happy or early-return).
-        # Tell the runner to exit so ``proc.wait`` and ``stderr_task``
-        # can resolve. Best-effort send: the runner may already be dead
-        # (e.g., crashed mid-response), in which case ``BrokenPipeError``
-        # is harmless — we still have the result.
-        try:
-            await _send(proc, {"jsonrpc": "2.0", "method": "shutdown"})
-        except (BrokenPipeError, ConnectionError):
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            _kill_process_group(proc.pid)
-            await proc.wait()
-        stderr_extra = await stderr_task
-        return _attach_deno_stderr(result, stderr_extra)
-    except BaseException:
-        _kill_process_group(proc.pid)
-        await proc.wait()
-        try:
-            await stderr_task
-        except Exception:
-            pass
-        raise
-
-
-async def _drive(
-    proc: asyncio.subprocess.Process,
-    mounts: list[tuple[Path, str]],
-    user_code: str,
-) -> CodeExecutionResult:
-    """Send the deterministic mount → bootstrap → execute sequence over JSON-RPC.
-
-    Pure protocol: returns a ``CodeExecutionResult`` representing the
-    outcome of the runner work, or raises on a protocol-level failure
-    (timeout, runner died mid-call, ready sentinel never arrived).
-    Subprocess lifecycle (shutdown frame, ``proc.wait``, stderr drain)
-    is the caller's responsibility — see ``_run_session``.
-    """
-    assert proc.stdin is not None and proc.stdout is not None
-
-    await _read_ready(proc.stdout)
-
-    request_id = 0
-    for host_path, virtual_path in mounts:
-        request_id += 1
-        mount = await _call(
-            proc,
-            "mount_file",
-            {"host_path": str(host_path), "virtual_path": virtual_path},
-            request_id,
-        )
-        # Surface mount failures up front. Without this, a Deno permission
-        # denial or missing host file makes the next bootstrap call fall
-        # over with a confusing ``FileNotFoundError`` deep inside Pyodide
-        # — the user sees a Python traceback when the real cause is the
-        # file never landing in the WASM FS.
-        if mount.error is not None:
-            return CodeExecutionResult(
-                exit_code=1,
-                stdout="",
-                stderr=_format_rpc_error(f"mount_file({virtual_path})", mount.error),
-                timed_out=False,
-            )
-
-    request_id += 1
-    boot = await _call(
-        proc,
-        "bootstrap",
-        {"trace_path": _TRACE_VIRTUAL_PATH, "index_path": _INDEX_VIRTUAL_PATH},
-        request_id,
-    )
-    if boot.error is not None:
-        return CodeExecutionResult(
-            exit_code=1,
-            stdout="",
-            stderr=_format_rpc_error("bootstrap", boot.error),
-            timed_out=False,
-        )
-    boot_result = boot.result or {}
-    if int(boot_result.get("exit_code", 1)) != 0:
-        return CodeExecutionResult(
-            exit_code=int(boot_result.get("exit_code", 1)),
-            stdout=str(boot_result.get("stdout", "")),
-            stderr=str(boot_result.get("stderr", "")),
-            timed_out=False,
-        )
-
-    request_id += 1
-    run = await _call(proc, "execute", {"code": user_code}, request_id)
-    if run.error is not None:
-        return CodeExecutionResult(
-            exit_code=1,
-            stdout="",
-            stderr=_format_rpc_error("execute", run.error),
-            timed_out=False,
-        )
-    run_result = run.result or {}
-    return CodeExecutionResult(
-        exit_code=int(run_result.get("exit_code", 1)),
-        stdout=_truncate(str(run_result.get("stdout", "")), _MAX_STDOUT_BYTES),
-        stderr=_truncate(str(run_result.get("stderr", "")), _MAX_STDERR_BYTES),
-        timed_out=False,
-    )
-
-
-async def _read_ready(stdout: asyncio.StreamReader) -> None:
-    """Wait for the ``{"result": {"ready": true}}`` sentinel from runner.js.
-
-    Pyodide's package loader prints non-JSON status lines (``Loading
-    numpy, pandas, ...``) to stdout before the runner emits its first
-    JSON message, so we skip non-JSON / non-id-zero lines until the
-    sentinel arrives. A blank stdout (process exited) is fatal.
-    """
-    deadline = asyncio.get_event_loop().time() + _READY_TIMEOUT_SECONDS
-    max_lines = 200
-    for _ in range(max_lines):
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            raise SandboxError("Pyodide runner did not become ready in time")
-        try:
-            line = await asyncio.wait_for(stdout.readline(), timeout=remaining)
-        except asyncio.TimeoutError as exc:
-            raise SandboxError("Pyodide runner did not become ready in time") from exc
-        if not line:
-            raise SandboxError("Pyodide runner exited before signalling ready")
-        text = line.decode("utf-8", errors="replace").strip()
-        if not text or not text.startswith("{"):
-            continue
-        try:
-            msg = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if msg.get("error") is not None:
-            raise SandboxError(f"runner failed at startup: {msg['error']}")
-        if msg.get("id") == 0 and msg.get("result", {}).get("ready") is True:
-            return
-        # Future Pyodide / Deno releases could emit JSON diagnostics on
-        # stdout during boot. Skip-and-keep-looking matches what
-        # ``_read_response`` already does for non-matching ids; raising
-        # here would kill the session for nothing.
-        continue
-    raise SandboxError("too many non-JSON lines while waiting for ready sentinel")
-
-
-async def _call(
-    proc: asyncio.subprocess.Process,
-    method: str,
-    params: dict,
-    request_id: int,
-) -> _RpcResult:
-    """Send one JSON-RPC request, await the matching response, return result/error."""
-    await _send(
-        proc,
-        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
-    )
-    return await _read_response(proc, request_id, method)
-
-
-async def _send(proc: asyncio.subprocess.Process, payload: dict) -> None:
-    """Serialize ``payload`` as one JSON-RPC line and write it to the runner's stdin.
-
-    ``ensure_ascii=False`` keeps non-ASCII content as raw UTF-8 rather
-    than ``\\uXXXX`` escapes — smaller wire, and (more importantly)
-    the path the runner's ``TextDecoder`` actually has to handle
-    across chunk boundaries. With ASCII escaping every byte on stdin
-    is single-byte, so the multi-byte decode path would never be
-    exercised in production.
-    """
-    assert proc.stdin is not None
-    data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
-    proc.stdin.write(data)
-    await proc.stdin.drain()
-
-
-async def _read_response(
-    proc: asyncio.subprocess.Process,
-    expected_id: int,
-    method: str,
-) -> _RpcResult:
-    """Read JSON-RPC lines from ``proc.stdout`` until the matching id arrives."""
-    assert proc.stdout is not None
-    # Pyodide's package loader emits status lines ("Loading numpy, ...")
-    # before/between JSON responses. Skip those; only treat lines starting
-    # with '{' as JSON-RPC.
-    max_skip = 200
-    for _ in range(max_skip):
-        line = await proc.stdout.readline()
-        if not line:
-            raise SandboxError(f"runner closed stdout before responding to {method!r}")
-        text = line.decode("utf-8", errors="replace").strip()
-        if not text or not text.startswith("{"):
-            continue
-        try:
-            msg = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if msg.get("id") != expected_id:
-            continue
-        return _RpcResult(result=msg.get("result"), error=msg.get("error"))
-    raise SandboxError(f"too many non-JSON lines while waiting for {method!r} response")
+    _logger.warning(warning)
+    print(warning, file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
-# Output handling
+# Pure utilities
 # ---------------------------------------------------------------------------
 
 
@@ -717,7 +791,7 @@ async def _drain_capped(stream: asyncio.StreamReader | None, cap: int) -> bytes:
     return bytes(buf)
 
 
-def _truncate(text: str, cap_bytes: int) -> str:
+def _truncate_to_bytes(text: str, cap_bytes: int) -> str:
     """Truncate ``text`` so its UTF-8 encoding is at most ``cap_bytes`` bytes.
 
     The cap is named in bytes (``_MAX_STDOUT_BYTES`` etc.) so we honor

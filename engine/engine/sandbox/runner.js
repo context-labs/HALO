@@ -22,12 +22,12 @@
 // trace + index). We never request --allow-net, --allow-write,
 // --allow-env, --allow-run.
 
-// Version pin must match ``_PYODIDE_VERSION`` in ``pyodide_client.py``:
-// the client looks up cached wheels and the npm package directory by that
-// exact version string. Without the pin Deno would resolve to whatever is
-// latest on npm, populate a different cache directory, and the client's
-// existence check would silently fail — leaving ``run_code`` quietly
-// disabled the next time pyodide ships a release.
+// Version pin must match ``_PYODIDE_VERSION`` in ``sandbox.py``: the host
+// looks up cached wheels and the npm package directory by that exact
+// version string. Without the pin Deno would resolve to whatever is latest
+// on npm, populate a different cache directory, and the host's existence
+// check would silently fail — leaving ``run_code`` quietly disabled the
+// next time pyodide ships a release.
 import pyodideModule from "npm:pyodide@0.29.3/pyodide.js";
 
 // =============================================================================

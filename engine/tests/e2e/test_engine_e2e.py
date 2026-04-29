@@ -170,7 +170,7 @@ async def test_engine_run_code_executes_in_sandbox(tmp_path: Path, fixtures_dir:
     """
     if not os.environ.get("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
-    if Sandbox.resolve() is None:
+    if Sandbox.get() is None:
         pytest.skip("sandbox unavailable on this host; run_code is not registered without Deno")
 
     trace_path = _trace_path(tmp_path, fixtures_dir)

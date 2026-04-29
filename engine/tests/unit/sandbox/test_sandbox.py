@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -15,7 +17,7 @@ def _fake_sandbox(tmp_path: Path) -> Sandbox:
 
     Bypasses the discovery path: tests at this level care about
     ``run_python`` plumbing, not Deno detection. The actual subprocess
-    is replaced by stubbing ``_run_session`` in the test bodies.
+    is replaced by stubbing ``_RunnerSession`` methods in the test bodies.
     """
     deno = tmp_path / "deno"
     deno.write_text("")
@@ -39,50 +41,48 @@ def _fake_sandbox(tmp_path: Path) -> Sandbox:
     )
 
 
-# -- Sandbox.resolve -----------------------------------------------------------
+# -- Sandbox.get ---------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _clear_resolve_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sandbox.resolve memoizes successful results in ``_RESOLVED_SANDBOX``.
+def _clear_sandbox_cache() -> Iterator[None]:
+    """``Sandbox.get`` memoizes successful resolves on ``Sandbox._cached``.
 
     A test that runs after an integration suite would otherwise hit the
     cached real Sandbox and bypass the monkeypatched discovery helpers.
-    Resetting the cache before every unit test keeps each test
-    hermetic without needing every test to do the reset itself.
-
-    ``raising=False`` so the fixture is a no-op against any code that
-    hasn't introduced the cache yet — the test bodies still exercise
-    the real behavior on either side of the fix.
+    Resetting before every unit test keeps each test hermetic without
+    needing every test to do the reset itself.
     """
-    monkeypatch.setattr(sandbox_module, "_RESOLVED_SANDBOX", None, raising=False)
+    Sandbox._cached = None
+    yield
+    Sandbox._cached = None
 
 
-def test_resolve_returns_none_when_deno_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No Deno on PATH or via the PyPI dep → ``Sandbox.resolve`` returns ``None``.
+def test_get_returns_none_when_deno_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No Deno on PATH or via the PyPI dep → ``Sandbox.get`` returns ``None``.
 
     Discovery emits its own remediation warning before bailing out;
-    ``Sandbox.resolve`` just propagates the ``None`` so callers can
+    ``Sandbox.get`` just propagates the ``None`` so callers can
     silently drop ``run_code`` from the agent surface.
     """
-    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: None)
-    assert Sandbox.resolve() is None
+    monkeypatch.setattr(sandbox_module, "_locate_deno", lambda: None)
+    assert Sandbox.get() is None
 
 
-def test_resolve_returns_none_when_required_file_missing(
+def test_get_returns_none_when_required_file_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If runner.js or its sibling .py files vanish, resolve must refuse to fabricate a Sandbox."""
+    """If runner.js or its sibling .py files vanish, get must refuse to fabricate a Sandbox."""
     deno = tmp_path / "deno"
     deno.write_text("")
-    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: deno)
+    monkeypatch.setattr(sandbox_module, "_locate_deno", lambda: deno)
     # Point ``__file__``-derived parent at an empty dir so the required
     # sibling files don't exist relative to it.
     monkeypatch.setattr(sandbox_module, "__file__", str(tmp_path / "sandbox.py"))
-    assert Sandbox.resolve() is None
+    assert Sandbox.get() is None
 
 
-def test_resolve_caches_successful_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_caches_successful_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Successful resolves must be memoized — discovery is subprocess-heavy.
 
     Regression: a long-lived process (e.g., a server handling many
@@ -115,34 +115,73 @@ def test_resolve_caches_successful_result(tmp_path: Path, monkeypatch: pytest.Mo
     def _wheels(_dir):
         counts["wheels"] += 1
 
-    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", _locate)
+    monkeypatch.setattr(sandbox_module, "_locate_deno", _locate)
     monkeypatch.setattr(sandbox_module, "_query_deno_dir", _query)
-    monkeypatch.setattr(sandbox_module, "_ensure_pyodide_npm_cache", _npm_cache)
-    monkeypatch.setattr(sandbox_module, "_ensure_pyodide_wheels", _wheels)
+    monkeypatch.setattr(sandbox_module, "_ensure_npm_cache", _npm_cache)
+    monkeypatch.setattr(sandbox_module, "_ensure_wheels", _wheels)
 
-    first = Sandbox.resolve()
-    second = Sandbox.resolve()
-    third = Sandbox.resolve()
+    first = Sandbox.get()
+    second = Sandbox.get()
+    third = Sandbox.get()
 
     assert first is not None
-    assert second is first, "second resolve must return the cached instance"
-    assert third is first, "third resolve must return the cached instance"
+    assert second is first, "second get must return the cached instance"
+    assert third is first, "third get must return the cached instance"
     assert counts == {"locate": 1, "deno_info": 1, "npm_cache": 1, "wheels": 1}, (
         f"discovery helpers must run exactly once across cached resolves; got {counts}"
     )
 
 
-def test_resolve_does_not_cache_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failed resolve must not poison the cache — a transient failure
+def test_get_does_not_cache_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed get must not poison the cache — a transient failure
     should not silently disable ``run_code`` for the rest of the process.
     """
-    monkeypatch.setattr(sandbox_module, "_locate_deno_executable", lambda: None)
-    assert Sandbox.resolve() is None
+    monkeypatch.setattr(sandbox_module, "_locate_deno", lambda: None)
+    assert Sandbox.get() is None
     # Cache stays empty so the next attempt re-runs discovery.
-    assert sandbox_module._RESOLVED_SANDBOX is None
+    assert Sandbox._cached is None
 
 
 # -- Sandbox.run_python: argv shape -------------------------------------------
+
+
+def _install_session_stub(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    captured_argv: dict[str, list[str]] | None = None,
+    result: CodeExecutionResult | None = None,
+) -> None:
+    """Replace ``_RunnerSession`` with a no-op stub that records argv and returns ``result``.
+
+    The stub bypasses the entire subprocess / JSON-RPC plumbing: ``start``
+    no-ops, ``mount`` / ``bootstrap`` succeed, ``execute`` returns the
+    canned ``result`` (or a default success). ``stop`` returns empty
+    stderr.
+    """
+    canned = result or CodeExecutionResult(exit_code=0, stdout="ok", stderr="", timed_out=False)
+
+    class _StubSession:
+        def __init__(self, *, argv: list[str]) -> None:
+            if captured_argv is not None:
+                captured_argv["argv"] = list(argv)
+            self._returncode: int | None = None
+
+        @property
+        def returncode(self) -> int | None:
+            return self._returncode
+
+        async def start(self) -> None: ...
+        async def stop(self, *, hard: bool) -> bytes:
+            return b""
+
+        async def mount(self, _host: Path, _virtual: str) -> None: ...
+        async def bootstrap(self, _t: str, _i: str) -> CodeExecutionResult:
+            return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+        async def execute(self, _code: str) -> CodeExecutionResult:
+            return canned
+
+    monkeypatch.setattr(sandbox_module, "_RunnerSession", _StubSession)
 
 
 @pytest.mark.asyncio
@@ -163,12 +202,7 @@ async def test_run_python_includes_trace_and_index_in_allow_read(
     index.write_text("")
 
     captured: dict[str, list[str]] = {}
-
-    async def _stub_run_session(*, argv, **_kwargs):
-        captured["argv"] = list(argv)
-        return CodeExecutionResult(exit_code=0, stdout="ok", stderr="", timed_out=False)
-
-    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
+    _install_session_stub(monkeypatch, captured_argv=captured)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 0
@@ -197,12 +231,7 @@ async def test_run_python_does_not_pass_unsafe_flags(
     index.write_text("")
 
     captured: dict[str, list[str]] = {}
-
-    async def _stub_run_session(*, argv, **_kwargs):
-        captured["argv"] = list(argv)
-        return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
-
-    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
+    _install_session_stub(monkeypatch, captured_argv=captured)
 
     await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     forbidden = ("--allow-net", "--allow-write", "--allow-env", "--allow-run", "--allow-all")
@@ -216,7 +245,11 @@ async def test_run_python_does_not_pass_unsafe_flags(
 async def test_run_python_returns_runner_result_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A runner result with ``timed_out`` and a non-zero exit must round-trip unchanged."""
+    """A runner result with non-zero exit must round-trip unchanged.
+
+    ``timed_out=True`` is reserved for the wall-clock timeout path; the
+    happy path (execute returns) always sets ``timed_out=False``.
+    """
     sandbox = _fake_sandbox(tmp_path)
     trace = tmp_path / "t.jsonl"
     trace.write_text("")
@@ -227,30 +260,26 @@ async def test_run_python_returns_runner_result_unchanged(
         exit_code=137,
         stdout="partial",
         stderr="boom",
-        timed_out=True,
+        timed_out=False,
     )
-
-    async def _stub_run_session(**_kwargs):
-        return expected
-
-    monkeypatch.setattr(sandbox_module, "_run_session", _stub_run_session)
+    _install_session_stub(monkeypatch, result=expected)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result == expected
 
 
-# -- _truncate: byte-aware caps -----------------------------------------------
+# -- _truncate_to_bytes: byte-aware caps --------------------------------------
 
 
 def test_truncate_below_cap_passthrough() -> None:
     """A string under the cap must round-trip unchanged."""
-    assert sandbox_module._truncate("hello", 100) == "hello"
+    assert sandbox_module._truncate_to_bytes("hello", 100) == "hello"
 
 
 def test_truncate_ascii_above_cap_emits_marker() -> None:
     """ASCII content above the cap is replaced past the head with the truncation marker."""
     text = "x" * 200
-    result = sandbox_module._truncate(text, 100)
+    result = sandbox_module._truncate_to_bytes(text, 100)
     assert len(result.encode("utf-8")) <= 100
     assert sandbox_module._TRUNCATION_MARKER in result
     assert result.startswith("x")
@@ -259,7 +288,7 @@ def test_truncate_ascii_above_cap_emits_marker() -> None:
 def test_truncate_multibyte_respects_byte_cap_not_char_cap() -> None:
     """Cap is named ``_MAX_STDOUT_BYTES`` so it must be enforced in bytes.
 
-    Regression: ``_truncate`` previously sliced on ``len(text)`` (character
+    Regression: the old ``_truncate`` sliced on ``len(text)`` (character
     count). 200 emoji are 200 chars but 800 UTF-8 bytes; under the old
     code a 100-byte cap would let through ~800 bytes — silently breaking
     the byte-named contract. The fix encodes first, slices on bytes,
@@ -269,7 +298,7 @@ def test_truncate_multibyte_respects_byte_cap_not_char_cap() -> None:
     # 4-byte emoji × 200 = 800 UTF-8 bytes.
     text = "🔥" * 200
     cap_bytes = 100
-    result = sandbox_module._truncate(text, cap_bytes)
+    result = sandbox_module._truncate_to_bytes(text, cap_bytes)
     assert len(result.encode("utf-8")) <= cap_bytes, (
         f"truncated output is {len(result.encode('utf-8'))} bytes, exceeds cap {cap_bytes}"
     )
@@ -287,7 +316,7 @@ def test_truncate_drops_partial_utf8_at_cut() -> None:
     # to actually trigger truncation, hence ``é * 100`` not ``ééé``.
     text = "é" * 100
     cap_bytes = len(sandbox_module._TRUNCATION_MARKER) + 5
-    result = sandbox_module._truncate(text, cap_bytes)
+    result = sandbox_module._truncate_to_bytes(text, cap_bytes)
     assert len(result.encode("utf-8")) <= cap_bytes
     assert "�" not in result
     assert result.endswith(sandbox_module._TRUNCATION_MARKER)
@@ -296,7 +325,7 @@ def test_truncate_drops_partial_utf8_at_cut() -> None:
     assert not result.startswith("ééé")
 
 
-# -- _run_session lifecycle: every drive return path must shut down the runner ---
+# -- _RunnerSession lifecycle: every protocol return path must shut down the runner ---
 
 
 # Sentinel ``_RpcResult`` factories — short builders for the test responses below.
@@ -308,8 +337,8 @@ def _rpc_error(message: str, code: int = -32008) -> "sandbox_module._RpcResult":
     return sandbox_module._RpcResult(result=None, error={"code": code, "message": message})
 
 
-class _DriveCapture:
-    """Records every ``_call`` method and every ``_send`` payload through one session."""
+class _SessionCapture:
+    """Records every ``_request`` method and every ``_write_message`` payload."""
 
     def __init__(self) -> None:
         self.phases: list[str] = []
@@ -319,34 +348,38 @@ class _DriveCapture:
         return any(p.get("method") == "shutdown" for p in self.sent)
 
 
-def _install_drive_stubs(
+def _install_session_internals_stubs(
     monkeypatch: pytest.MonkeyPatch,
     *,
     rpc_responder,
     send_failure_for: str | None = None,
-) -> _DriveCapture:
-    """Wire the standard unit-level stubs around ``_run_session``.
+) -> _SessionCapture:
+    """Wire stubs around ``_RunnerSession``'s internals.
+
+    Patches the real ``_RunnerSession`` methods so the test exercises
+    the actual ``Sandbox.run_python`` → ``_run_protocol`` flow but
+    without spawning a real subprocess.
 
     ``rpc_responder(method)`` returns the ``_RpcResult`` to use for that
     JSON-RPC method call. Reaching an un-handled method is a test bug
     (the responder should ``raise AssertionError`` to surface that).
 
-    ``send_failure_for`` (optional): the ``method`` whose ``_send`` call
-    should raise ``BrokenPipeError`` — used to simulate a runner that
+    ``send_failure_for`` (optional): the ``method`` whose ``_write_message``
+    call should raise ``BrokenPipeError`` — used to simulate a runner that
     exits between responding and reading the next frame.
     """
-    capture = _DriveCapture()
+    capture = _SessionCapture()
 
-    async def _stub_call(_proc, method, _params, _request_id):
+    async def _stub_request(self, method, _params):
         capture.phases.append(method)
         return rpc_responder(method)
 
-    async def _stub_send(_proc, payload):
+    async def _stub_write_message(self, payload):
         capture.sent.append(payload)
         if send_failure_for is not None and payload.get("method") == send_failure_for:
             raise BrokenPipeError(f"runner already exited (simulated for {send_failure_for})")
 
-    async def _stub_read_ready(_stdout):
+    async def _stub_await_ready(self):
         return None
 
     async def _stub_drain_capped(_stream, _cap):
@@ -370,9 +403,9 @@ def _install_drive_stubs(
     async def _stub_create_subprocess(*_args, **_kwargs):
         return _StubProc()
 
-    monkeypatch.setattr(sandbox_module, "_call", _stub_call)
-    monkeypatch.setattr(sandbox_module, "_send", _stub_send)
-    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_request", _stub_request)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_write_message", _stub_write_message)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_await_ready", _stub_await_ready)
     monkeypatch.setattr(sandbox_module, "_drain_capped", _stub_drain_capped)
     monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", _stub_create_subprocess)
     return capture
@@ -397,14 +430,15 @@ async def test_run_python_sends_shutdown_after_mount_file_error(
     1. The driver previously discarded the result of every ``mount_file``
        call. A failed mount (host file missing, Deno --allow-read denial)
        let bootstrap run anyway and crash with a confusing
-       ``FileNotFoundError`` deep inside Pyodide. The fix returns early
-       with a clear ``mount_file`` error.
+       ``FileNotFoundError`` deep inside Pyodide. The fix raises a
+       ``SandboxError`` from ``_RunnerSession.mount`` and ``run_python``
+       converts it into a clear stderr message.
 
     2. The early-return path skipped the shutdown send, leaving the
        Deno subprocess alive and blocking ``stderr_task``'s drain (which
        waits for the subprocess to close stderr on exit). The fix
-       relocates the shutdown send into ``_run_session`` so every
-       successful ``_drive`` return triggers cleanup uniformly.
+       puts shutdown in ``_RunnerSession.stop`` so every error path
+       runs cleanup uniformly via the outer try/except in ``run_python``.
     """
     sandbox = _fake_sandbox(tmp_path)
     trace, index = _trace_and_index(tmp_path)
@@ -412,9 +446,9 @@ async def test_run_python_sends_shutdown_after_mount_file_error(
     def _responder(method: str):
         if method == "mount_file":
             return _rpc_error("Failed to mount file: missing")
-        raise AssertionError(f"_drive must return after mount_file error; reached {method!r}")
+        raise AssertionError(f"protocol must return after mount_file error; reached {method!r}")
 
-    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
+    capture = _install_session_internals_stubs(monkeypatch, rpc_responder=_responder)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 1
@@ -449,9 +483,9 @@ async def test_run_python_sends_shutdown_after_bootstrap_rpc_error(
             return _rpc_ok({"mounted": "/x"})
         if method == "bootstrap":
             return _rpc_error("runner rejected bootstrap")
-        raise AssertionError(f"_drive must return after bootstrap RPC error; reached {method!r}")
+        raise AssertionError(f"protocol must return after bootstrap RPC error; reached {method!r}")
 
-    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
+    capture = _install_session_internals_stubs(monkeypatch, rpc_responder=_responder)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 1
@@ -489,9 +523,11 @@ async def test_run_python_sends_shutdown_after_bootstrap_python_error(
                     "stderr": "Traceback (most recent call last):\n  ...\nValueError: bad index\n",
                 }
             )
-        raise AssertionError(f"_drive must return after bootstrap python error; reached {method!r}")
+        raise AssertionError(
+            f"protocol must return after bootstrap python error; reached {method!r}"
+        )
 
-    capture = _install_drive_stubs(monkeypatch, rpc_responder=_responder)
+    capture = _install_session_internals_stubs(monkeypatch, rpc_responder=_responder)
 
     result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
     assert result.exit_code == 1
@@ -510,11 +546,12 @@ async def test_run_python_preserves_result_when_shutdown_send_fails(
 
     Regression: the post-execute shutdown send is best-effort cleanup —
     the result is already in hand. If the runner exits between
-    responding and reading our shutdown frame, ``_send`` raises
+    responding and reading our shutdown frame, ``_write_message`` raises
     ``BrokenPipeError`` (subclass of ``OSError``). Previously that
-    propagated through ``_run_session``'s ``except BaseException`` and
-    out of ``run_python``, which only catches ``SandboxError`` — so the
-    caller saw the ``OSError`` instead of the valid result.
+    propagated through ``run_python``'s outer ``except BaseException`` and
+    out, which only catches ``SandboxError`` — so the caller saw the
+    ``OSError`` instead of the valid result. The fix swallows
+    ``BrokenPipeError``/``ConnectionError`` inside ``_RunnerSession.stop``.
     """
     sandbox = _fake_sandbox(tmp_path)
     trace, index = _trace_and_index(tmp_path)
@@ -528,7 +565,7 @@ async def test_run_python_preserves_result_when_shutdown_send_fails(
             return _rpc_ok({"exit_code": 0, "stdout": "real result\n", "stderr": ""})
         raise AssertionError(f"unexpected method {method!r}")
 
-    capture = _install_drive_stubs(
+    capture = _install_session_internals_stubs(
         monkeypatch, rpc_responder=_responder, send_failure_for="shutdown"
     )
 
@@ -541,7 +578,7 @@ async def test_run_python_preserves_result_when_shutdown_send_fails(
 
 
 @pytest.mark.asyncio
-async def test_run_python_does_not_hang_when_drive_returns_early(
+async def test_run_python_does_not_hang_when_protocol_returns_early(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End-to-end behavior check: no early-return path may leave the session hanging.
@@ -555,7 +592,7 @@ async def test_run_python_does_not_hang_when_drive_returns_early(
 
       * ``_drain_capped`` only resolves once the runner is "dead".
       * ``proc.wait`` only resolves once the runner is "dead".
-      * ``_send(method=shutdown)`` flips the runner to "dead".
+      * ``_write_message(method=shutdown)`` flips the runner to "dead".
       * ``_kill_process_group`` also flips it to "dead" (the bug-free
         timeout/exception paths still cover us — but here we assert the
         *normal* early-return path does it on its own).
@@ -572,14 +609,14 @@ async def test_run_python_does_not_hang_when_drive_returns_early(
             return _rpc_error("Failed to mount file: missing")
         raise AssertionError(f"reached {method!r}")
 
-    async def _stub_call(_proc, method, _params, _request_id):
+    async def _stub_request(self, method, _params):
         return _responder(method)
 
-    async def _stub_send(_proc, payload):
+    async def _stub_write_message(self, payload):
         if payload.get("method") == "shutdown":
             proc_dead.set()
 
-    async def _stub_read_ready(_stdout):
+    async def _stub_await_ready(self):
         return None
 
     async def _stub_drain_capped(_stream, _cap):
@@ -606,9 +643,9 @@ async def test_run_python_does_not_hang_when_drive_returns_early(
     async def _stub_create_subprocess(*_args, **_kwargs):
         return _StubProc()
 
-    monkeypatch.setattr(sandbox_module, "_call", _stub_call)
-    monkeypatch.setattr(sandbox_module, "_send", _stub_send)
-    monkeypatch.setattr(sandbox_module, "_read_ready", _stub_read_ready)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_request", _stub_request)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_write_message", _stub_write_message)
+    monkeypatch.setattr(sandbox_module._RunnerSession, "_await_ready", _stub_await_ready)
     monkeypatch.setattr(sandbox_module, "_drain_capped", _stub_drain_capped)
     monkeypatch.setattr(sandbox_module, "_kill_process_group", _stub_kill)
     monkeypatch.setattr(sandbox_module.asyncio, "create_subprocess_exec", _stub_create_subprocess)
@@ -622,7 +659,7 @@ async def test_run_python_does_not_hang_when_drive_returns_early(
     assert proc_dead.is_set()
 
 
-# -- _read_ready: tolerate unexpected JSON before sentinel --------------------
+# -- _RunnerSession._await_ready: tolerate unexpected JSON before sentinel ----
 
 
 class _FakeStdout:
@@ -640,18 +677,40 @@ class _FakeStdout:
         return line
 
 
+def _session_with_fake_stdout(lines: list[bytes]) -> sandbox_module._RunnerSession:
+    """Build a ``_RunnerSession`` whose ``_proc.stdout`` is the fake reader.
+
+    Bypasses ``start()`` (no subprocess) — we wire the proc attribute
+    directly so we can drive ``_await_ready`` against scripted input.
+    """
+    session = sandbox_module._RunnerSession(argv=["fake"])
+
+    class _StubProc:
+        stdout = _FakeStdout(lines)
+        stdin = None
+        stderr = None
+        pid = 2**31 - 1
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    session._proc = _StubProc()  # type: ignore[assignment]
+    return session
+
+
 @pytest.mark.asyncio
-async def test_read_ready_skips_unexpected_json_before_sentinel() -> None:
+async def test_await_ready_skips_unexpected_json_before_sentinel() -> None:
     """Unexpected JSON before the ready sentinel must be skipped, not fatal.
 
-    Regression: ``_read_ready`` previously raised on any valid JSON line
-    that wasn't an error and wasn't the ``id=0, result.ready=True``
+    Regression: ``_await_ready`` previously raised on any valid JSON
+    line that wasn't an error and wasn't the ``id=0, result.ready=True``
     sentinel. Future Pyodide / Deno releases could legitimately log JSON
     diagnostics on stdout during boot; that should not kill the session.
-    Behavior must mirror ``_read_response``, which already
+    Behavior must mirror ``_read_until_id``, which already
     skip-and-retries on non-matching ids.
     """
-    stdout = _FakeStdout(
+    session = _session_with_fake_stdout(
         [
             b'{"some": "diagnostic"}\n',
             b'{"jsonrpc":"2.0","method":"unknown_event"}\n',
@@ -659,29 +718,125 @@ async def test_read_ready_skips_unexpected_json_before_sentinel() -> None:
         ]
     )
     # Should return cleanly (no exception).
-    await sandbox_module._read_ready(stdout)
+    await session._await_ready()
 
 
 @pytest.mark.asyncio
-async def test_read_ready_still_raises_on_explicit_startup_error() -> None:
+async def test_await_ready_still_raises_on_explicit_startup_error() -> None:
     """An ``error`` field in JSON before the sentinel is still a fatal startup signal.
 
     Skipping unexpected JSON must not also swallow real error
     notifications — the runner emits these from its
     ``unhandledrejection`` handler, and they encode genuine failures.
     """
-    stdout = _FakeStdout(
+    session = _session_with_fake_stdout(
         [
             b'{"jsonrpc":"2.0","error":{"code":-32007,"message":"boom"}}\n',
         ]
     )
     with pytest.raises(sandbox_module.SandboxError, match="runner failed at startup"):
-        await sandbox_module._read_ready(stdout)
+        await session._await_ready()
 
 
 @pytest.mark.asyncio
-async def test_read_ready_raises_on_premature_eof() -> None:
+async def test_await_ready_raises_on_premature_eof() -> None:
     """Empty stdout (process exited before signalling) is still fatal."""
-    stdout = _FakeStdout([])
+    session = _session_with_fake_stdout([])
     with pytest.raises(sandbox_module.SandboxError, match="exited before signalling ready"):
-        await sandbox_module._read_ready(stdout)
+        await session._await_ready()
+
+
+# -- _resolve_required_wheels: lockfile-driven wheel discovery -----------------
+
+
+def _write_minimal_lockfile(pyodide_dir: Path, packages: dict) -> None:
+    pyodide_dir.mkdir(parents=True, exist_ok=True)
+    (pyodide_dir / "pyodide-lock.json").write_text(json.dumps({"packages": packages}))
+
+
+def test_resolve_required_wheels_walks_transitive_dependencies(tmp_path: Path) -> None:
+    """The resolver must transitively follow ``depends`` and dedupe shared deps.
+
+    Regression target: a hand-maintained list misses a transitive dep
+    on Pyodide bumps. The lockfile walk should expand to the full
+    closure even for diamond-shaped dep graphs (two packages share a
+    child).
+    """
+    pyodide_dir = tmp_path / "pyodide"
+    _write_minimal_lockfile(
+        pyodide_dir,
+        {
+            "numpy": {"file_name": "numpy.whl", "depends": []},
+            "pandas": {
+                "file_name": "pandas.whl",
+                "depends": ["numpy", "python-dateutil"],
+            },
+            "python-dateutil": {"file_name": "python_dateutil.whl", "depends": ["six"]},
+            "six": {"file_name": "six.whl", "depends": []},
+            "pydantic": {"file_name": "pydantic.whl", "depends": ["six"]},  # diamond on six
+            # Unrelated package the resolver must NOT pull in:
+            "scipy": {"file_name": "scipy.whl", "depends": ["numpy"]},
+        },
+    )
+    wheels = set(sandbox_module._resolve_required_wheels(pyodide_dir))
+    assert wheels == {
+        "numpy.whl",
+        "pandas.whl",
+        "python_dateutil.whl",
+        "six.whl",
+        "pydantic.whl",
+    }
+
+
+def test_resolve_required_wheels_raises_when_lockfile_missing(tmp_path: Path) -> None:
+    """A missing ``pyodide-lock.json`` must raise ``_ResolutionError``."""
+    with pytest.raises(sandbox_module._ResolutionError, match="pyodide-lock.json missing"):
+        sandbox_module._resolve_required_wheels(tmp_path / "nonexistent-pyodide")
+
+
+def test_resolve_required_wheels_normalizes_underscore_in_depends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``depends`` entry in underscore form must resolve to its dash-keyed entry.
+
+    Regression: the real Pyodide 0.29.3 lockfile keys ``packages`` by
+    the PEP 503-normalized form (``pydantic-core``) but pydantic's
+    ``depends`` list contains the importable underscore form
+    (``pydantic_core``). Without normalization the resolver fails with
+    "no entry for required package 'pydantic_core'" even though the
+    package is right there under a different spelling. The resolver
+    normalizes both keys and lookups via PEP 503, so the dependency
+    walk follows either spelling.
+    """
+    monkeypatch.setattr(sandbox_module, "_REQUIRED_PACKAGES", ("pydantic",))
+    pyodide_dir = tmp_path / "pyodide"
+    _write_minimal_lockfile(
+        pyodide_dir,
+        {
+            "pydantic": {"file_name": "pydantic.whl", "depends": ["pydantic_core"]},
+            "pydantic-core": {"file_name": "pydantic_core.whl", "depends": []},
+        },
+    )
+    wheels = set(sandbox_module._resolve_required_wheels(pyodide_dir))
+    assert wheels == {"pydantic.whl", "pydantic_core.whl"}
+
+
+def test_resolve_required_wheels_raises_when_required_package_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A required-package name absent from the lockfile must raise.
+
+    This is the ``Pyodide bumped, dropped a package we depend on`` case.
+    Better to fail loudly at resolve time than to silently skip it and
+    crash inside Pyodide on ``loadPackage``.
+    """
+    monkeypatch.setattr(sandbox_module, "_REQUIRED_PACKAGES", ("numpy", "missingpkg"))
+    pyodide_dir = tmp_path / "pyodide"
+    _write_minimal_lockfile(
+        pyodide_dir,
+        {"numpy": {"file_name": "numpy.whl", "depends": []}},
+    )
+    with pytest.raises(
+        sandbox_module._ResolutionError, match="no entry for required package 'missingpkg'"
+    ):
+        sandbox_module._resolve_required_wheels(pyodide_dir)

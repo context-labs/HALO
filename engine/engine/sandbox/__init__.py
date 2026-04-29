@@ -1,7 +1,7 @@
 """HALO sandbox module: run user Python under a Deno+Pyodide WASM sandbox.
 
 Public surface:
-    - ``Sandbox``: resolved sandbox; obtained via ``Sandbox.resolve()``.
+    - ``Sandbox``: resolved sandbox; obtained via ``Sandbox.get()``.
     - ``CodeExecutionResult`` / ``RunCodeArguments``: tool IO models.
 """
 
