@@ -25,10 +25,6 @@ on:
       - ".github/workflows/engine--lint-format-typecheck.yml"
   workflow_call:
 
-concurrency:
-  group: engine-lint-format-typecheck-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   PYTHON_VERSION: "3.10"
 

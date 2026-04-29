@@ -25,10 +25,6 @@ on:
       - ".github/workflows/engine--unit-tests.yml"
   workflow_call:
 
-concurrency:
-  group: engine-unit-tests-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   PYTHON_VERSION: "3.10"
 

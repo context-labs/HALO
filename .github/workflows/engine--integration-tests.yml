@@ -26,10 +26,6 @@ on:
   workflow_dispatch:
   workflow_call:
 
-concurrency:
-  group: engine-integration-tests-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   PYTHON_VERSION: "3.10"
 
