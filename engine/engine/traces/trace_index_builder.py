@@ -12,6 +12,23 @@ from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
 
 
+def _available_cpus(*, max_workers: int = 8) -> int:
+    """Return CPUs actually available to this process, capped at ``max_workers``.
+
+    Uses ``os.sched_getaffinity`` on Linux so we respect cgroup CPU limits — in
+    a Kubernetes pod with ``cpus=2`` on a 64-core node, ``os.cpu_count`` would
+    return 64 and we would oversubscribe massively. Falls back to ``cpu_count``
+    on platforms without ``sched_getaffinity`` (notably macOS). Capped at
+    ``max_workers`` because per-chunk pickle/IPC overhead has fixed cost, so
+    very high worker counts hit diminishing returns.
+    """
+    if hasattr(os, "sched_getaffinity"):
+        n = len(os.sched_getaffinity(0))
+    else:
+        n = os.cpu_count() or 1
+    return min(max(n, 1), max_workers)
+
+
 def _index_line_offsets(trace_path: Path) -> list[tuple[int, int]]:
     """Stage 1: sequentially scan the JSONL, return (byte_offset, byte_length) for every non-empty line.
 
@@ -88,7 +105,10 @@ def _write_atomic(
     tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
     tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
 
-    tmp_index.write_text("\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else ""))
+    with tmp_index.open("w") as fh:
+        for row in rows:
+            fh.write(row.model_dump_json())
+            fh.write("\n")
     tmp_meta.write_text(
         TraceIndexMeta(
             schema_version=schema_version,
@@ -340,8 +360,7 @@ class TraceIndexBuilder:
             merged = await asyncio.to_thread(_process_chunk, trace_path, line_offsets)
             return [acc.finalize() for acc in merged.values()]
 
-        n_workers = os.cpu_count() or 1
-        chunks = _split_into_chunks(line_offsets, n_workers)
+        chunks = _split_into_chunks(line_offsets, _available_cpus())
         loop = asyncio.get_running_loop()
         ctx = mp.get_context("forkserver")
         with ProcessPoolExecutor(max_workers=len(chunks), mp_context=ctx) as ex:
