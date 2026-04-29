@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from collections import Counter
@@ -480,7 +481,11 @@ class TraceStore:
                 # Parse the span only when it has at least one match — avoids paying
                 # the SpanRecord validate cost on spans we'll never report on.
                 span = SpanRecord.model_validate_json(blob)
-                for m in (first, *iterator):
+                # Lazy chain over the first match + remaining iterator rather than
+                # ``(first, *iterator)`` which would eagerly materialize every match
+                # into a tuple — for a broad regex on a large span that's millions of
+                # ``re.Match`` objects held in memory at once.
+                for m in itertools.chain([first], iterator):
                     match_count += 1
                     if len(matches) < max_matches:
                         matches.append(
@@ -534,9 +539,13 @@ class TraceStore:
             ):
                 fh.seek(offset)
                 blob = fh.read(length)
-                span = SpanRecord.model_validate_json(blob)
-                if span.span_id != span_id:
+                # Cheap pre-check: stdlib JSON parse to read just ``span_id`` without
+                # paying the SpanRecord field-by-field validation cost on every
+                # non-matching span. Full Pydantic validation only runs once we know
+                # this is the span we want.
+                if json.loads(blob).get("span_id") != span_id:
                     continue
+                span = SpanRecord.model_validate_json(blob)
                 raw = blob.decode("utf-8", errors="replace")
                 for m in pattern.finditer(raw):
                     match_count += 1
