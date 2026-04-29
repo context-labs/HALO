@@ -84,7 +84,7 @@ halo --help
 3. Run the HALO engine, see the [CLI](/halo_cli/README.md) docs for more info
 ```bash
 export OPENAI_API_KEY=...
-halo path_to_your_traces.jsonl
+halo path_to_your_traces.jsonl -p "Diagnose the errors you find and suggest fixes"
 ```
 
 We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
