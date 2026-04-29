@@ -61,7 +61,12 @@ jobs:
 
   bump-version:
     name: Bump Version
-    needs: [e2e-tests]
+    needs:
+      - lint-format-typecheck
+      - unit-tests
+      - integration-tests
+      - integration-tests-live
+      - e2e-tests
     runs-on: depot-ubuntu-latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
