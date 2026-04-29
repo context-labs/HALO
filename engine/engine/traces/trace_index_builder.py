@@ -1,11 +1,147 @@
 from __future__ import annotations
 
+import asyncio
+import multiprocessing as mp
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from engine.traces.models.canonical_span import SpanRecord
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.models.trace_index_models import TraceIndexMeta, TraceIndexRow
+
+
+def _available_cpus(*, max_workers: int = 8) -> int:
+    """Return CPUs actually available to this process, capped at ``max_workers``.
+
+    Uses ``os.sched_getaffinity`` on Linux so we respect cgroup CPU limits — in
+    a Kubernetes pod with ``cpus=2`` on a 64-core node, ``os.cpu_count`` would
+    return 64 and we would oversubscribe massively. Falls back to ``cpu_count``
+    on platforms without ``sched_getaffinity`` (notably macOS). Capped at
+    ``max_workers`` because per-chunk pickle/IPC overhead has fixed cost, so
+    very high worker counts hit diminishing returns.
+    """
+    if hasattr(os, "sched_getaffinity"):
+        n = len(os.sched_getaffinity(0))
+    else:
+        n = os.cpu_count() or 1
+    return min(max(n, 1), max_workers)
+
+
+def _index_line_offsets(trace_path: Path) -> list[tuple[int, int]]:
+    """Stage 1: sequentially scan the JSONL, return (byte_offset, byte_length) for every non-empty line.
+
+    ``byte_length`` includes the trailing newline; workers strip it before parsing.
+    Empty lines are filtered out so worker processes never see them.
+    """
+    offsets: list[tuple[int, int]] = []
+    with trace_path.open("rb") as fh:
+        position = 0
+        for raw_line in fh:
+            length = len(raw_line)
+            if raw_line.rstrip(b"\n"):
+                offsets.append((position, length))
+            position += length
+    return offsets
+
+
+def _split_into_chunks(
+    line_offsets: list[tuple[int, int]], n_workers: int
+) -> list[list[tuple[int, int]]]:
+    """Stage 2 prep: split into ``n_workers`` contiguous, order-preserving slices.
+
+    Caps ``n_workers`` at ``len(line_offsets)`` so no empty chunks are dispatched.
+    Returns ``[]`` for an empty input.
+    """
+    if not line_offsets:
+        return []
+    n = min(n_workers, len(line_offsets))
+    base, remainder = divmod(len(line_offsets), n)
+    chunks: list[list[tuple[int, int]]] = []
+    start = 0
+    for i in range(n):
+        size = base + (1 if i < remainder else 0)
+        chunks.append(line_offsets[start : start + size])
+        start += size
+    return chunks
+
+
+def _merge_accumulators(
+    per_worker: list[dict[str, _RowAccumulator]],
+) -> dict[str, _RowAccumulator]:
+    """Stage 3: merge per-worker partials by trace_id; chunk-order traversal preserves file order.
+
+    Iterating ``per_worker`` in order — and ``asyncio.gather`` returns results
+    in argument order — is what guarantees ``byte_offsets`` within a trace stays
+    sorted by file position. No explicit sort step is needed.
+    """
+    merged: dict[str, _RowAccumulator] = {}
+    for worker_dict in per_worker:
+        for trace_id, acc in worker_dict.items():
+            existing = merged.get(trace_id)
+            if existing is None:
+                merged[trace_id] = acc
+            else:
+                existing.merge_in(acc)
+    return merged
+
+
+def _write_atomic(
+    *,
+    index_path: Path,
+    meta_path: Path,
+    rows: list[TraceIndexRow],
+    schema_version: int,
+    source_size: int,
+    source_mtime_ns: int,
+) -> None:
+    """Serialize rows + meta and atomically replace the sidecar files.
+
+    Synchronous on purpose — callers run this via ``asyncio.to_thread`` so the
+    event loop is not blocked while serializing potentially hundreds of MB of
+    JSON or writing large files to disk.
+    """
+    tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
+    tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
+
+    with tmp_index.open("w") as fh:
+        for row in rows:
+            fh.write(row.model_dump_json())
+            fh.write("\n")
+    tmp_meta.write_text(
+        TraceIndexMeta(
+            schema_version=schema_version,
+            trace_count=len(rows),
+            source_size=source_size,
+            source_mtime_ns=source_mtime_ns,
+        ).model_dump_json()
+    )
+
+    tmp_index.replace(index_path)
+    tmp_meta.replace(meta_path)
+
+
+def _process_chunk(trace_path: Path, chunk: list[tuple[int, int]]) -> dict[str, _RowAccumulator]:
+    """Stage 2 worker: read each (offset, length) from the file, parse, and accumulate locally.
+
+    Top-level so it pickles cleanly for ``ProcessPoolExecutor`` dispatch. Each
+    worker opens the file independently and seeks to its tuples — the OS page
+    cache makes repeated reads of nearby bytes essentially free after the
+    stage-1 scan.
+    """
+    rows: dict[str, _RowAccumulator] = {}
+    with trace_path.open("rb") as fh:
+        for byte_offset, byte_length in chunk:
+            fh.seek(byte_offset)
+            raw = fh.read(byte_length)
+            stripped = raw.rstrip(b"\n")
+            if not stripped:
+                continue
+            span = SpanRecord.model_validate_json(stripped)
+            acc = rows.setdefault(span.trace_id, _RowAccumulator(trace_id=span.trace_id))
+            acc.absorb(span=span, byte_offset=byte_offset, byte_length=len(stripped))
+    return rows
 
 
 # TODO: Switch all dataclasses to pydantic
@@ -67,6 +203,30 @@ class _RowAccumulator:
         if isinstance(proj, str) and self.project_id is None:
             self.project_id = proj
 
+    def merge_in(self, other: _RowAccumulator) -> None:
+        """Fold ``other`` into ``self`` for the same trace_id; caller iterates partials in file order."""
+        self.byte_offsets.extend(other.byte_offsets)
+        self.byte_lengths.extend(other.byte_lengths)
+        self.span_count += other.span_count
+
+        if not self.start_time or (other.start_time and other.start_time < self.start_time):
+            self.start_time = other.start_time
+        if not self.end_time or other.end_time > self.end_time:
+            self.end_time = other.end_time
+
+        if other.has_errors:
+            self.has_errors = True
+
+        self.service_names |= other.service_names
+        self.model_names |= other.model_names
+        self.agent_names |= other.agent_names
+
+        self.total_input_tokens += other.total_input_tokens
+        self.total_output_tokens += other.total_output_tokens
+
+        if self.project_id is None:
+            self.project_id = other.project_id
+
     def finalize(self) -> TraceIndexRow:
         """Snapshot the accumulated state into the immutable TraceIndexRow that gets written to the sidecar."""
         return TraceIndexRow(
@@ -94,6 +254,8 @@ class TraceIndexBuilder:
     matches the trace file, and rebuilds it otherwise. Schema-version mismatches
     still fail fast. ``build_index`` is the actual scan + write path.
     """
+
+    SMALL_FILE_THRESHOLD = 1000
 
     @classmethod
     async def ensure_index_exists(
@@ -156,13 +318,18 @@ class TraceIndexBuilder:
         source_size: int | None = None,
         source_mtime_ns: int | None = None,
     ) -> None:
-        """Single-pass binary scan over the JSONL, grouping by trace_id and writing the sidecars atomically.
+        """Two-pass parallel scan over the JSONL, grouping by trace_id and writing the sidecars atomically.
 
-        Reads in binary mode so byte_offset/byte_length are exact, accumulates per-trace
-        rollups, then writes ``<file>.tmp`` then renames into place so a partially-written
-        index is never observable. ``source_size`` and ``source_mtime_ns`` are the
-        freshness fingerprint stored in meta; callers may pass precomputed values to
-        avoid a redundant stat.
+        Stage 1 (sequential, in a thread) records ``(byte_offset, byte_length)``
+        per non-empty line. Stage 2 splits that list into N=cpu_count worker
+        chunks dispatched via ``ProcessPoolExecutor`` + ``asyncio.gather`` to
+        parallel pydantic parse + accumulate. Stage 3 merges per-worker partials
+        by ``trace_id`` in chunk order — which equals file order, preserving
+        today's byte-exact output. Below ``SMALL_FILE_THRESHOLD`` non-empty
+        lines we run inline (no executor) to avoid fork+pickle overhead
+        dominating on small files. The atomic write block runs in a thread so
+        the event loop is not blocked while serializing/writing potentially
+        large index files.
         """
         if schema_version != 1:
             raise ValueError(f"unsupported trace index schema_version={schema_version}")
@@ -170,40 +337,35 @@ class TraceIndexBuilder:
         if source_size is None or source_mtime_ns is None:
             source_size, source_mtime_ns = cls._fingerprint_trace_file(trace_path)
 
-        rows_by_trace: dict[str, _RowAccumulator] = {}
+        rows = await cls._run_build(trace_path)
 
-        # TODO: Stream file to avoid loading all into memory
-        with trace_path.open("rb") as fh:
-            offset = 0
-
-            # TODO: Parallelize / async, can be slow
-            for raw_line in fh:
-                byte_length = len(raw_line)
-                stripped = raw_line.rstrip(b"\n")
-                if stripped:
-                    span = SpanRecord.model_validate_json(stripped)
-                    acc = rows_by_trace.setdefault(
-                        span.trace_id, _RowAccumulator(trace_id=span.trace_id)
-                    )
-                    acc.absorb(span=span, byte_offset=offset, byte_length=len(stripped))
-                offset += byte_length
-
-        rows = [acc.finalize() for acc in rows_by_trace.values()]
-
-        tmp_index = index_path.with_suffix(index_path.suffix + ".tmp")
-        tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
-
-        tmp_index.write_text(
-            "\n".join(row.model_dump_json() for row in rows) + ("\n" if rows else "")
-        )
-        tmp_meta.write_text(
-            TraceIndexMeta(
-                schema_version=schema_version,
-                trace_count=len(rows),
-                source_size=source_size,
-                source_mtime_ns=source_mtime_ns,
-            ).model_dump_json()
+        await asyncio.to_thread(
+            _write_atomic,
+            index_path=index_path,
+            meta_path=meta_path,
+            rows=rows,
+            schema_version=schema_version,
+            source_size=source_size,
+            source_mtime_ns=source_mtime_ns,
         )
 
-        tmp_index.replace(index_path)
-        tmp_meta.replace(meta_path)
+    @classmethod
+    async def _run_build(cls, trace_path: Path) -> list[TraceIndexRow]:
+        """Async staged pipeline: index lines (in a thread), parse via ProcessPoolExecutor, merge, finalize."""
+        line_offsets = await asyncio.to_thread(_index_line_offsets, trace_path)
+        if not line_offsets:
+            return []
+
+        if len(line_offsets) < cls.SMALL_FILE_THRESHOLD:
+            merged = await asyncio.to_thread(_process_chunk, trace_path, line_offsets)
+            return [acc.finalize() for acc in merged.values()]
+
+        chunks = _split_into_chunks(line_offsets, _available_cpus())
+        loop = asyncio.get_running_loop()
+        ctx = mp.get_context("forkserver")
+        with ProcessPoolExecutor(max_workers=len(chunks), mp_context=ctx) as ex:
+            per_worker = await asyncio.gather(
+                *(loop.run_in_executor(ex, _process_chunk, trace_path, c) for c in chunks)
+            )
+        merged = _merge_accumulators(per_worker)
+        return [acc.finalize() for acc in merged.values()]
