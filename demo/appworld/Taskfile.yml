@@ -67,62 +67,98 @@ tasks:
         --task-id 50e1ac9_1
 
   run:dev:
-    desc: Run on the full dev split (57 tasks). MODEL=... overrides default model.
+    desc: Run on the full dev split (57 tasks). MODEL=, AGENT=, PARALLEL= override defaults.
     deps: [setup:data]
     vars:
       MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
       AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+      PARALLEL: '{{.PARALLEL | default "1"}}'
     cmds:
       - >-
         {{.APPWORLD_BIN}} run auto
         --agent-name {{.AGENT}}
         --model-name {{.MODEL}}
         --dataset-name dev
+        --num-processes {{.PARALLEL}}
+      - task: traces:merge
 
   run:test-normal:
-    desc: Run on the test_normal split (168 tasks).
+    desc: Run on the test_normal split (168 tasks). PARALLEL=N runs N processes (8-16 recommended).
     deps: [setup:data]
     vars:
       MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
       AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+      PARALLEL: '{{.PARALLEL | default "1"}}'
     cmds:
       - >-
         {{.APPWORLD_BIN}} run auto
         --agent-name {{.AGENT}}
         --model-name {{.MODEL}}
         --dataset-name test_normal
+        --num-processes {{.PARALLEL}}
+      - task: traces:merge
 
   run:test-challenge:
-    desc: Run on the test_challenge split (417 tasks).
+    desc: Run on the test_challenge split (417 tasks). PARALLEL=N runs N processes (8-16 recommended).
     deps: [setup:data]
     vars:
       MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
       AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+      PARALLEL: '{{.PARALLEL | default "1"}}'
     cmds:
       - >-
         {{.APPWORLD_BIN}} run auto
         --agent-name {{.AGENT}}
         --model-name {{.MODEL}}
         --dataset-name test_challenge
+        --num-processes {{.PARALLEL}}
+      - task: traces:merge
 
   run:train:
-    desc: Run on the train split (90 tasks).
+    desc: Run on the train split (90 tasks). PARALLEL=N runs N processes (4-8 recommended).
     deps: [setup:data]
     vars:
       MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
       AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+      PARALLEL: '{{.PARALLEL | default "1"}}'
     cmds:
       - >-
         {{.APPWORLD_BIN}} run auto
         --agent-name {{.AGENT}}
         --model-name {{.MODEL}}
         --dataset-name train
+        --num-processes {{.PARALLEL}}
+      - task: traces:merge
 
   run:custom:
     desc: 'Pass arbitrary args to `appworld run`: task run:custom -- auto --agent-name X ...'
     deps: [setup:data]
     cmds:
       - "{{.APPWORLD_BIN}} run {{.CLI_ARGS}}"
+      - task: traces:merge
+
+  traces:merge:
+    desc: Concatenate per-process traces-p*.jsonl into a single traces.jsonl in each experiment dir. Idempotent; no-op when nothing to merge.
+    cmds:
+      - |
+        merged=0
+        if [ ! -d "{{.TASKFILE_DIR}}/experiments/outputs" ]; then
+          echo "[merge] no experiments/outputs/ yet — nothing to do"
+          exit 0
+        fi
+        while IFS= read -r dir; do
+          # shellcheck disable=SC2012  # ls is fine here, we only need to detect presence
+          if ls "$dir"/traces-p*.jsonl >/dev/null 2>&1; then
+            count=$(ls "$dir"/traces-p*.jsonl | wc -l | tr -d ' ')
+            cat "$dir"/traces-p*.jsonl > "$dir/traces.jsonl"
+            rm "$dir"/traces-p*.jsonl
+            echo "[merge] $count files -> $dir/traces.jsonl"
+            merged=$((merged + 1))
+          fi
+        done < <(find "{{.TASKFILE_DIR}}/experiments/outputs" -type d)
+        if [ "$merged" -eq 0 ]; then
+          echo "[merge] no per-process traces to merge (run with PARALLEL>1 to produce them)"
+        fi
 
   verify:traces:
     desc: Run HALO's spec checker against the most recent traces.jsonl in experiments/outputs/.

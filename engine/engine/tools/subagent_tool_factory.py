@@ -27,6 +27,7 @@ from engine.tools.trace_tools import (
     GetDatasetOverviewTool,
     QueryTracesTool,
     SearchTraceTool,
+    ViewSpansTool,
     ViewTraceTool,
 )
 
@@ -119,6 +120,7 @@ def _child_tools_for_depth(
         to_sdk_function_tool(QueryTracesTool(), context_factory=make_ctx),
         to_sdk_function_tool(CountTracesTool(), context_factory=make_ctx),
         to_sdk_function_tool(ViewTraceTool(), context_factory=make_ctx),
+        to_sdk_function_tool(ViewSpansTool(), context_factory=make_ctx),
         to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
         to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
         to_sdk_function_tool(

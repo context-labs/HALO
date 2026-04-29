@@ -100,6 +100,39 @@ Inside `run_agent_on_tasks`, around the existing `async with AgentsMCP(...)` blo
 
 `set_trace_processors([])` clears the SDK's auto-registered default processor (which uploads to OpenAI's trace dashboard). `setup_tracing(...)` then adds the HALO file processor on top. Per the SDK's own docs, this is the canonical pattern for replacing the default.
 
+### `experiments/code/openai_agents/run.py` and `language_model.py` — OpenAI client request timeout
+
+Upstream constructs `AsyncOpenAI()` clients with no explicit timeout, so httpx falls back to defaults that allow individual requests to hang for ~10 minutes on a half-closed TCP connection (CLOSE_WAIT from the server side). In parallel runs this stalls a whole subprocess and, because the parent collects subprocess output strictly in launch order, can stall the entire `appworld run` for minutes on end.
+
+We install an explicit 90-second per-request timeout on every `AsyncOpenAI` client constructed inside the agent harness:
+
+```diff
++ # HALO patch: per-request timeout for the OpenAI client. ...
++ _OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
+
+  def maybe_set_default_openai_client(
+      base_url: str | None = None, api_key: str | None = None
+  ) -> None:
+-     if base_url is None and api_key is None:
+-         return
+-     if base_url is not None and api_key is not None:
+-         client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+-     elif base_url is not None:
+-         client = AsyncOpenAI(base_url=base_url)
+-     else:
+-         client = AsyncOpenAI(api_key=api_key)
++     # HALO patch: always set the default client so we can install a sane request timeout.
++     kwargs: dict[str, Any] = {"timeout": _OPENAI_REQUEST_TIMEOUT_SECONDS}
++     if base_url is not None:
++         kwargs["base_url"] = base_url
++     if api_key is not None:
++         kwargs["api_key"] = api_key
++     client = AsyncOpenAI(**kwargs)
+      _set_default_openai_client(client)
+```
+
+Same pattern in `language_model.py` for the API-predictor sub-agent's client. The 90s value is well above p99 normal latency for `gpt-4o-*`/`gpt-4.1-*` chat completions but tight enough that one stuck request fails fast instead of pinning a subprocess. Tune `_OPENAI_REQUEST_TIMEOUT_SECONDS` (in both files) if running models with longer normal latencies — e.g. raise to 300s for reasoning models like `o3` or `gpt-5-2025-08-07-high-reasoning`.
+
 ### `.gitignore` — HALO additions
 
 Appended to upstream's gitignore to cover artifacts that upstream's gitignore does not:
