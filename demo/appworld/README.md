@@ -8,24 +8,17 @@ What this demo gives you:
 - **HALO traces** at `experiments/outputs/<experiment>/traces.jsonl` after every run, ready to feed to the HALO Engine
 - **A Taskfile-driven workflow** so you don't have to memorize the install dance
 
-For the full list of changes from upstream, see [`HALO_PATCH.md`](HALO_PATCH.md).
+For the full list of changes from upstream, see `[HALO_PATCH.md](HALO_PATCH.md)`.
 
 ## Scope
 
-HALO tracing is wired into the **`openai_agents_mcp_agent`** harness only. Upstream's other paradigms (`legacy_*`, `simplified_*`, `smolagents_*`) still run, but produce no HALO traces — `task agents:list` lists every paradigm upstream ships, not the subset HALO patched. Stick with the default `AGENT=openai_agents_mcp_agent` for the HALO loop.
-
-Within that harness, the LLM call is dispatched through one of two adapter classes based on the model config's `type` field:
-
-- **`type: "openai"`** → `OpenAIChatCompletionsModel` over `AsyncOpenAI` (works against `api.openai.com` or any OpenAI-compatible endpoint via `base_url`).
-- **`type: "litellm"`** → `LitellmModel` (SDK extension at `agents.extensions.models.litellm_model`), which routes through litellm's translator to provider-native APIs (Anthropic Messages, Vertex AI, Bedrock, etc.).
-
-The HALO trace processor is registered on the SDK's tracing layer and sees spans from both adapters — both paths emit HALO traces. Only OpenAI configs are checked in (`experiments/configs/openai_agents_mcp_agent/openai/*`); other providers require generating configs from the registry at `experiments/configs/_generator/models/`. See [Other models](#other-models).
+HALO tracing is wired into the `**openai_agents_mcp_agent`** harness only. Upstream's other paradigms (`legacy_*`, `simplified_*`, `smolagents_*`) still run, but produce no HALO traces — `task agents:list` lists every paradigm upstream ships, not the subset HALO patched. Stick with the default `AGENT=openai_agents_mcp_agent` for the HALO loop.
 
 ## Prereqs
 
 - macOS or Linux (Windows untested)
-- [`uv`](https://docs.astral.sh/uv/) for Python env management
-- [Task](https://taskfile.dev) (`brew install go-task`) — recommended; everything is reachable manually too
+- `[uv](https://docs.astral.sh/uv/)` for Python env management
+- [Task](https://taskfile.dev) (`brew install go-task`) recommended; everything is reachable manually too
 - An OpenAI API key (or another provider's; see [Other models](#other-models))
 
 ## Setup
@@ -37,12 +30,14 @@ task setup
 
 `task setup` is idempotent. It runs four steps; each only does work the first time:
 
-| Step | What it does | First-run cost |
-|---|---|---|
-| `setup:venv` | Creates `.venv` with Python 3.12 | ~5s |
-| `setup:install` | Installs `appworld` and `appworld-agents[openai_agents]` editable | ~30s, ~250MB |
-| `setup:bundles` | `appworld install --repo` — unpacks the four encrypted bundles | ~2s |
-| `setup:data` | `appworld download data` — fetches the 728-task dataset from S3 | ~10s, ~190MB |
+
+| Step            | What it does                                                      | First-run cost |
+| --------------- | ----------------------------------------------------------------- | -------------- |
+| `setup:venv`    | Creates `.venv` with Python 3.12                                  | ~5s            |
+| `setup:install` | Installs `appworld` and `appworld-agents[openai_agents]` editable | ~30s, ~250MB   |
+| `setup:bundles` | `appworld install --repo` unpacks the four encrypted bundles    | ~2s            |
+| `setup:data`    | `appworld download data` fetches the 728-task dataset from S3   | ~10s, ~190MB   |
+
 
 After setup, `task --list` shows everything available.
 
@@ -88,12 +83,14 @@ task run:train PARALLEL=-1              # all CPUs - 1, clamped to task count
 
 Approximate wallclock with `gpt-4o-mini-2024-07-18` (~20s/task sequential):
 
-| Split | Tasks | `PARALLEL=1` | `PARALLEL=8` | `PARALLEL=16` |
-|---|---|---|---|---|
-| dev | 57 | ~19 min | ~3-5 min | ~3 min |
-| train | 90 | ~30 min | ~5-7 min | ~4 min |
-| test_normal | 168 | ~56 min | ~9-12 min | ~6-8 min |
-| test_challenge | 417 | ~2.3 h | ~22-30 min | ~15-20 min |
+
+| Split          | Tasks | `PARALLEL=1` | `PARALLEL=8` | `PARALLEL=16` |
+| -------------- | ----- | ------------ | ------------ | ------------- |
+| dev            | 57    | ~19 min      | ~3-5 min     | ~3 min        |
+| train          | 90    | ~30 min      | ~5-7 min     | ~4 min        |
+| test_normal    | 168   | ~56 min      | ~9-12 min    | ~6-8 min      |
+| test_challenge | 417   | ~2.3 h       | ~22-30 min   | ~15-20 min    |
+
 
 Override the model with the `MODEL=` task variable:
 
@@ -102,7 +99,7 @@ task run:dev MODEL=gpt-4.1-2025-04-14
 task run:test-normal MODEL=gpt-4.1-mini-2025-04-14 PARALLEL=12
 ```
 
-`AGENT=` exists too but only `openai_agents_mcp_agent` is HALO-traced — see [Scope](#scope) above. `task agents:list` lists every paradigm upstream ships, not the subset HALO patched.
+`AGENT=` exists too but only `openai_agents_mcp_agent` is HALO-traced, see [Scope](#scope) above. `task agents:list` lists every paradigm upstream ships, not the subset HALO patched.
 
 For the full menu of supported model names:
 
@@ -151,14 +148,16 @@ experiments/outputs/openai_agents_mcp_agent/openai/gpt-4o-mini-2024-07-18/dev/
 
 The HALO trace shape per span:
 
-| Field | Notes |
-|---|---|
-| `trace_id`, `span_id`, `parent_span_id` | OTLP IDs; one trace per task |
-| `name` | `agent.Assistant`, `generation.<model>`, `function.<app>__<tool>`, `mcp_tools` |
-| `attributes."inference.observation_kind"` | `AGENT` / `LLM` / `TOOL` |
-| `attributes."inference.project_id"` | `appworld-<experiment_name_with_slashes_underscored>` |
-| `attributes."inference.llm.{model_name,input_tokens,output_tokens}"` | LLM spans only |
-| `attributes."tool.name"`, `input.value`, `output.value` | TOOL spans only |
+
+| Field                                                                | Notes                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `trace_id`, `span_id`, `parent_span_id`                              | OTLP IDs; one trace per task                                                   |
+| `name`                                                               | `agent.Assistant`, `generation.<model>`, `function.<app>__<tool>`, `mcp_tools` |
+| `attributes."inference.observation_kind"`                            | `AGENT` / `LLM` / `TOOL`                                                       |
+| `attributes."inference.project_id"`                                  | `appworld-<experiment_name_with_slashes_underscored>`                          |
+| `attributes."inference.llm.{model_name,input_tokens,output_tokens}"` | LLM spans only                                                                 |
+| `attributes."tool.name"`, `input.value`, `output.value`              | TOOL spans only                                                                |
+
 
 A typical 20-step task trace contains ~50 spans: 1 root AGENT, ~10 LLM, ~10 TOOL function calls, ~10 MCP tool-listing spans.
 
@@ -193,18 +192,20 @@ The whole point of this demo is HALO-driven harness improvement. The loop:
 
 Most-improvable surfaces:
 
-| Path | What's there |
-|---|---|
-| `experiments/code/openai_agents/run.py` | The agent loop, including the API predictor → main agent handoff and the `ModelBehaviorError` recovery gap that upstream itself flagged with `# no easy way to give it feedback about the error in this framework, so leave it.` |
-| `experiments/code/openai_agents/api_predictor.py` | The first-pass model that whitelists ≤20 APIs per task; under-fetching here cascades into main-agent failures |
-| `experiments/prompts/function_calling_agent/instructions.txt` | The agent's system prompt template |
-| `experiments/prompts/function_calling_agent/demos.json` | Few-shot demonstrations |
-| `experiments/prompts/api_predictor.txt` | The API predictor's prompt |
-| `experiments/configs/_generator/templates/openai_agents_mcp_agent.jsonnet.j2` | The template that produces per-model run configs (`max_steps`, tool_choice, parallelism, etc.) |
+
+| Path                                                                          | What's there                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `experiments/code/openai_agents/run.py`                                       | The agent loop, including the API predictor → main agent handoff and the `ModelBehaviorError` recovery gap that upstream itself flagged with `# no easy way to give it feedback about the error in this framework, so leave it.` |
+| `experiments/code/openai_agents/api_predictor.py`                             | The first-pass model that whitelists ≤20 APIs per task; under-fetching here cascades into main-agent failures                                                                                                                    |
+| `experiments/prompts/function_calling_agent/instructions.txt`                 | The agent's system prompt template                                                                                                                                                                                               |
+| `experiments/prompts/function_calling_agent/demos.json`                       | Few-shot demonstrations                                                                                                                                                                                                          |
+| `experiments/prompts/api_predictor.txt`                                       | The API predictor's prompt                                                                                                                                                                                                       |
+| `experiments/configs/_generator/templates/openai_agents_mcp_agent.jsonnet.j2` | The template that produces per-model run configs (`max_steps`, tool_choice, parallelism, etc.)                                                                                                                                   |
+
 
 ## Other models
 
-The default is `gpt-4o-mini-2024-07-18`, routed through the `"openai"` adapter (`AsyncOpenAI` → `api.openai.com`). The harness can also route to non-OpenAI providers via the `"litellm"` adapter — see [Scope](#scope) for the openai-vs-litellm split. The model registry at `experiments/configs/_generator/models/<provider>.py` declares which adapter each model uses; entries for `anthropic/`, `google/`, `meta/`, `deepseek/` and others are tagged `"client_name": "litellm"`.
+The default is `gpt-4o-mini-2024-07-18`, routed through the `"openai"` adapter (`AsyncOpenAI` → `api.openai.com`). The harness can also route to non-OpenAI providers via the `"litellm"` adapter. The model registry at `experiments/configs/_generator/models/<provider>.py` declares which adapter each model uses; entries for `anthropic/`, `google/`, `meta/`, `deepseek/` and others are tagged `"client_name": "litellm"`.
 
 Practical caveats:
 
@@ -228,16 +229,16 @@ After `task clean`, a `task setup` from scratch takes ~1–2 minutes.
 
 ## Troubleshooting
 
-**`uv pip install -e 'experiments[openai_agents]'` installs the wrong package.**
+`**uv pip install -e 'experiments[openai_agents]'` installs the wrong package.**
 There is a generic PyPI package named `experiments`. Use `'./experiments[openai_agents]'` with the leading `./`. The Taskfile already does this; this only bites if you run `uv pip install` by hand.
 
-**`appworld download data` fails with "package not fully installed".**
+`**appworld download data` fails with "package not fully installed".**
 You ran `appworld install` (package mode) instead of `appworld install --repo`. The verify-installation heuristic checks paths that only the `--repo` mode populates when AppWorld is installed editable from outside `site-packages`. The Taskfile uses `--repo`; if running by hand, do the same.
 
 **Traces are empty or missing.**
 The HALO file processor flushes on `processor.shutdown()`. The patched `run.py` calls this in a `finally` block. If you killed the run with `SIGKILL` rather than `SIGTERM` / Ctrl-C, the gzip stream may have been truncated. Re-run the task.
 
-**`appworld run` errors with "Could not find dataset".**
+`**appworld run` errors with "Could not find dataset".**
 You skipped `task setup:data`. Run `task setup` (or just `task setup:data`) first.
 
 **Some non-OpenAI model fails to load a prompt at `experiments/prompts/function_calling_v2_zero_shot.txt`.**
@@ -250,8 +251,8 @@ This fork sets a 90-second per-request timeout on every `AsyncOpenAI` client (de
 
 - [HALO_PATCH.md](HALO_PATCH.md) — what this fork changes vs upstream and how to resync
 - Upstream AppWorld: [stonybrooknlp/appworld](https://github.com/StonyBrookNLP/appworld), [appworld.dev](https://appworld.dev), [paper](https://arxiv.org/abs/2407.18901)
-- HALO OpenAI Agents SDK integration: [`docs/integrations/openai-agents-sdk.md`](../../docs/integrations/openai-agents-sdk.md)
+- HALO OpenAI Agents SDK integration: `[docs/integrations/openai-agents-sdk.md](../../docs/integrations/openai-agents-sdk.md)`
 
 ## License
 
-Apache 2.0, inherited from upstream — see [`LICENSE`](LICENSE).
+Apache 2.0, inherited from upstream — see `[LICENSE](LICENSE)`.

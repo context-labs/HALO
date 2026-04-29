@@ -1,6 +1,6 @@
 # HALO patch notes
 
-This directory is a vendored fork of [StonyBrookNLP/appworld](https://github.com/StonyBrookNLP/appworld) wired to emit HALO trace JSONL. There is no live link to upstream — to pull updates, manually diff against a newer upstream commit and re-apply the changes recorded here.
+This directory is a vendored fork of [StonyBrookNLP/appworld](https://github.com/StonyBrookNLP/appworld) wired to emit HALO trace JSONL. There is no live link to upstream. To pull updates, manually diff against a newer upstream commit and re-apply the changes recorded here.
 
 ## Snapshot
 
@@ -66,7 +66,7 @@ Result: the `[openai_agents]` extra is uninstallable as-published. We removed th
 + "litellm",                # HALO patch: floor removed (upstream `>=1.78.2` for haiku-4-5 conflicts with openai_agents extra).
 ```
 
-Side effect: Claude Haiku 4.5 will not work via litellm with this fork. Acceptable for a v1 OpenAI-focused HALO demo. If/when upstream resolves the conflict, drop this patch.
+Side effect: Claude Haiku 4.5 will not work via litellm with this fork.
 
 ### `experiments/code/openai_agents/run.py` — HALO trace processor
 
@@ -144,7 +144,7 @@ We install an explicit 90-second per-request timeout on every `AsyncOpenAI` clie
       _set_default_openai_client(client)
 ```
 
-Same pattern in `language_model.py` for the API-predictor sub-agent's client. The 90s value is well above p99 normal latency for `gpt-4o-*`/`gpt-4.1-*` chat completions but tight enough that one stuck request fails fast instead of pinning a subprocess. Tune `_OPENAI_REQUEST_TIMEOUT_SECONDS` (in both files) if running models with longer normal latencies — e.g. raise to 300s for reasoning models like `o3` or `gpt-5-2025-08-07-high-reasoning`.
+Same pattern in `language_model.py` for the API-predictor sub-agent's client. The 90s value is well above p99 normal latency for `gpt-4o-*`/`gpt-4.1-*` chat completions but tight enough that one stuck request fails fast instead of pinning a subprocess. Tune `_OPENAI_REQUEST_TIMEOUT_SECONDS` (in both files) if running models with longer normal latencies, e.g. raise to 300s for reasoning models like `o3` or `gpt-5-2025-08-07-high-reasoning`.
 
 ### `.gitignore` — HALO additions
 
@@ -189,4 +189,4 @@ A clean trace will contain at minimum:
   - `mcp_tools` — SDK's per-server tool-listing span
   - `function.<app>__<tool>` — actual MCP tool invocations (e.g. `function.spotify__login`)
 
-If `verify_traces.py` fails or no `function.*` spans appear, the SDK's MCP tool wrapping has changed shape — see `agents/mcp/util.py:to_function_tool` and `agents/_run_impl.py:execute_function_tool_calls` in the installed SDK to confirm `function_span(...)` is still wrapping MCP tool calls.
+If `verify_traces.py` fails or no `function.*` spans appear, the SDK's MCP tool wrapping has changed shape. See `agents/mcp/util.py:to_function_tool` and `agents/_run_impl.py:execute_function_tool_calls` in the installed SDK to confirm `function_span(...)` is still wrapping MCP tool calls.
