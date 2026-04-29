@@ -8,7 +8,7 @@
 
 <h1 align="center">
   <br>
-  <a href="https://github.com/context-labs/uwu"><img src="https://em-content.zobj.net/thumbs/240/apple/354/smiling-face-with-halo_1f607.png" alt="😇" width="200" style="border-radius:8px;"></a>
+  <a href="https://github.com/context-labs/uwu"><img src="https://em-content.zobj.net/thumbs/240/apple/354/smiling-face-with-halo_1f607.png" alt="😇" width="150" style="border-radius:8px;"></a>
    <br>
   HALO
   <br>
@@ -60,7 +60,7 @@ HALO is great at finding issues in production agent deployments. We find product
 
 A general-purpose harness like Claude Code is the wrong tool for trace analysis. This isn’t because the model isn’t smart, but because traces can get extremely long, and you need a specialized toolkit in order to make observations about systemic agentic behavior. We noticed in our testing that harnesses like CC would often overfit to an error present in a single/few traces rather than generalize to harness-level problems. This led us to creating a specialized form of a RLM.
 
-<img src="./assets//halo-rlm.png" alt="rlm"  style="border-radius:8px;" width="600px">
+<img src="./assets//halo-rlm.png" alt="rlm"  style="border-radius:8px;" width="600">
 
 
 
