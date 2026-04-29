@@ -48,3 +48,4 @@ async def test_query_traces_through_sdk_adapter(tmp_path: Path, fixtures_dir: Pa
     assert only["model_names"] == ["gpt-5.4"]
     assert only["total_input_tokens"] == 200
     assert only["total_output_tokens"] == 40
+    assert only["raw_jsonl_bytes"] > 0

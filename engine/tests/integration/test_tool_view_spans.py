@@ -1,7 +1,7 @@
-"""Isolated integration test for ``search_trace``.
+"""Isolated integration test for ``view_spans``.
 
 Invokes the registered SDK ``FunctionTool`` against a real ``TraceStore`` and
-asserts the ``SpanMatchRecord`` shape returned for a known regex pattern.
+asserts that the surgical-read path returns only the requested spans.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from tests.integration.tool_isolation_kit import (
 
 
 @pytest.mark.asyncio
-async def test_search_trace_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
+async def test_view_spans_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
     cfg = engine_config()
     store = await load_store(tmp_path, fixtures_dir)
     tools = wired_tools(
@@ -33,17 +33,11 @@ async def test_search_trace_through_sdk_adapter(tmp_path: Path, fixtures_dir: Pa
         parent_execution=root_execution(cfg),
     )
 
-    raw = await tools["search_trace"].on_invoke_tool(
+    raw = await tools["view_spans"].on_invoke_tool(
         MagicMock(spec=SdkToolContext),
-        '{"trace_id": "t-bbbb", "regex_pattern": "tool failure"}',
+        '{"trace_id": "t-bbbb", "span_ids": ["s-bbbb-2"]}',
     )
     payload = json.loads(raw)["result"]
     assert payload["trace_id"] == "t-bbbb"
-    assert payload["match_count"] == 1
-    assert payload["returned_match_count"] == 1
-    assert payload["has_more"] is False
-    record = payload["matches"][0]
-    assert record["span_id"] == "s-bbbb-2"
-    assert record["match_text"] == "tool failure"
-    assert "tool failure" in record["matched_context"]
-    assert record["raw_jsonl_bytes"] > 0
+    assert [s["span_id"] for s in payload["spans"]] == ["s-bbbb-2"]
+    assert payload["oversized"] is None
