@@ -10,6 +10,17 @@ What this demo gives you:
 
 For the full list of changes from upstream, see [`HALO_PATCH.md`](HALO_PATCH.md).
 
+## Scope
+
+HALO tracing is wired into the **`openai_agents_mcp_agent`** harness only. Upstream's other paradigms (`legacy_*`, `simplified_*`, `smolagents_*`) still run, but produce no HALO traces — `task agents:list` lists every paradigm upstream ships, not the subset HALO patched. Stick with the default `AGENT=openai_agents_mcp_agent` for the HALO loop.
+
+Within that harness, the LLM call is dispatched through one of two adapter classes based on the model config's `type` field:
+
+- **`type: "openai"`** → `OpenAIChatCompletionsModel` over `AsyncOpenAI` (works against `api.openai.com` or any OpenAI-compatible endpoint via `base_url`).
+- **`type: "litellm"`** → `LitellmModel` (SDK extension at `agents.extensions.models.litellm_model`), which routes through litellm's translator to provider-native APIs (Anthropic Messages, Vertex AI, Bedrock, etc.).
+
+The HALO trace processor is registered on the SDK's tracing layer and sees spans from both adapters — both paths emit HALO traces. Only OpenAI configs are checked in (`experiments/configs/openai_agents_mcp_agent/openai/*`); other providers require generating configs from the registry at `experiments/configs/_generator/models/`. See [Other models](#other-models).
+
 ## Prereqs
 
 - macOS or Linux (Windows untested)
@@ -84,19 +95,19 @@ Approximate wallclock with `gpt-4o-mini-2024-07-18` (~20s/task sequential):
 | test_normal | 168 | ~56 min | ~9-12 min | ~6-8 min |
 | test_challenge | 417 | ~2.3 h | ~22-30 min | ~15-20 min |
 
-Override the model or agent paradigm with task variables:
+Override the model with the `MODEL=` task variable:
 
 ```bash
 task run:dev MODEL=gpt-4.1-2025-04-14
-task run:dev AGENT=simplified_react_code_agent     # different harness shape
 task run:test-normal MODEL=gpt-4.1-mini-2025-04-14 PARALLEL=12
 ```
 
-For the full menu of supported model and agent names:
+`AGENT=` exists too but only `openai_agents_mcp_agent` is HALO-traced — see [Scope](#scope) above. `task agents:list` lists every paradigm upstream ships, not the subset HALO patched.
+
+For the full menu of supported model names:
 
 ```bash
 task models:list
-task agents:list
 ```
 
 ### How parallelism works under the hood
@@ -193,11 +204,18 @@ Most-improvable surfaces:
 
 ## Other models
 
-The default is `gpt-4o-mini-2024-07-18`. The harness supports many providers via litellm — see `experiments/configs/_generator/models/` for the registry. Set the relevant API key in `.env` before invoking with a non-OpenAI model.
+The default is `gpt-4o-mini-2024-07-18`, routed through the `"openai"` adapter (`AsyncOpenAI` → `api.openai.com`). The harness can also route to non-OpenAI providers via the `"litellm"` adapter — see [Scope](#scope) for the openai-vs-litellm split. The model registry at `experiments/configs/_generator/models/<provider>.py` declares which adapter each model uses; entries for `anthropic/`, `google/`, `meta/`, `deepseek/` and others are tagged `"client_name": "litellm"`.
 
-`task models:list` prints the full list. Some good cheap options for HALO-loop work:
+Practical caveats:
 
-- OpenAI: `gpt-4o-mini-2024-07-18`, `gpt-5-nano-2025-08-07-minimal-reasoning`, `gpt-4.1-mini-2025-04-14`
+- **Only OpenAI configs are checked in for `openai_agents_mcp_agent`.** `experiments/configs/openai_agents_mcp_agent/` ships only `openai/gpt-4o-2024-05-13` and `openai/gpt-4o-mini-2024-07-18`. Running a non-OpenAI model under HALO tracing means generating a fresh config from the registry; `task models:list` prints names the generator accepts.
+- **Set the relevant API key in `.env`** before invoking with a non-OpenAI model.
+- **The 90s `AsyncOpenAI` request timeout is OpenAI-path only** — `LitellmModel` has its own httpx client and is unaffected (see [HALO_PATCH.md](HALO_PATCH.md)).
+- **Claude Haiku 4.5 won't route via litellm in this fork** — the `litellm>=1.78.2` floor was dropped to make the `[openai_agents]` extra installable, and Haiku 4.5 needs that floor.
+
+Some good cheap options for HALO-loop work:
+
+- OpenAI (`type: openai`): `gpt-4o-mini-2024-07-18`, `gpt-5-nano-2025-08-07-minimal-reasoning`, `gpt-4.1-mini-2025-04-14`
 
 ## Cleaning up
 
