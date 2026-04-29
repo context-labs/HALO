@@ -1,0 +1,139 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+
+# Logs and DB
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Sphinx documentation
+docs/_build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# AppWorld (public)
+.history
+.DS_Store
+.vscode
+.ruff_cache
+.coverage_report
+.profiling/
+uv.lock
+poetry.lock
+experiments/outputs/
+tests/LICENSE
+tests/README_BEFORE_SHARING.md
+tests/package/LICENSE
+tests/package/README_BEFORE_SHARING.md
+generate/data/LICENSE
+generate/data/README_BEFORE_SHARING.md
+generate/tasks/task_generators/LICENSE
+generate/tasks/task_generators/README_BEFORE_SHARING.md
+generate/data/LICENSE
+generate/data/README_BEFORE_SHARING.md
+generate/tasks/task_generators/LICENSE
+generate/tasks/task_generators/README_BEFORE_SHARING.md
+data/
+
+# AppWorld (private)
+src/appworld/apps/admin
+src/appworld/apps/amazon
+src/appworld/apps/api_docs
+src/appworld/apps/file_system
+src/appworld/apps/gmail
+src/appworld/apps/phone
+src/appworld/apps/simple_note
+src/appworld/apps/splitwise
+src/appworld/apps/spotify
+src/appworld/apps/supervisor
+src/appworld/apps/todoist
+src/appworld/apps/venmo
+generate/tasks/task_generators/
+tests/package/apps
+tests/generation
+# !generate/data
+
+# HALO additions: runtime artifacts not in upstream's gitignore
+.tmp/
+generate/data/
+tests/package/test_*.py
+experiments/configs/openai_agents_mcp_agent/openai/*
+!experiments/configs/openai_agents_mcp_agent/openai/gpt-4o-2024-05-13
+!experiments/configs/openai_agents_mcp_agent/openai/gpt-4o-2024-05-13/**

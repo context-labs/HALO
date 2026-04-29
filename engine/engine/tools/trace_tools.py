@@ -20,7 +20,9 @@ class GetDatasetOverviewTool:
 
     name = "get_dataset_overview"
     description = (
-        "Return high-level stats about the trace dataset: counts, services, models, totals."
+        "Return high-level stats about the trace dataset: counts, services, models, totals, "
+        "and a `sample_trace_ids` list (up to 20) of the first matching trace ids — call this "
+        "before `view_trace` so you have real ids to pass."
     )
     arguments_model = DatasetOverviewArguments
     result_model = DatasetOverviewResult

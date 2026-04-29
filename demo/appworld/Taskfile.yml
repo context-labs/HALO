@@ -1,0 +1,195 @@
+version: "3"
+output: prefixed
+
+vars:
+  UV_BIN: '{{.UV_BIN | default "uv"}}'
+  PYTHON_VERSION: '{{.PYTHON_VERSION | default "3.12"}}'
+  VENV: "{{.TASKFILE_DIR}}/.venv"
+  PYTHON_BIN: "{{.TASKFILE_DIR}}/.venv/bin/python"
+  APPWORLD_BIN: "{{.TASKFILE_DIR}}/.venv/bin/appworld"
+  HALO_CLI_DIR: "{{.TASKFILE_DIR}}/../../cli"
+
+env:
+  APPWORLD_ROOT: "{{.TASKFILE_DIR}}"
+
+tasks:
+  setup:
+    desc: One-shot setup — venv, deps, bundles, data. Idempotent; safe to re-run.
+    cmds:
+      - task: setup:venv
+      - task: setup:install
+      - task: setup:bundles
+      - task: setup:data
+
+  setup:venv:
+    desc: Create the .venv (uv-managed, Python {{.PYTHON_VERSION}})
+    status:
+      - test -x {{.PYTHON_BIN}}
+    cmds:
+      - "{{.UV_BIN}} venv --python {{.PYTHON_VERSION}} {{.VENV}}"
+
+  setup:install:
+    desc: Install appworld + appworld-agents[openai_agents] into .venv
+    deps: [setup:venv]
+    status:
+      - "{{.PYTHON_BIN}} -c 'import appworld_agents.code.openai_agents.run' 2>/dev/null"
+    cmds:
+      # NOTE: the leading `./` on `./experiments[openai_agents]` is REQUIRED.
+      # Without it, uv resolves to a different PyPI package named `experiments`.
+      - UV_PROJECT_ENVIRONMENT={{.VENV}} {{.UV_BIN}} pip install -e .
+      - UV_PROJECT_ENVIRONMENT={{.VENV}} {{.UV_BIN}} pip install -e './experiments[openai_agents]'
+
+  setup:bundles:
+    desc: Unpack the encrypted apps + tests + generation bundles into the source tree
+    deps: [setup:install]
+    status:
+      - test -d {{.TASKFILE_DIR}}/src/appworld/apps/spotify
+    cmds:
+      - "{{.APPWORLD_BIN}} install --repo"
+
+  setup:data:
+    desc: Download AppWorld benchmark data (~30MB compressed → ~190MB unpacked)
+    deps: [setup:bundles]
+    status:
+      - test -f {{.TASKFILE_DIR}}/data/datasets/dev.txt
+    cmds:
+      - "{{.APPWORLD_BIN}} download data"
+
+  run:smoke:
+    desc: One-task smoke test (gpt-4o-mini on dev/50e1ac9_1). Confirms install + tracing end-to-end.
+    deps: [setup:data]
+    cmds:
+      - >-
+        {{.APPWORLD_BIN}} run auto
+        --agent-name openai_agents_mcp_agent
+        --model-name gpt-4o-mini-2024-07-18
+        --dataset-name dev
+        --task-id 50e1ac9_1
+
+  run:dev:
+    desc: Run on the full dev split (57 tasks). MODEL=... overrides default model.
+    deps: [setup:data]
+    vars:
+      MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
+      AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+    cmds:
+      - >-
+        {{.APPWORLD_BIN}} run auto
+        --agent-name {{.AGENT}}
+        --model-name {{.MODEL}}
+        --dataset-name dev
+
+  run:test-normal:
+    desc: Run on the test_normal split (168 tasks).
+    deps: [setup:data]
+    vars:
+      MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
+      AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+    cmds:
+      - >-
+        {{.APPWORLD_BIN}} run auto
+        --agent-name {{.AGENT}}
+        --model-name {{.MODEL}}
+        --dataset-name test_normal
+
+  run:test-challenge:
+    desc: Run on the test_challenge split (417 tasks).
+    deps: [setup:data]
+    vars:
+      MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
+      AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+    cmds:
+      - >-
+        {{.APPWORLD_BIN}} run auto
+        --agent-name {{.AGENT}}
+        --model-name {{.MODEL}}
+        --dataset-name test_challenge
+
+  run:train:
+    desc: Run on the train split (90 tasks).
+    deps: [setup:data]
+    vars:
+      MODEL: '{{.MODEL | default "gpt-4o-mini-2024-07-18"}}'
+      AGENT: '{{.AGENT | default "openai_agents_mcp_agent"}}'
+    cmds:
+      - >-
+        {{.APPWORLD_BIN}} run auto
+        --agent-name {{.AGENT}}
+        --model-name {{.MODEL}}
+        --dataset-name train
+
+  run:custom:
+    desc: 'Pass arbitrary args to `appworld run`: task run:custom -- auto --agent-name X ...'
+    deps: [setup:data]
+    cmds:
+      - "{{.APPWORLD_BIN}} run {{.CLI_ARGS}}"
+
+  verify:traces:
+    desc: Run HALO's spec checker against the most recent traces.jsonl in experiments/outputs/.
+    cmds:
+      - |
+        TRACE_PATH=$(find experiments/outputs -name 'traces.jsonl' -print | head -1)
+        if [ -z "$TRACE_PATH" ]; then
+          echo "No traces.jsonl found under experiments/outputs/. Run 'task run:smoke' first." >&2
+          exit 1
+        fi
+        echo "[verify] checking $TRACE_PATH"
+        {{.PYTHON_BIN}} {{.TASKFILE_DIR}}/../openai-agents-sdk-demo/verify_traces.py "$TRACE_PATH"
+
+  analyze:
+    desc: 'Stream HALO Engine over the latest traces. PROMPT="..." overrides default question. TRACE_PATH=... overrides target.'
+    vars:
+      PROMPT: '{{.PROMPT | default "What harness-level issues caused failures in this run? Suggest concrete changes to instructions, prompts, or tool wiring."}}'
+      MODEL: '{{.MODEL | default "gpt-5.4-mini"}}'
+    cmds:
+      - |
+        TRACE_PATH="{{.TRACE_PATH}}"
+        if [ -z "$TRACE_PATH" ]; then
+          TRACE_PATH=$(find {{.TASKFILE_DIR}}/experiments/outputs -name 'traces.jsonl' -print | head -1)
+        fi
+        if [ -z "$TRACE_PATH" ]; then
+          echo "No traces.jsonl found. Run 'task run:smoke' or 'task run:dev' first." >&2
+          exit 1
+        fi
+        if [ ! -d "{{.HALO_CLI_DIR}}" ]; then
+          echo "HALO CLI not found at {{.HALO_CLI_DIR}}. This task assumes the demo lives at HALO/demo/appworld/." >&2
+          exit 1
+        fi
+        echo "[analyze] feeding $TRACE_PATH to HALO Engine"
+        cd {{.HALO_CLI_DIR}} && {{.UV_BIN}} run halo-engine "$TRACE_PATH" --model {{.MODEL}} --prompt "{{.PROMPT}}"
+
+  clean:run-outputs:
+    desc: Remove run outputs only (experiments/outputs/). Source, bundles, and data preserved.
+    cmds:
+      - rm -rf {{.TASKFILE_DIR}}/experiments/outputs
+
+  clean:
+    desc: Remove .venv, data, run outputs, and unpacked bundles. Source preserved.
+    prompt: This will delete .venv, data/, experiments/outputs/, and all bundle-unpacked content. Continue?
+    cmds:
+      - rm -rf {{.TASKFILE_DIR}}/.venv {{.TASKFILE_DIR}}/data {{.TASKFILE_DIR}}/experiments/outputs {{.TASKFILE_DIR}}/.tmp
+      - |
+        for app in admin amazon api_docs file_system gmail phone simple_note splitwise spotify supervisor todoist venmo; do
+          rm -rf {{.TASKFILE_DIR}}/src/appworld/apps/$app
+        done
+      - rm -rf {{.TASKFILE_DIR}}/tests/package/apps {{.TASKFILE_DIR}}/tests/generation
+      - rm -rf {{.TASKFILE_DIR}}/generate/data {{.TASKFILE_DIR}}/generate/tasks
+      - rm -f {{.TASKFILE_DIR}}/tests/LICENSE {{.TASKFILE_DIR}}/tests/README_BEFORE_SHARING.md
+      - rm -f {{.TASKFILE_DIR}}/tests/package/LICENSE {{.TASKFILE_DIR}}/tests/package/README_BEFORE_SHARING.md
+      - |
+        find {{.TASKFILE_DIR}}/experiments/configs/openai_agents_mcp_agent/openai -mindepth 1 -maxdepth 1 \
+          -not -name 'gpt-4o-2024-05-13' -exec rm -rf {} + 2>/dev/null || true
+      - find {{.TASKFILE_DIR}} -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+      - find {{.TASKFILE_DIR}} -name '*.egg-info' -type d -exec rm -rf {} + 2>/dev/null || true
+
+  models:list:
+    desc: List all model IDs the appworld run-config generator accepts
+    deps: [setup:install]
+    cmds:
+      - "{{.APPWORLD_BIN}} run auto --model-name options"
+
+  agents:list:
+    desc: List all agent paradigms the appworld run-config generator accepts
+    deps: [setup:install]
+    cmds:
+      - "{{.APPWORLD_BIN}} run auto --agent-name options"
