@@ -81,8 +81,8 @@ class ViewTraceTool:
     name = "view_trace"
     description = (
         "Return ALL spans of a trace by id. Per-attribute payloads (input.value, "
-        "output.value, llm.input_messages, etc.) are head-capped at ~4KB each, "
-        "with a marker showing the original length.\n\n"
+        "output.value, llm.input_messages, etc.) are head-capped at ~4KB each "
+        "(the discovery cap), with a marker showing the original length.\n\n"
         "If the trace's truncated total exceeds the per-call budget (~150K chars), "
         "this tool returns an empty `spans` list and an `oversized` summary instead "
         "of the full payload. The summary contains span_count, char totals, per-span "
@@ -90,7 +90,9 @@ class ViewTraceTool:
         "and error_span_count. When you receive an `oversized` response, DO NOT retry "
         "view_trace — switch to `search_trace(trace_id, pattern)` to surface only the "
         "spans matching a specific substring, then `view_spans(trace_id, span_ids=[...])` "
-        "to read those spans surgically.\n\n"
+        "to read those spans surgically at a 16KB-per-attribute cap (4× higher than "
+        "the discovery cap), which is how you actually get more of a truncated "
+        "attribute's content.\n\n"
         "Best used for traces you already know are small (e.g. span_count ≤ ~50 from "
         "a query_traces summary). For unknown or large traces, go straight to "
         "search_trace + view_spans."
@@ -111,12 +113,18 @@ class ViewSpansTool:
 
     name = "view_spans"
     description = (
-        "Return only the named spans from a trace, with the same per-attribute "
-        "truncation as `view_trace`. Use this after `search_trace` has surfaced "
-        "interesting spans to materialize them in full (or as full as the cap "
-        "allows) without dragging in the rest of the trace. Pass up to 200 "
-        "`span_ids`. Span ids that don't match any span in the trace are silently "
-        "skipped."
+        "Return only the named spans from a trace, head-capped at ~16KB per "
+        "attribute — 4× higher than the ~4KB discovery cap used by `view_trace` "
+        "and `search_trace`. This is the only tool that gives you MORE bytes of "
+        "a truncated attribute than what `search_trace` returned: re-fetching the "
+        "same span by id here will recover up to 16KB of any attribute that was "
+        "head-capped at 4KB on the discovery path.\n\n"
+        "Two primary uses: (1) materialize a span more fully after `search_trace` "
+        "showed it was truncated and you need more of its payload; (2) fetch spans "
+        "by id that `search_trace` did NOT surface — e.g. the parent or sibling of "
+        "a search hit, or any span_id you saw in another tool's output — without "
+        "having to find a substring that matches them. Pass up to 200 `span_ids`. "
+        "Span ids that don't match any span in the trace are silently skipped."
     )
     arguments_model = ViewSpansArguments
     result_model = ViewTraceResult
@@ -136,11 +144,15 @@ class SearchTraceTool:
 
     name = "search_trace"
     description = (
-        "Substring-search inside one trace; returns matching spans (with the same "
-        "per-attribute truncation as `view_trace`). Pattern matches against the raw "
-        "on-disk JSON, so you can target attribute keys (`STATUS_CODE_ERROR`, "
-        "`MaxTurnsExceeded`), tool names (`spotify__login`), or any literal substring. "
-        "Pair with `view_spans` for a low-context way to inspect a long trace."
+        "Substring-search inside one trace; returns matching spans head-capped at "
+        "~4KB per attribute (the discovery cap, same as `view_trace`). Pattern "
+        "matches against the raw on-disk JSON, so you can target attribute keys "
+        "(`STATUS_CODE_ERROR`, `MaxTurnsExceeded`), tool names (`spotify__login`), "
+        "or any literal substring. If a returned match is truncated and you need "
+        "more of its payload, follow up with `view_spans(trace_id, span_ids=[...])` "
+        "— that tool uses a 16KB-per-attribute cap, so you'll actually get more "
+        "bytes back. Pair with `view_spans` for a low-context way to inspect a "
+        "long trace."
     )
     arguments_model = SearchTraceArguments
     result_model = SearchTraceResult
