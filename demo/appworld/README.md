@@ -12,7 +12,7 @@ For the full list of changes from upstream, see `[HALO_PATCH.md](HALO_PATCH.md)`
 
 ## Scope
 
-HALO tracing is wired into the `**openai_agents_mcp_agent`** harness only. Upstream's other paradigms (`legacy_*`, `simplified_*`, `smolagents_*`) still run, but produce no HALO traces — `task agents:list` lists every paradigm upstream ships, not the subset HALO patched. Stick with the default `AGENT=openai_agents_mcp_agent` for the HALO loop.
+HALO tracing is wired into the `**openai_agents_mcp_agent`** harness only, and use default `AGENT=openai_agents_mcp_agent` for the HALO loop.
 
 ## Prereqs
 
@@ -213,10 +213,6 @@ Practical caveats:
 - **Set the relevant API key in `.env`** before invoking with a non-OpenAI model.
 - **The 90s `AsyncOpenAI` request timeout is OpenAI-path only** — `LitellmModel` has its own httpx client and is unaffected (see [HALO_PATCH.md](HALO_PATCH.md)).
 - **Claude Haiku 4.5 won't route via litellm in this fork** — the `litellm>=1.78.2` floor was dropped to make the `[openai_agents]` extra installable, and Haiku 4.5 needs that floor.
-
-Some good cheap options for HALO-loop work:
-
-- OpenAI (`type: openai`): `gpt-4o-mini-2024-07-18`, `gpt-5-nano-2025-08-07-minimal-reasoning`, `gpt-4.1-mini-2025-04-14`
 
 ## Cleaning up
 
