@@ -87,6 +87,7 @@ class DatasetOverview(BaseModel):
     error_trace_count: int
     total_input_tokens: int
     total_output_tokens: int
+    sample_trace_ids: list[str] = Field(default_factory=list)
 
 
 class QueryTracesArguments(BaseModel):
@@ -94,7 +95,7 @@ class QueryTracesArguments(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    filters: TraceFilters
+    filters: TraceFilters = Field(default_factory=TraceFilters)
     limit: int = Field(default=50, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
 
@@ -104,7 +105,7 @@ class CountTracesArguments(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    filters: TraceFilters
+    filters: TraceFilters = Field(default_factory=TraceFilters)
 
 
 class ViewTraceArguments(BaseModel):
@@ -129,7 +130,7 @@ class DatasetOverviewArguments(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    filters: TraceFilters
+    filters: TraceFilters = Field(default_factory=TraceFilters)
 
 
 class QueryTracesResult(BaseModel):

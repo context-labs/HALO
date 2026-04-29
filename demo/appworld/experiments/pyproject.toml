@@ -1,0 +1,111 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "appworld-agents"
+description = "A companion package for the AppWorld library containing code for agents and experiments."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "Harsh Trivedi", email = "harshjtrivedi94@gmail.com" },
+]
+version = "0.1.0.dev0"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+  "Topic :: Software Development :: Code Generators",
+]
+dependencies = [
+  "openai<=1.99.8",         # pinned temporarily as litellm does not work >= 1.99.9 at the moment.
+  "litellm",                # HALO patch: floor removed (upstream `>=1.78.2` for haiku-4-5 conflicts with openai_agents extra).
+  "jsonnet>=0.21.0",        # bottom-pin needed for being able to build on windows.
+  "jinja2>=3.1.3",
+  "joblib>=1.3.1",
+]
+
+[project.optional-dependencies]
+simplified = []             # Kept empty to make simplified default installation with core dependencies.
+legacy = [
+  "filelock>=3.14.0",
+  "recoma==0.0.5",
+  "diskcache>=5.6.3",
+  "tiktoken>=0.7.0",
+]
+smolagents = [
+  "makefun>=1.15.4",
+  "smolagents>=1.13.0",
+  "mcp>=1.19.0",
+]
+openai_agents = [
+  "openai<=1.96.1",        # bottom-pin needed to avoid: https://github.com/openai/openai-python/issues/2489",
+  "mcp>=1.19.0",
+  "openai-agents>=0.2.3",
+]
+all = [
+  # core
+  "openai<=1.99.8",         # pinned temporarily as litellm does not work >= 1.99.9 at the moment.
+                            # Note: It does not satisfy the openai-agents constrained mentioned above,
+                            # but that is all we can do install "all" in a single env for now.
+  "litellm>=1.78.2",
+  "jsonnet>=0.20.0; sys_platform == \"linux\" or sys_platform == \"darwin\"",
+  "jsonnet-binary>=0.17.0; sys_platform == \"win32\"",
+  "jinja2>=3.1.3",
+  "joblib>=1.3.1",
+  # extras
+  "filelock>=3.14.0",
+  "recoma==0.0.5",
+  "diskcache>=5.6.3",
+  "tiktoken>=0.7.0",
+  "makefun>=1.15.4",
+  "smolagents>=1.13.0",
+  "mcp>=1.19.0",
+  "openai-agents>=0.2.3",
+]
+
+[project.urls]
+Homepage = "https://appworld.dev/"
+Source = "https://github.com/stonybrooknlp/appworld"
+"Bug Tracker" = "https://github.com/stonybrooknlp/appworld/issues"
+
+[tool.setuptools]
+include-package-data = false
+packages = [
+  "appworld_agents",
+  "appworld_agents.code",
+  "appworld_agents.code.common",
+  "appworld_agents.code.common.vllm_plugins",
+  "appworld_agents.code.legacy",
+  "appworld_agents.code.legacy.plain",
+  "appworld_agents.code.legacy.plain.agents",
+  "appworld_agents.code.legacy.plain.language_models",
+  "appworld_agents.code.legacy.recoma",
+  "appworld_agents.code.simplified",
+  "appworld_agents.code.smolagents",
+  "appworld_agents.code.openai_agents",
+  "appworld_agents.configs",
+  "appworld_agents.configs._generator",
+  "appworld_agents.configs._generator.agents",
+  "appworld_agents.configs._generator.models",
+  "appworld_agents.configs._generator.templates",
+  "appworld_agents.prompts",
+]
+
+[tool.setuptools.package-dir]
+appworld_agents = "."
+
+# Data files inside the package
+[tool.setuptools.package-data]
+"appworld_agents.prompts" = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.jsonl", "**/*.txt", "**/*.md"]
+"appworld_agents.configs" = ["**/*.jsonnet"]
+"appworld_agents.configs._generator.templates" = ["**/*.jsonnet.j2"]

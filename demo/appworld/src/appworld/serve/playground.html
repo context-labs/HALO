@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppWorld API Docs</title>
+<link rel="icon" href="./static/icon.png" type="image/png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.7.2/styles/monokai-sublime.min.css">
+<style>
+    .details {
+        display: none;
+    }
+    .mark {
+        background-color: yellow;
+        font-weight: bold;
+    }
+    .serial-number {
+        font-weight: bold;
+        margin-right: 10px;
+        background-color: #e9ecef;
+        color: #495057;
+        padding: 3px 10px;
+        border-radius: 15px;
+        display: inline-block;
+        font-size: 0.9em;
+    }
+    #editor {
+        width: 100%;
+        height: 150px;
+    }
+    .hljs {
+        background: #000; /* Truly black background */
+    }
+</style>
+</head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-C72WJV5D0M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-C72WJV5D0M');
+</script>
+<body class="bg-gray-100">
+
+    <div class="bg-slate-800 text-white text-center">
+        <div class="max-w-7xl mx-auto p-6 px-6 sm:px-10 md:px-15 lg:px-20 text-center grid grid-cols-3">
+            <div class="flex items-center space-x-0 col-span-2 pl-5">
+                <img src="./static/icon.png" alt="AppWorld Icon" class="h-9 w-9 mr-3">
+                <h1 class="text-2xl font-bold">Playground</h1>
+            </div>
+            <div class="flex items-center justify-end space-x-3 pr-5">
+                <button id="open-all" class="inline-block bg-white text-slate-800 px-4 py-1 rounded-md border-2 border-slate-800 hover:bg-blue-50 flex items-center">
+                    <i class="fas fa-angle-double-down sm:mr-1"></i>
+                    <span class="hidden sm:inline">Open</span>
+                </button>
+                <button id="close-all" class="inline-block bg-white text-slate-800 px-4 py-1 rounded-md border-2 border-slate-800 hover:bg-blue-50 flex items-center">
+                    <i class="fas fa-angle-double-up sm:mr-1"></i>
+                    <span class="hidden sm:inline">Close</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto py-2 px-6 sm:px-10 md:px-15 lg:px-20">
+        <div id="notification" class="relative bg-black text-white text-center p-4 rounded-md mb-4 flex items-center hidden">
+            <p id="notification-message" class="flex-grow text-left pr-4"></p>
+            <button class="text-white text-lg ml-0" onclick="hideNotification()">✕</button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="col-span-1">
+                <label for="host-input" class="block text-sm text-center font-medium">Env. Server</label>
+                <div class="relative flex items-stretch w-full">
+                    <input type="text" id="host-input" class="block w-full px-3 py-1 pr-10 mt-1 text-gray-800 bg-white border border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50" value="http://0.0.0.0:8000" placeholder="http://0.0.0.0:8000" aria-label="http://0.0.0.0:8000">
+                </div>
+            </div>
+            <div class="col-span-1">
+                <label for="task-id-input" class="block text-sm text-center font-medium">Task ID</label>
+                <div class="relative flex items-stretch w-full">
+                    <input type="text" id="task-id-input" class="block w-full px-3 py-1 pr-10 mt-1 text-gray-800 bg-white border border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50" value="b0a8eae_1" placeholder="b0a8eae_1" aria-label="b0a8eae_1">
+                </div>
+            </div>
+            <div class="col-span-1">
+                <label class="block text-sm text-center font-medium">&nbsp;</label>
+                <div class="relative flex items-stretch w-full">
+                    <button id="launch-button" class="block w-full px-3 py-1 mt-1 text-white bg-slate-800 border bg-black rounded-md shadow-sm hover:bg-slate-700 focus:border-indigo-700 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 disabled:bg-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:shadow-none">
+                        <span id="launch-button-text">Launch</span>
+                        <i id="launch-spinner" class="fas fa-spinner fa-spin hidden"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto py-2 px-6 sm:px-10 md:px-15 lg:px-20">
+        <div id="task-card" class="bg-white px-6 py-4 rounded-lg shadow-md border border-black hidden">
+            <p><span class="font-bold">Instruction:</span> <span id="instruction"></span></p>
+            <hr class="my-2">
+            <div>
+                <p class="font-bold">Supervisor:</p>
+                <p>&#x2192; <span class="font-bold">Name:</span> <span id="supervisor-name"></span></p>
+                <p>&#x2192; <span class="font-bold">Email:</span> <span id="supervisor-email"></span></p>
+                <p>&#x2192; <span class="font-bold">Phone:</span> <span id="supervisor-phone"></span></p>
+            </div>
+            <hr class="my-2">
+            <p><span class="font-bold">Datetime:</span> <span id="datetime"></span></p>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto py-2 px-6 sm:px-10 md:px-15 lg:px-20 pb-60">
+        <div id="messages-cards-container"></div>
+    </div>
+
+    <!-- Fixed bottom bar -->
+    <div id="bottom-bar" class="fixed bottom-0 w-full bg-white border-t border-gray-300 py-6 hidden">
+        <div class="max-w-7xl mx-auto flex items-center justify-between px-6 sm:px-10 md:px-15 lg:px-20">
+            <!-- Monaco Editor occupying 90% of the horizontal space and increasing in height -->
+            <!-- <div id="editor" class="w-10/12 h-full border border-gray-300 rounded-md shadow-sm"></div> -->
+            <div class="w-10/12 h-full bg-black border border-gray-300 rounded-md shadow-sm p-2">
+                <div id="editor" class="w-full h-full rounded-md"></div>
+            </div>
+
+            <!-- Buttons occupying the remaining 10% of the space -->
+            <div class="w-2/12 flex flex-col space-y-2 ml-3 h-24">
+                <button id="execute-button" type="button" class="bg-black text-white px-3 py-1 mx-1 rounded text-sm h-1/2 w-full hover:bg-slate-700" onclick="executeCode()">
+                    <i id="execute-icon" class="fas fa-play sm:mr-1"></i>
+                    <i id="execute-spinner" class="fas fa-spinner fa-spin hidden sm:mr-1"></i>
+                    <span class="hidden sm:inline"> Execute </span>
+                </button>
+                <button id="evaluate-button" type="button" class="bg-white text-black border border-black px-3 py-1 mx-1 rounded text-sm h-1/2 w-full hover:bg-blue-50" onclick="evaluatState()">
+                    <i id="evaluate-icon" class="fas fa-check sm:mr-1"></i>
+                    <i id="evaluate-spinner" class="fas fa-spinner fa-spin hidden sm:mr-1"></i>
+                    <span class="hidden sm:inline"> Evaluate </span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+<!-- jQuery (necessary for JavaScript plugins) -->
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<!-- Highlight.js Library for Syntax Highlighting -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.7.2/highlight.min.js"></script>
+<!-- Crypto.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+<!-- Monaco -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs/loader.min.js"></script>
+<script>
+
+// function to load API Docs
+var apiDocs = {};
+function loadApiDocs(host) {
+    // Fetch API documentation
+    $.ajax({
+        url: host + '/api_docs',
+        type: 'GET',
+        dataType: 'json',
+        success: function(data) {
+            apiDocs = data;
+            // Once the data is fetched, register the completion item provider
+            monaco.languages.registerCompletionItemProvider('python', {
+                triggerCharacters: ['.'],
+                provideCompletionItems: function(model, position) {
+                    var textUntilPosition = model.getValueInRange({
+                        startLineNumber: position.lineNumber,
+                        startColumn: 1,
+                        endLineNumber: position.lineNumber,
+                        endColumn: position.column
+                    });
+                    // Suggest app names after "apis."
+                    if (textUntilPosition.endsWith("apis.")) {
+                        var appNames = Object.keys(apiDocs).map(app => ({
+                            label: app,
+                            insertText: app,
+                            kind: monaco.languages.CompletionItemKind.Module
+                        }));
+                        return { suggestions: appNames };
+                    }
+                    // Suggest API names for a given app
+                    var match = textUntilPosition.match(/apis\.(.*?)\.$/);
+                    if (match && match[1] && apiDocs[match[1]]) {
+                        var apis = Object.keys(apiDocs[match[1]]).map(api => ({
+                            label: api,
+                            insertText: api,
+                            kind: monaco.languages.CompletionItemKind.Function
+                        }));
+                        return { suggestions: apis };
+                    }
+                    return { suggestions: [] };
+                }
+            });
+        // Register Signature Help Provider
+        monaco.languages.registerSignatureHelpProvider('python', {
+            provideSignatureHelp: function(model, position) {
+                const textUntilPosition = model.getValueInRange({
+                    startLineNumber: position.lineNumber,
+                    startColumn: 1,
+                    endLineNumber: position.lineNumber,
+                    endColumn: position.column
+                });
+                const match = textUntilPosition.match(/(\w+)\.(\w+)\(/);
+                if (!match) return null;
+                const [, serviceName, methodName] = match;
+                const api = apiDocs[serviceName] && apiDocs[serviceName][methodName];
+                if (!api) return null;
+                const signatureLabel = `${serviceName}.${methodName}(` +
+                    api.parameters.map(p => `${p.name}: ${p.type}${p.default !== undefined ? ` = ${p.default}` : ''}`).join(', ') + `)`;
+                const mainDocumentation = (
+                    `**Description:**\n${api.description}\n\n`
+                    + `**Response Schema (Success):**\n${api.response_schemas.success}\n\n`
+                    + `**Response Schema (Failure):**\n${api.response_schemas.failure}`
+                );
+                return {
+                    value: {
+                        signatures: [{
+                            label: signatureLabel,
+                            documentation: {
+                                value: mainDocumentation,
+                                isTrusted: true,
+                            },
+                            parameters: api.parameters.map(p => ({
+                                label: `${p.name}: ${p.type}`,
+                                documentation: `${p.description}${p.required ? ' (required)' : ''}${p.default !== undefined ? `\nDefault: ${p.default}` : ''}`
+                            }))
+                        }],
+                        activeSignature: 0,
+                        activeParameter: determineActiveParameter(textUntilPosition, api.parameters)
+                    },
+                    dispose: function() {}
+                };
+            },
+            signatureHelpTriggerCharacters: ['(', ',', '=']
+        });
+        function determineActiveParameter(textUntilPosition, parameters) {
+            // Split the text by commas to get potential parameters
+            const potentialParams = textUntilPosition.split("(")[1].split(',');
+            console.log(potentialParams)
+            let activeParamIndex = 0;
+            const currentParamSegment = potentialParams[potentialParams.length - 1].trim();
+            for (let i = potentialParams.length - 1; i >= 0; i--) {
+                if (potentialParams[i].includes('=')) {
+                    const paramName = potentialParams[i].split('=')[0].trim();
+                    const paramIndex = parameters.findIndex(p => p.name === paramName);
+                    if (paramIndex !== -1) {
+                        activeParamIndex = paramIndex;
+                        break; // Stop the loop as we've found the active parameter
+                    }
+                } else {
+                    const matchingParamIndex = parameters.findIndex(p => p.name.startsWith(currentParamSegment));
+                    if (matchingParamIndex !== -1) {
+                        activeParamIndex = matchingParamIndex;
+                    } else if (i < parameters.length) {
+                        activeParamIndex = i;
+                    }
+                }
+            }
+            return activeParamIndex;
+        }
+        },
+        error: function(error) {
+            console.log("Error fetching API documentation:", error);
+        }
+    });
+}
+
+
+// function to generate host alternatives
+function getHostAlternatives(host) {
+    const alternatives = [host];
+
+    // If host contains 0.0.0.0, generate alternatives
+    if (host.includes('0.0.0.0')) {
+        alternatives.push(host.replace('0.0.0.0', 'localhost'));
+        alternatives.push(host.replace('0.0.0.0', '127.0.0.1'));
+    }
+    // If host contains 127.0.0.1, also try localhost
+    else if (host.includes('127.0.0.1')) {
+        alternatives.push(host.replace('127.0.0.1', 'localhost'));
+    }
+    // If host contains localhost, also try 127.0.0.1
+    else if (host.includes('localhost')) {
+        alternatives.push(host.replace('localhost', '127.0.0.1'));
+    }
+
+    return alternatives;
+}
+
+// function to render environment not initialized
+function environmentNotInitialized(hostAlternatives, taskId) {
+    const notificationMessage = document.getElementById('notification-message');
+    const links = hostAlternatives.map(h =>
+        `<a href="${h}/tasks/${taskId}" target="_blank">${h}/tasks/${taskId}</a>`
+    ).join(', ');
+    notificationMessage.innerHTML = `
+        🚫 &nbsp; The environment server is unreachable or host/task_id is invalid.
+        Check if any of these are accessible: ${links}
+    `;
+    const notification = document.getElementById('notification');
+    notification.classList.remove('hidden');
+    // hide the task details
+    document.getElementById('task-card').classList.add('hidden');
+    // hide the messages
+    document.getElementById('messages-cards-container').classList.add('hidden');
+    // hide the bottom bar
+    document.getElementById('bottom-bar').classList.add('hidden');
+}
+
+// function to render environment not reachable
+function environmentNotReachable(host) {
+    renderMessage({"role": "error", "message": `Failed to connect to the environment server at ${host}`});
+}
+
+// Hide notification
+function hideNotification() {
+    document.getElementById('notification').classList.add('hidden');
+}
+
+// Function to render task
+function renderTask(task) {
+
+    document.getElementById('instruction').innerHTML = task.instruction;
+    document.getElementById('supervisor-name').innerHTML = task.supervisor.first_name + ' ' + task.supervisor.last_name;
+    document.getElementById('supervisor-email').innerHTML = task.supervisor.email;
+    document.getElementById('supervisor-phone').innerHTML = task.supervisor.phone_number;
+    document.getElementById('datetime').innerHTML = task.datetime;
+    document.getElementById('task-card').classList.remove('hidden');
+}
+
+// Function to render new messages
+let messageCount = 0;
+function renderMessage(message) {
+    const messages_container = document.getElementById('messages-cards-container');
+    const card = document.createElement('div');
+    const getLanguage = (role) => {
+        switch(role) {
+            case 'agent':
+            return 'python';
+            case 'environment':
+            return 'json';
+            case 'evaluator':
+            return 'markdown';
+            default:
+            return 'plaintext';
+        }
+    };
+    const language = getLanguage(message.role);
+    card.className = 'bg-white shadow-md border border-black rounded-lg mb-4';
+    card.innerHTML = `
+        <div class="p-4 border-b">
+            <span class="serial-number">${messageCount + 1}</span>
+            <span class="bg-slate-800 text-white px-1 py-0.5 rounded">${message.role}</span></strong>
+            <button type="button" class="bg-white text-black border border-black px-3 py-1 mx-1 rounded text-sm float-right" onclick="toggleDetails(${messageCount})">
+                <i class="fas fa-angle-double-up sm:mr-1"></i>
+                <span class="hidden sm:inline">Close</span>
+            </button>
+        </div>
+        <div class="p-4">
+            <div class="details" id="details-${messageCount}" style="display: block;">
+                <pre class="rounded-lg overflow-hidden bg-black p-3" style="white-space: pre-wrap; word-break: break-word;">
+                    <code class="language-${language}">${escapeHTML(message.message)}</code>
+                </pre>
+            </div>
+        </div>
+    `;
+    messages_container.appendChild(card);
+    // Apply syntax highlighting using Highlight.js
+    document.querySelectorAll('pre code').forEach((block) => {
+        hljs.highlightElement(block);
+    });
+    // Increment the message count
+    messageCount += 1;
+    // Scroll to the bottom of the page
+    scrollToBottom();
+}
+
+
+function resetPlayground() {
+    document.getElementById('messages-cards-container').innerHTML = '';
+    messageCount = 0;
+    editor.setValue('');
+    document.getElementById('bottom-bar').classList.add('hidden');
+}
+
+// Function to scroll to the bottom of the page
+function scrollToBottom() {
+    window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: 'smooth'
+    });
+}
+
+
+// Function to toggle the visibility of messages cards
+function toggleDetails(index) {
+    const detailsElement = document.getElementById(`details-${index}`);
+    const buttonElement = document.querySelector(`button[onclick="toggleDetails(${index})"]`);
+    const iconElement = buttonElement.querySelector('i');
+    const spanElement = buttonElement.querySelector('span');
+    if (detailsElement.style.display === 'none' || detailsElement.style.display === '') {
+        detailsElement.style.display = 'block';
+        iconElement.classList.remove('fa-angle-double-down');
+        iconElement.classList.add('fa-angle-double-up');
+        spanElement.textContent = 'Close';
+    } else {
+        detailsElement.style.display = 'none';
+        iconElement.classList.remove('fa-angle-double-up');
+        iconElement.classList.add('fa-angle-double-down');
+        spanElement.textContent = 'Open';
+    }
+}
+
+// Function to execute the code
+function executeCode() {
+    var button = document.getElementById('execute-button');
+    var icon = document.getElementById('execute-icon');
+    var spinner = document.getElementById('execute-spinner');
+    icon.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    button.disabled = true;
+    const code = editor.getValue();
+    renderMessage({"role": "agent", "message": code});
+    fetch(host + '/execute', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task_id: taskId, code: code })
+    })
+    .then(response => response.json())
+    .then(data => {
+        renderMessage({"role": "environment", "message": data.output});
+        editor.setValue('');
+    })
+    .catch(error => {
+        console.error('Fetch error:', error);
+        environmentNotReachable(host);
+    })
+    .finally(() => {
+        icon.classList.remove('hidden');
+        spinner.classList.add('hidden');
+        button.disabled = false;
+    });
+}
+
+// function to evaluate the state
+function evaluatState() {
+    var button = document.getElementById('evaluate-button');
+    var icon = document.getElementById('evaluate-icon');
+    var spinner = document.getElementById('evaluate-spinner');
+    icon.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    button.disabled = true;
+    fetch(host + '/evaluate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ task_id: taskId, suppress_errors: true, report: true})
+    })
+    .then(response => response.json())
+    .then(data => {
+        renderMessage({"role": "evaluator", "message": data.output});
+    })
+    .catch(error => {
+        console.error('Fetch error:', error);
+        environmentNotReachable(host);
+    })
+    .finally(() => {
+        icon.classList.remove('hidden');
+        spinner.classList.add('hidden');
+        button.disabled = false;
+    });
+}
+
+
+// Function to escape HTML characters in code blocks
+function escapeHTML(html) {
+    return html
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Event listeners for open all and close all buttons
+document.getElementById('open-all').addEventListener('click', function() {
+    const detailsElements = document.querySelectorAll('.details');
+    detailsElements.forEach(function(details) {
+        details.style.display = 'block'; // Open all details
+    });
+});
+document.getElementById('close-all').addEventListener('click', function() {
+    const detailsElements = document.querySelectorAll('.details');
+    detailsElements.forEach(function(details) {
+        details.style.display = 'none'; // Close all details
+    });
+});
+
+
+// Function to try initializing with host alternatives
+async function tryInitialize(hostAlternatives, taskId) {
+    for (let i = 0; i < hostAlternatives.length; i++) {
+        const currentHost = hostAlternatives[i];
+        try {
+            console.log(`Trying to connect to: ${currentHost}`);
+            const response = await fetch(currentHost + '/initialize', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task_id: taskId })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                console.log(`Successfully connected to: ${currentHost}`);
+                return { success: true, host: currentHost, data: data };
+            }
+        } catch (error) {
+            console.log(`Failed to connect to ${currentHost}:`, error);
+            // Continue to next alternative
+        }
+    }
+    return { success: false, host: null, data: null };
+}
+
+document.getElementById('launch-button').addEventListener('click', async function() {
+    var launchButton = document.getElementById('launch-button');
+    var launchButtonText = document.getElementById('launch-button-text');
+    var spinner = document.getElementById('launch-spinner');
+    launchButtonText.classList.add('hidden');
+    spinner.classList.remove('hidden');
+    launchButton.disabled = true;
+    taskId = document.getElementById('task-id-input').value.trim();
+    const inputHost = document.getElementById('host-input').value.trim().replace(/\/+$/, '');
+    const hostAlternatives = getHostAlternatives(inputHost);
+
+    resetPlayground();
+
+    const result = await tryInitialize(hostAlternatives, taskId);
+
+    if (result.success) {
+        host = result.host;  // Set the working host
+        data = result.data.output;
+        renderTask(data);
+        loadApiDocs(host);
+        document.getElementById('bottom-bar').classList.remove('hidden');
+
+        const helpMessage = `
+# Write Python code to interact with the app APIs to explore this task world.
+# You can call app APIs in regular function format via \`apis\` object.
+# E.g., apis.{app_name}.{api_name}(arg_name_1=arg_value_1, ...)
+# You will see autocomplete suggestions for apps, apis on "." key stroke,
+# and brief function doc on "(" keystroke (like in VS Code).
+# Alternatively, you can check API docs on https://appworld.dev/api-explorer
+# Press Shift + Enter to Execute.
+print(apis.supervisor.show_profile())
+`.trim();
+        editor.setValue(helpMessage);
+        scrollToBottom();
+    } else {
+        console.log('All connection attempts failed');
+        environmentNotInitialized(hostAlternatives, taskId);
+    }
+
+    launchButtonText.classList.remove('hidden');
+    spinner.classList.add('hidden');
+    launchButton.disabled = false;
+});
+
+
+document.addEventListener("DOMContentLoaded", function() {
+    const hostInput = document.getElementById("host-input");
+    const taskIdInput = document.getElementById("task-id-input");
+    const launchButton = document.getElementById("launch-button");
+
+    function toggleButtonState() {
+        host = hostInput.value.trim().replace(/\/+$/, '');
+        taskId = taskIdInput.value.trim();
+        if (host !== "" && taskId !== "") {
+            launchButton.disabled = false;
+        } else {
+            launchButton.disabled = true;
+        }
+    }
+    hostInput.addEventListener("input", toggleButtonState);
+    taskIdInput.addEventListener("input", toggleButtonState);
+});
+
+require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs' }});
+require(['vs/editor/editor.main'], function () {
+monaco.languages.register({ id: 'python' });
+// theme is copied from: https://github.com/brijeshb42/monaco-themes/blob/master/themes/Monokai.json
+const monokaiTheme = {
+    "base": "vs-dark",
+    "inherit": true,
+    "rules": [
+        {
+            "background": "272822",
+            "token": ""
+        },
+        {
+            "foreground": "75715e",
+            "token": "comment"
+        },
+        {
+            "foreground": "e6db74",
+            "token": "string"
+        },
+        {
+            "foreground": "ae81ff",
+            "token": "constant.numeric"
+        },
+        {
+            "foreground": "ae81ff",
+            "token": "constant.language"
+        },
+        {
+            "foreground": "ae81ff",
+            "token": "constant.character"
+        },
+        {
+            "foreground": "ae81ff",
+            "token": "constant.other"
+        },
+        {
+            "foreground": "f92672",
+            "token": "keyword"
+        },
+        {
+            "foreground": "f92672",
+            "token": "storage"
+        },
+        {
+            "foreground": "66d9ef",
+            "fontStyle": "italic",
+            "token": "storage.type"
+        },
+        {
+            "foreground": "a6e22e",
+            "fontStyle": "underline",
+            "token": "entity.name.class"
+        },
+        {
+            "foreground": "a6e22e",
+            "fontStyle": "italic underline",
+            "token": "entity.other.inherited-class"
+        },
+        {
+            "foreground": "a6e22e",
+            "token": "entity.name.function"
+        },
+        {
+            "foreground": "fd971f",
+            "fontStyle": "italic",
+            "token": "variable.parameter"
+        },
+        {
+            "foreground": "f92672",
+            "token": "entity.name.tag"
+        },
+        {
+            "foreground": "a6e22e",
+            "token": "entity.other.attribute-name"
+        },
+        {
+            "foreground": "66d9ef",
+            "token": "support.function"
+        },
+        {
+            "foreground": "66d9ef",
+            "token": "support.constant"
+        },
+        {
+            "foreground": "66d9ef",
+            "fontStyle": "italic",
+            "token": "support.type"
+        },
+        {
+            "foreground": "66d9ef",
+            "fontStyle": "italic",
+            "token": "support.class"
+        },
+        {
+            "foreground": "f8f8f0",
+            "background": "f92672",
+            "token": "invalid"
+        },
+        {
+            "foreground": "f8f8f0",
+            "background": "ae81ff",
+            "token": "invalid.deprecated"
+        },
+        {
+            "foreground": "cfcfc2",
+            "token": "meta.structure.dictionary.json string.quoted.double.json"
+        },
+        {
+            "foreground": "75715e",
+            "token": "meta.diff"
+        },
+        {
+            "foreground": "75715e",
+            "token": "meta.diff.header"
+        },
+        {
+            "foreground": "f92672",
+            "token": "markup.deleted"
+        },
+        {
+            "foreground": "a6e22e",
+            "token": "markup.inserted"
+        },
+        {
+            "foreground": "e6db74",
+            "token": "markup.changed"
+        },
+        {
+            "foreground": "ae81ffa0",
+            "token": "constant.numeric.line-number.find-in-files - match"
+        },
+        {
+            "foreground": "e6db74",
+            "token": "entity.name.filename.find-in-files"
+        }
+    ],
+    "colors": {
+        "editor.foreground": "#F8F8F2",
+        "editor.background": "#000000",
+        "editor.selectionBackground": "#49483E",
+        "editor.lineHighlightBackground": "#3E3D32",
+        "editorCursor.foreground": "#F8F8F0",
+        "editorWhitespace.foreground": "#3B3A32",
+        "editorIndentGuide.activeBackground": "#9D550FB0",
+        "editor.selectionHighlightBorder": "#222218"
+    }
+};
+monaco.editor.defineTheme('monokai', monokaiTheme);
+monaco.editor.setTheme('monokai');
+editor = monaco.editor.create(document.getElementById('editor'), {
+    value: "",
+    language: 'python',
+    lineNumbers: 'off',
+    // theme: 'vs-dark',
+    minimap: {enabled: false},
+    automaticLayout: true,
+    wordBasedSuggestions: true,
+    quickSuggestions: true,
+    matchBrackets: 'always',
+    folding: true,
+    glyphMargin: true,
+});
+monaco.editor.setTheme('monokai');
+});
+
+$(document).on('keydown', function(event) {
+    if (event.shiftKey && event.key === "Enter") {
+        executeCode()
+    }
+});
+
+</script>
+
+</body>
+</html>

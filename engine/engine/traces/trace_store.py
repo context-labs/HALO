@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     )
 
 
+_OVERVIEW_SAMPLE_TRACE_IDS = 20
+
+
 class TraceStore:
     """Pure read/query/render API over a built index plus the canonical JSONL.
 
@@ -142,6 +145,7 @@ class TraceStore:
             error_trace_count=sum(1 for r in rows if r.has_errors),
             total_input_tokens=sum(r.total_input_tokens for r in rows),
             total_output_tokens=sum(r.total_output_tokens for r in rows),
+            sample_trace_ids=[r.trace_id for r in rows[:_OVERVIEW_SAMPLE_TRACE_IDS]],
         )
 
     def search_trace(self, trace_id: str, pattern: str) -> "TraceSearchResult":
