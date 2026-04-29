@@ -5,7 +5,7 @@ TODO:
 
 SearchTraceArguments(BaseModel):
     trace_id: str
-    pattern: str # compile as regex internally; invalid regex should fail clearly
+    regex_pattern: str # compile as regex internally; invalid regex should fail clearly
     context_buffer_chars: int = 100
     max_matches: int = 50
 
@@ -37,7 +37,7 @@ SpanMatchRecord(BaseModel):
 SearchSpanArguments(BaseModel):
     trace_id: str
     span_id: str
-    pattern: str # compile as regex internally; invalid regex should fail clearly
+    regex_pattern: str # compile as regex internally; invalid regex should fail clearly
     context_buffer_chars: int = 100
     max_matches: int = 50
 
@@ -71,7 +71,7 @@ class TraceSummary(BaseModel):
     agent_names: list[str]
     total_serialized_bytes: int = Field(ge=0)
 
-- [ ] query traces should have a regex option. Prefer making this explicit on QueryTracesArguments as `content_pattern` rather than hiding scan-heavy behavior inside the common TraceFilters used by overview/count. Normal filters stay index-only; `content_pattern` scans raw span JSON for matching traces.
+- [ ] query traces should have a regex option. Prefer making this explicit on QueryTracesArguments as `content_regex_pattern` rather than hiding scan-heavy behavior inside the common TraceFilters used by overview/count. Normal filters stay index-only; `content_regex_pattern` scans raw span JSON for matching traces.
 
 class TraceFilters(BaseModel):
     """Common filter set applied across overview/query/count. All fields are optional ANDed predicates."""
@@ -88,7 +88,7 @@ class TraceFilters(BaseModel):
 
 class QueryTracesArguments(BaseModel):
     filters: TraceFilters = Field(default_factory=TraceFilters)
-    content_pattern: str | None = None # compile as regex internally
+    content_regex_pattern: str | None = None # compile as regex internally
     limit: int = Field(default=50, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
 
