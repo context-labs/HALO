@@ -214,7 +214,7 @@ tasks:
       - task: typecheck
       - task: test:unit
 
-  check-fix:
+  check:fix:
     desc: Run checks with auto-fix enabled
     cmds:
       - task: pinned-versions

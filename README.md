@@ -122,7 +122,7 @@ Run `task --list` for the full list. The ones you'll use most:
 | Task                    | What it does                                                                    |
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `task check`            | Run all pre-commit checks: pinned-versions, lint, format, typecheck, unit tests |
-| `task check-fix`        | Same, but auto-fix lint/format issues                                           |
+| `task check:fix`        | Same, but auto-fix lint/format issues                                           |
 | `task test:unit`        | Unit tests under `tests/unit/`                                                  |
 | `task test:integration` | Integration tests under `tests/integration/`                                    |
 
