@@ -51,3 +51,4 @@ async def test_get_dataset_overview_through_sdk_adapter(tmp_path: Path, fixtures
     assert payload["agent_names"] == ["agent-a", "agent-b"]
     assert payload["total_input_tokens"] == 330
     assert payload["total_output_tokens"] == 100
+    assert payload["raw_jsonl_bytes"] > 0
