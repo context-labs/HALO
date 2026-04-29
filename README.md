@@ -14,7 +14,6 @@
   <br>
 </h1>
 
-
 <h4 align="center">✨ RLM-based Automatic Agent Optimization Loop ✨</h4>
 
 <p align="center">
@@ -32,29 +31,48 @@
 
 <p align="center">
   <a href="#what-is-this">What is this?</a> •
+  <a href="#install">Install</a> •
   <a href="#why-an-rlm">Why RLM?</a> •
   <a href="#benchmarks">Benchmarks</a> •
+  <a href="#development">Development</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
 ## What is this?
 
-HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains information on HALO methodology, a [Python package](https://pypi.org/project/inference-catalyst-tracing/) that implements the core HALO RLM engine, a [demo project](/demo) that shows how to build HALO loops for your agents using the Python package, and a benchmarking example applying HALO to a popular agent benchmark ([AppWorld](#appworld)).
+HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains information on HALO methodology, a [Python package](https://pypi.org/project/halo-engine/) that implements the core HALO RLM engine, a [demo project](/demo) that shows how to build HALO loops for your agents using the Python package, and a benchmarking example applying HALO to a popular agent benchmark ([AppWorld](#appworld)).
 
 ## HALO Loop
 
 The core HALO loop is suprisingly simple:
+
 1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing.
 2. Feed traces in the HALO RLM.
 3. The RLM decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
 4. This report is then fed to a coding agent like Cursor or Claude Code, which is responsible for generating and applying a set of changes to your harness to improve performance.
-5. The harness is then re-deployed, more traces are gathered, and the cycle repeats again. 
+5. The harness is then re-deployed, more traces are gathered, and the cycle repeats again.
 
 HALO is great at finding issues in production agent deployments. We find production environments tend to generate more data with higher variance across executions, creating the type of issues that HALO’s RLM-decomposition is great at spotting.
 
+## Install
+
+Install the HALO engine + CLI from PyPI:
+
+```bash
+pip install halo-engine
+```
+
+This puts the `halo` command on your `PATH`. Verify with `halo --help`.
+
+The engine needs an OpenAI key:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
 ## Get Started
 
-For instructions on using the HALO loop with your OpenAI Agents SDK Agent, see our [integration guide](docs/integrations/openai-agents-sdk.md) to start gathering traces. Then, use the HALO [Python package](ttps://pypi.org/project/inference-catalyst-tracing/) to generate a report you can use to improve your agent. Included in the package is a [CLI](/halo_cli/README.md). 
+For instructions on using the HALO loop with your OpenAI Agents SDK Agent, see our [integration guide](docs/integrations/openai-agents-sdk.md) to start gathering traces. Then, use the HALO [Python package](https://pypi.org/project/halo-engine/) to generate a report you can use to improve your agent. Included in the package is a [CLI](/halo_cli/README.md).
 
 For integration examples, we have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
 
@@ -64,17 +82,15 @@ A general-purpose harness like Claude Code is the wrong tool for trace analysis.
 
 <img src="./assets//halo-rlm.png" alt="rlm"  style="border-radius:8px;" width="600">
 
-
-
 ## Benchmarks
 
-HALO is consistently capable of driving improvements on benchmarks, solely by optimizing the harness. 
+HALO is consistently capable of driving improvements on benchmarks, solely by optimizing the harness.
 
-### AppWorld 
+### AppWorld
 
 We applied HALO to the [AppWorld](https://appworld.dev/) benchmark, a set of agentic tasks that assess the LLM’s ability to use multi-app services like Spotify, Venmo, file systems, and phone contacts. We tested HALO’s ability to improve harnesses for both Gemini 3 Flash and Sonnet 4.6. We iterated on the harness using the `dev` split, and then used the `test_normal` split as a proxy to verify that improvements did not come from overfitting.
 
-The feedback from HALO Engine surfaced failures in the harnesses such as hallucinated tool calls, redundant arguments in tools, refusal loops, and semantic correctness issues. Each issue mapped cleanly to a direct prompt edit. HALO’s claims were independently verified from the source trace files with the findings holding up under scrutiny. 
+The feedback from HALO Engine surfaced failures in the harnesses such as hallucinated tool calls, redundant arguments in tools, refusal loops, and semantic correctness issues. Each issue mapped cleanly to a direct prompt edit. HALO’s claims were independently verified from the source trace files with the findings holding up under scrutiny.
 
 <img src="./assets//halo-app-world-sgc.png" alt="app-world-sgc"  style="border-radius:8px;">
 <!-- 
@@ -83,7 +99,32 @@ The feedback from HALO Engine surfaced failures in the harnesses such as halluci
   If this does not display as desired, you will need to update the image asset itself
   to include padding and a black background.
 -->
-The peak improvements over baseline were substantial for both models. For Gemini 3 Flash, dev SGC went from 36.8% to 52.6% (+15.8 points) and test_normal SGC went from 37.5% to 48.2% (+10.7 points). For Sonnet 4.6, dev SGC went from 73.7% to 89.5% (+15.8 points) and test_normal SGC went from 62.5% to 73.2% (+10.7 points). 
+The peak improvements over baseline were substantial for both models. For Gemini 3 Flash, dev SGC went from 36.8% to 52.6% (+15.8 points) and test_normal SGC went from 37.5% to 48.2% (+10.7 points). For Sonnet 4.6, dev SGC went from 73.7% to 89.5% (+15.8 points) and test_normal SGC went from 62.5% to 73.2% (+10.7 points).
+
+## Development
+
+Local development against this repo uses [`uv`](https://docs.astral.sh/uv/) for dependency management and [`go-task`](https://taskfile.dev/) as the task runner.
+
+### Setup
+
+```bash
+git clone https://github.com/context-labs/HALO
+cd HALO
+task env:setup
+```
+
+`task env:setup` installs `uv` (if missing), syncs the venv from `uv.lock`, and configures the repo's git hooks. After that, the `halo` CLI is available via `uv run halo ...` (or activate `.venv/`).
+
+### Common tasks
+
+Run `task --list` for the full list. The ones you'll use most:
+
+| Task                    | What it does                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `task check`            | Run all pre-commit checks: pinned-versions, lint, format, typecheck, unit tests |
+| `task check-fix`        | Same, but auto-fix lint/format issues                                           |
+| `task test:unit`        | Unit tests under `tests/unit/`                                                  |
+| `task test:integration` | Integration tests under `tests/integration/`                                    |
 
 ## License
 

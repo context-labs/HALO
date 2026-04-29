@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-halo-engine = "halo_cli.main:app"
+halo = "halo_cli.main:app"
 
 [dependency-groups]
 dev = [

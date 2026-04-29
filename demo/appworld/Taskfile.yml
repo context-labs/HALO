@@ -192,7 +192,7 @@ tasks:
           exit 1
         fi
         echo "[analyze] feeding $TRACE_PATH to HALO Engine"
-        cd {{.HALO_ROOT}} && {{.UV_BIN}} run halo-engine "$TRACE_PATH" --model {{.MODEL}} --prompt "{{.PROMPT}}"
+        cd {{.HALO_ROOT}} && {{.UV_BIN}} run halo "$TRACE_PATH" --model {{.MODEL}} --prompt "{{.PROMPT}}"
 
   clean:run-outputs:
     desc: Remove run outputs only (experiments/outputs/). Source, bundles, and data preserved.

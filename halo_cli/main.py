@@ -1,4 +1,4 @@
-"""`halo-engine` CLI: stream the HALO engine over a JSONL trace file."""
+"""`halo` CLI: stream the HALO engine over a JSONL trace file."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _run(
 
 
 def app() -> None:
-    """Entry point bound to `halo-engine` in pyproject.toml."""
+    """Entry point bound to `halo` in pyproject.toml."""
     typer.run(_run)
 
 
