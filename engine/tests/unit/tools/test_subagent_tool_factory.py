@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +21,7 @@ from engine.tools.subagent_tool_factory import (
     build_subagent_semaphores,
 )
 from engine.traces.trace_store import TraceStore
+from tests._sdk_events import assistant_message_event, tool_call_event
 
 
 def _engine_config(max_depth: int) -> EngineConfig:
@@ -223,26 +223,8 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
     )
 
     events = [
-        SimpleNamespace(
-            type="run_item_stream_event",
-            item=SimpleNamespace(
-                type="tool_call_item",
-                raw_item=SimpleNamespace(
-                    call_id="c1", id="c1", name="query_traces", arguments="{}"
-                ),
-            ),
-        ),
-        SimpleNamespace(
-            type="run_item_stream_event",
-            item=SimpleNamespace(
-                type="message_output_item",
-                raw_item=SimpleNamespace(
-                    id="m1",
-                    role="assistant",
-                    content=[SimpleNamespace(type="output_text", text="done")],
-                ),
-            ),
-        ),
+        tool_call_event(call_id="c1", name="query_traces", raw_id="c1"),
+        assistant_message_event(item_id="m1", text="done"),
     ]
 
     class _Stream:
@@ -352,18 +334,10 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         sandbox=None,
     )
 
-    message_item = SimpleNamespace(
-        type="message_output_item",
-        raw_item=SimpleNamespace(
-            id="m1",
-            role="assistant",
-            content=[SimpleNamespace(type="output_text", text="child says 42")],
-        ),
-    )
-    stream_event = SimpleNamespace(type="run_item_stream_event", item=message_item)
+    stream_event = assistant_message_event(item_id="m1", text="child says 42")
 
     class _Stream:
-        new_items = [message_item]
+        new_items = [stream_event.item]
 
         async def stream_events(self):
             yield stream_event
@@ -420,17 +394,7 @@ async def test_depth_2_tool_runs_when_depth_1_slot_held() -> None:
         sandbox=None,
     )
 
-    one_event = SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="m1",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text="answered")],
-            ),
-        ),
-    )
+    one_event = assistant_message_event(item_id="m1", text="answered")
 
     class _Stream:
         async def stream_events(self):

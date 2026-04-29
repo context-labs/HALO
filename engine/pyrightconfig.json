@@ -3,8 +3,6 @@
     "engine",
     "tests/unit",
     "tests/integration",
-    "tests/integration-linux",
-    "tests/integration-macos",
     "tests/e2e"
   ],
   "exclude": [

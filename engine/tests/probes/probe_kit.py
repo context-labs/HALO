@@ -26,10 +26,12 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
+from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent
+
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_context import AgentContext
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.runner_protocol import RunnerProtocol
@@ -45,6 +47,12 @@ from engine.models.messages import AgentMessage
 from engine.tools.tool_protocol import ToolContext
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
+from tests._sdk_events import (
+    assistant_message_event,
+    text_delta_event,
+    tool_call_event,
+    tool_output_event,
+)
 
 # --- Fixture paths -----------------------------------------------------------
 
@@ -115,30 +123,23 @@ _: RunnerProtocol = FakeRunner()  # type: ignore[assignment]
 
 
 # --- Event builders ----------------------------------------------------------
-# Each builder returns a SimpleNamespace duck-typed to what OpenAiEventMapper
-# reads via getattr. Names of attributes match the openai-agents SDK shapes
-# (verified against engine/agents/openai_event_mapper.py).
+# Thin wrappers over the shared real-SDK factories in ``tests/_sdk_events.py``.
+# The mapper now dispatches via ``isinstance`` against ``RunItemStreamEvent`` /
+# ``RawResponsesStreamEvent`` and the per-item subclasses, so the SimpleNamespace
+# duck types these used to return would silently fall through to ``MappedEvent()``
+# and every probe event would be dropped. Keeping the public signatures stable
+# means existing probes continue to compile unchanged.
 
 
 def make_assistant_text(
     text: str,
     *,
     item_id: str = "msg-1",
-) -> SimpleNamespace:
+) -> RunItemStreamEvent:
     """Build a ``message_output_item`` event yielding ``text`` as assistant
     content. Use this for the model's natural-language replies, including
     those carrying the ``<final/>`` sentinel for the root agent."""
-    return SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id=item_id,
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text=text)],
-            ),
-        ),
-    )
+    return assistant_message_event(item_id=item_id, text=text)
 
 
 def make_tool_call(
@@ -147,21 +148,15 @@ def make_tool_call(
     arguments: str,
     call_id: str = "call-1",
     item_id: str | None = None,
-) -> SimpleNamespace:
+) -> RunItemStreamEvent:
     """Build a ``tool_call_item`` event for an LLM-issued function call.
     ``arguments`` is the raw JSON string the model produced (validate-it-or-not
     is up to the engine)."""
-    return SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="tool_call_item",
-            raw_item=SimpleNamespace(
-                id=item_id or call_id,
-                call_id=call_id,
-                name=name,
-                arguments=arguments,
-            ),
-        ),
+    return tool_call_event(
+        call_id=call_id,
+        name=name,
+        arguments=arguments,
+        raw_id=item_id or call_id,
     )
 
 
@@ -169,40 +164,30 @@ def make_tool_output(
     *,
     call_id: str,
     output: str,
-    name: str | None = None,
+    name: str | None = None,  # noqa: ARG001 — name lives on the assistant tool_calls block, not the output item
     item_id: str | None = None,
-) -> SimpleNamespace:
+) -> RunItemStreamEvent:
     """Build a ``tool_call_output_item`` event for the *result* of a tool call.
     Use this to simulate what the SDK would emit after invoking a tool — the
-    FakeRunner does NOT run real tool functions."""
-    return SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="tool_call_output_item",
-            output=output,
-            name=name,
-            raw_item=SimpleNamespace(
-                id=item_id or call_id,
-                call_id=call_id,
-                output=output,
-                name=name,
-            ),
-        ),
+    FakeRunner does NOT run real tool functions.
+
+    ``name`` is accepted for backwards compatibility but ignored: the
+    Responses-API ``FunctionCallOutput`` has no ``name`` field, and the
+    mapper now correlates names by ``call_id`` from the preceding
+    ``ToolCallItem``. Probes that need the result message to carry a
+    ``name`` should emit a matching ``make_tool_call`` first."""
+    return tool_output_event(
+        call_id=call_id,
+        output=output,
+        raw_id=item_id or call_id,
     )
 
 
-def make_text_delta(*, item_id: str, delta: str) -> SimpleNamespace:
+def make_text_delta(*, item_id: str, delta: str) -> RawResponsesStreamEvent:
     """Build a ``raw_response_event`` with a streaming text delta. The engine
     forwards these to the bus as ``AgentTextDelta`` events but does NOT add
     them to ``AgentContext``."""
-    return SimpleNamespace(
-        type="raw_response_event",
-        data=SimpleNamespace(
-            type="response.output_text.delta",
-            item_id=item_id,
-            delta=delta,
-        ),
-    )
+    return text_delta_event(item_id=item_id, delta=delta)
 
 
 # --- Config + message helpers ------------------------------------------------
@@ -240,6 +225,25 @@ def make_default_config(
 def make_default_messages(content: str = "Probe.") -> list[AgentMessage]:
     """One user message; the engine prepends its own root system prompt."""
     return [AgentMessage(role="user", content=content)]
+
+
+def make_root_context(
+    cfg: EngineConfig,
+    *,
+    messages: list[AgentMessage] | None = None,
+) -> AgentContext:
+    """Build a root ``AgentContext`` the way ``stream_engine_async`` does.
+
+    Probes that bypass ``stream_engine_async`` to call ``build_root_sdk_agent``
+    or ``_child_tools_for_depth`` directly need an ``AgentContext`` to pass
+    through. Going through ``AgentContext.from_input_messages`` keeps the
+    probe consistent with production: same compaction settings, same root
+    system-prompt prepending. Defaults to ``make_default_messages()``.
+    """
+    return AgentContext.from_input_messages(
+        messages=messages or make_default_messages(),
+        engine_config=cfg,
+    )
 
 
 # --- Trace fixture isolation -------------------------------------------------

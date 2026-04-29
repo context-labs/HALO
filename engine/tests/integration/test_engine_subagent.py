@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,6 +19,7 @@ from engine.tools.subagent_tool_factory import _build_subagent_as_tool
 from engine.traces.models.trace_index_config import TraceIndexConfig
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
+from tests._sdk_events import assistant_message_event
 
 
 class _FakeStream:
@@ -41,18 +41,8 @@ class _FakeRunner:
         return _FakeStream(self._events)
 
 
-def _assistant_text(text: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        type="run_item_stream_event",
-        item=SimpleNamespace(
-            type="message_output_item",
-            raw_item=SimpleNamespace(
-                id="child-msg-1",
-                role="assistant",
-                content=[SimpleNamespace(type="output_text", text=text)],
-            ),
-        ),
-    )
+def _assistant_text(text: str):
+    return assistant_message_event(item_id="child-msg-1", text=text)
 
 
 def _config() -> EngineConfig:
