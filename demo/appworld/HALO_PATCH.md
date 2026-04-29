@@ -14,6 +14,19 @@ This directory is a vendored fork of [StonyBrookNLP/appworld](https://github.com
 
 To resync: clone upstream at a newer sha, diff against this directory's tree (excluding the HALO additions below), cherry-pick what you want, and re-apply the patches.
 
+## Scope
+
+HALO tracing is patched into **only** the `openai_agents_mcp_agent` harness (`experiments/code/openai_agents/`). Upstream's other paradigms are present and runnable but emit no HALO traces:
+
+| Paradigm | Code dir | HALO-traced? |
+|---|---|---|
+| `openai_agents_mcp_agent` | `experiments/code/openai_agents/` | **yes** |
+| `legacy_{full_code,function_calling,plan_execute_code,react_code}_agent` | `experiments/code/legacy/` | no |
+| `simplified_{full_code,function_calling,react_code}_agent` | `experiments/code/simplified/` | no |
+| `smolagents_{code,tool_calling}_agent` | `experiments/code/smolagents/` | no |
+
+Within `openai_agents_mcp_agent`, the trace processor is registered on the OpenAI Agents SDK's tracing layer, so it captures spans regardless of whether the LLM call dispatches via `OpenAIChatCompletionsModel` (`type: "openai"`) or `LitellmModel` (`type: "litellm"`). Both adapter paths produce traces.
+
 ## Removed from upstream
 
 The following upstream files/directories were removed because they are not needed to run the HALO loop. Removed paths produce nothing at runtime and are not referenced by anything in `src/appworld/` or `experiments/code/openai_agents/`.
