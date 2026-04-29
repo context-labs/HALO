@@ -7,7 +7,7 @@ vars:
   VENV: "{{.TASKFILE_DIR}}/.venv"
   PYTHON_BIN: "{{.TASKFILE_DIR}}/.venv/bin/python"
   APPWORLD_BIN: "{{.TASKFILE_DIR}}/.venv/bin/appworld"
-  HALO_CLI_DIR: "{{.TASKFILE_DIR}}/../../cli"
+  HALO_ROOT: "{{.TASKFILE_DIR}}/../.."
 
 env:
   APPWORLD_ROOT: "{{.TASKFILE_DIR}}"
@@ -187,12 +187,12 @@ tasks:
           echo "No traces.jsonl found. Run 'task run:smoke' or 'task run:dev' first." >&2
           exit 1
         fi
-        if [ ! -d "{{.HALO_CLI_DIR}}" ]; then
-          echo "HALO CLI not found at {{.HALO_CLI_DIR}}. This task assumes the demo lives at HALO/demo/appworld/." >&2
+        if [ ! -d "{{.HALO_ROOT}}" ]; then
+          echo "HALO root not found at {{.HALO_ROOT}}. This task assumes the demo lives at HALO/demo/appworld/." >&2
           exit 1
         fi
         echo "[analyze] feeding $TRACE_PATH to HALO Engine"
-        cd {{.HALO_CLI_DIR}} && {{.UV_BIN}} run halo-engine "$TRACE_PATH" --model {{.MODEL}} --prompt "{{.PROMPT}}"
+        cd {{.HALO_ROOT}} && {{.UV_BIN}} run halo-engine "$TRACE_PATH" --model {{.MODEL}} --prompt "{{.PROMPT}}"
 
   clean:run-outputs:
     desc: Remove run outputs only (experiments/outputs/). Source, bundles, and data preserved.

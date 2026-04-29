@@ -5,11 +5,23 @@ on:
     branches: [main]
     paths:
       - "engine/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Taskfile.yml"
+      - "pyrightconfig.json"
       - ".github/workflows/engine--lint-format-typecheck.yml"
   push:
     branches: [main]
     paths:
       - "engine/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Taskfile.yml"
+      - "pyrightconfig.json"
       - ".github/workflows/engine--lint-format-typecheck.yml"
   workflow_call:
 
@@ -27,9 +39,6 @@ jobs:
   lint-format-typecheck:
     name: Lint, Format & Typecheck
     runs-on: depot-ubuntu-latest
-    defaults:
-      run:
-        working-directory: engine
 
     steps:
       - name: Checkout code
@@ -44,7 +53,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Install go-task
         uses: arduino/setup-task@v2

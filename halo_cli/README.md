@@ -5,11 +5,16 @@ Thin Typer wrapper around `halo-engine` that streams the engine over a JSONL tra
 ## Install
 
 ```bash
-cd cli
+pip install halo-engine
+```
+
+Or from a checkout of this repo:
+
+```bash
 uv sync
 ```
 
-This installs the `halo-engine` script and links the local `engine/` package in editable mode.
+Both install the `halo-engine` script onto your `PATH`.
 
 ## Setup
 
@@ -22,14 +27,14 @@ export OPENAI_API_KEY=sk-...
 ## Usage
 
 ```bash
-uv run halo-engine TRACE_PATH --prompt "your question"
+halo-engine TRACE_PATH --prompt "your question"
 ```
 
 ### Required
 
 | Arg | Description |
 |---|---|
-| `TRACE_PATH` | JSONL trace file (e.g. `engine/tests/fixtures/realistic_traces.jsonl`) |
+| `TRACE_PATH` | JSONL trace file (e.g. `tests/fixtures/realistic_traces.jsonl`) |
 | `--prompt`, `-p` | User prompt sent to the root agent |
 
 ### Options
@@ -45,7 +50,7 @@ uv run halo-engine TRACE_PATH --prompt "your question"
 ## Example
 
 ```bash
-uv run halo-engine engine/tests/fixtures/realistic_traces.jsonl \
+halo-engine tests/fixtures/realistic_traces.jsonl \
   -p "What are the most common failure modes?" \
   --max-depth 2 \
   --max-turns 12

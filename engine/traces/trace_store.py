@@ -83,9 +83,7 @@ def _truncate_attribute_value(value: Any, cap: int) -> Any:
 # attribute truncation, so we drop the flat projections to keep the per-span
 # size bounded. The string ``__halo_dropped_flat_projections`` is added to
 # preserve discoverability when the model needs to know what's missing.
-_NOISY_FLAT_PROJECTION_RE = re.compile(
-    r"^(?:llm\.(?:input|output)_messages|mcp\.tools)\.\d+\."
-)
+_NOISY_FLAT_PROJECTION_RE = re.compile(r"^(?:llm\.(?:input|output)_messages|mcp\.tools)\.\d+\.")
 
 
 def _is_noisy_flat_projection(key: str) -> bool:
@@ -196,6 +194,7 @@ class TraceStore:
             sorted_sizes = sorted(per_span_sizes)
             mid = sorted_sizes[len(sorted_sizes) // 2] if sorted_sizes else 0
             from collections import Counter
+
             name_counts = Counter(s.name for s in spans)
             error_spans = sum(1 for s in spans if s.status.code == "STATUS_CODE_ERROR")
             recommendation = (
@@ -254,9 +253,7 @@ class TraceStore:
                 blob = fh.read(length)
                 span = SpanRecord.model_validate_json(blob)
                 if span.span_id in wanted:
-                    spans.append(
-                        _truncate_span_attributes(span, _SURGICAL_ATTR_TRUNCATION_BYTES)
-                    )
+                    spans.append(_truncate_span_attributes(span, _SURGICAL_ATTR_TRUNCATION_BYTES))
         return TraceView(trace_id=trace_id, spans=spans)
 
     def query_traces(

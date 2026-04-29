@@ -15,8 +15,8 @@ cat > "$REFS_FILE"
 
 REMOTE="${1:-}"
 URL="${2:-}"
-ENGINE_HOOK="$REPO_ROOT/engine/scripts/git-hooks/pre-push"
+HOOK="$REPO_ROOT/scripts/git-hooks/pre-push"
 
-if [[ -x "$ENGINE_HOOK" ]]; then
-  "$ENGINE_HOOK" "$REMOTE" "$URL" < "$REFS_FILE"
+if [[ -x "$HOOK" ]]; then
+  "$HOOK" "$REMOTE" "$URL" < "$REFS_FILE"
 fi

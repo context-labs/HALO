@@ -1,7 +1,7 @@
 [project]
 name = "halo-engine"
 version = "0.1.0"
-description = "HALO engine: LLM agent runtime over OTel trace data."
+description = "HALO engine: LLM agent runtime over OTel trace data, with bundled CLI."
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
@@ -16,7 +16,13 @@ dependencies = [
     # unsupported platforms (e.g. musl Linux) pip will fall back to the
     # sdist and the sandbox will look for ``deno`` on PATH instead.
     "deno==2.7.14",
+    "typer==0.25.0",
+    "loguru==0.7.3",
+    "rich==15.0.0",
 ]
+
+[project.scripts]
+halo-engine = "halo_cli.main:app"
 
 [dependency-groups]
 dev = [
@@ -31,7 +37,7 @@ requires = ["hatchling==1.28.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["engine"]
+packages = ["engine", "halo_cli"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "engine/sandbox/runner.js" = "engine/sandbox/runner.js"
@@ -50,6 +56,7 @@ markers = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = ["demo"]
 
 [tool.ruff.lint]
 # Enabled rule families:

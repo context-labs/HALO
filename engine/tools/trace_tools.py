@@ -134,9 +134,7 @@ class ViewSpansTool:
     ) -> ViewTraceResult:
         """Read only the requested spans for ``trace_id`` from the JSONL."""
         store = tool_context.require_trace_store()
-        return ViewTraceResult(
-            result=store.view_spans(arguments.trace_id, arguments.span_ids)
-        )
+        return ViewTraceResult(result=store.view_spans(arguments.trace_id, arguments.span_ids))
 
 
 class SearchTraceTool:

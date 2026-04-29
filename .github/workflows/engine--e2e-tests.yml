@@ -23,9 +23,6 @@ jobs:
     name: E2E Tests
     runs-on: depot-ubuntu-latest
     timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: engine
 
     steps:
       - name: Checkout code
@@ -40,7 +37,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Install go-task
         uses: arduino/setup-task@v2
@@ -75,7 +72,7 @@ jobs:
         uses: mikepenz/action-junit-report@v5
         if: always()
         with:
-          report_paths: "engine/test-results/e2e/junit.xml"
+          report_paths: "test-results/e2e/junit.xml"
           update_check: true
           detailed_summary: true
           include_passed: true
@@ -87,5 +84,5 @@ jobs:
         if: always()
         with:
           name: engine-e2e-test-results
-          path: engine/test-results/e2e/
+          path: test-results/e2e/
           retention-days: 14

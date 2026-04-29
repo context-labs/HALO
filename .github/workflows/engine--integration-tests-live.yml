@@ -27,9 +27,6 @@ jobs:
     name: Live Integration Tests
     runs-on: depot-ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: engine
 
     steps:
       - name: Checkout code
@@ -44,7 +41,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Install go-task
         uses: arduino/setup-task@v2
@@ -79,7 +76,7 @@ jobs:
         uses: mikepenz/action-junit-report@v5
         if: always()
         with:
-          report_paths: "engine/test-results/integration-live.xml"
+          report_paths: "test-results/integration-live.xml"
           update_check: true
           detailed_summary: true
           include_passed: true
@@ -91,5 +88,5 @@ jobs:
         if: always()
         with:
           name: engine-live-integration-test-results
-          path: engine/test-results/
+          path: test-results/
           retention-days: 14
