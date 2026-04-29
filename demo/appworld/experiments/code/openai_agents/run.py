@@ -34,18 +34,26 @@ set_default_openai_api("chat_completions")
 
 APP_API_SEPARATOR = "__"
 
+# HALO patch: per-request timeout for the OpenAI client. Default httpx behaviour
+# allows requests to hang for ~10 minutes on a half-closed connection (CLOSE_WAIT
+# from the server side), which stalls parallel runs. 90s is well above the p99
+# normal latency for chat completions and short enough that one stuck request
+# doesn't pin a whole subprocess.
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
+
 
 def maybe_set_default_openai_client(
     base_url: str | None = None, api_key: str | None = None
 ) -> None:
-    if base_url is None and api_key is None:
-        return
-    if base_url is not None and api_key is not None:
-        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-    elif base_url is not None:
-        client = AsyncOpenAI(base_url=base_url)
-    else:
-        client = AsyncOpenAI(api_key=api_key)
+    # HALO patch: always set the default client (was: skip when both are None) so
+    # we can install a sane request timeout. The SDK falls back to OPENAI_API_KEY
+    # from env when api_key is None, matching the prior implicit behaviour.
+    kwargs: dict[str, Any] = {"timeout": _OPENAI_REQUEST_TIMEOUT_SECONDS}
+    if base_url is not None:
+        kwargs["base_url"] = base_url
+    if api_key is not None:
+        kwargs["api_key"] = api_key
+    client = AsyncOpenAI(**kwargs)
     _set_default_openai_client(client)
 
 
