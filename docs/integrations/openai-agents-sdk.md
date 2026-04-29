@@ -1,8 +1,7 @@
 # HALO — OpenAI Agents SDK integration
 
 Wire your existing OpenAI Agents SDK app into HALO's trace pipeline. Drop in one file (`tracing.py`), call `setup_tracing()` once at startup, and every agent / LLM / tool call becomes a JSONL span line on disk in the inference.net OTLP-shaped export format that the HALO Engine consumes.
-
-> **Hosted sink not yet launched.** This guide covers the local file sink, which works today. See [Hosted (HALO Cloud)](#hosted-halo-cloud) for the placeholder.
+]
 
 ## Prereqs
 
@@ -37,7 +36,7 @@ Copy [`demo/openai-agents-sdk-demo/tracing.py`](../../demo/openai-agents-sdk-dem
 - **`InferenceOtlpFileProcessor`** — an `agents.tracing.processor_interface.TracingProcessor` subclass that converts each `Span` to a JSON line via `span_to_otlp_line()` and appends it to a JSONL file. Thread-safe; writes on `on_span_end`. Stamps every span with the `inference.*` projection keys (`inference.project_id`, `inference.observation_kind`, `inference.llm.model_name`, `inference.llm.input_tokens`, etc.) per the inference.net `07-export.md` spec — these are what the HALO Engine indexes on.
 - **`setup_tracing()`** — the one function you call from your app. It builds an `ExportContext`, instantiates the processor at `$HALO_TRACES_PATH` (default `./traces.jsonl`), registers it with `add_trace_processor(...)`, and returns the processor so you can call `.shutdown()` before exit.
 
-The module is vendored, not packaged — copy it as-is and don't edit it. Future spec changes will land in the demo copy first.
+The module is vendored, not packaged. Copy it as-is and don't edit it. Future spec changes will land in the demo copy first.
 
 ## Wire it into your app
 
@@ -68,11 +67,7 @@ Order matters: `setup_tracing()` must run before the first `Agent(...)` so the p
 uv run main.py "your question"
 ```
 
-Traces land at `./traces.jsonl` (or wherever `HALO_TRACES_PATH` points). Pass that file directly to the Engine — it reads plain JSONL and writes a sidecar `traces.jsonl.engine-index.jsonl` next to it on first read.
-
-## Hosted (HALO Cloud)
-
-> **Not yet launched.** When the hosted ingest endpoint ships, this section will describe how to swap `InferenceOtlpFileProcessor` for an HTTP processor that POSTs the same JSONL line shape to HALO Cloud — same `ExportContext`, same `span_to_otlp_line` projection, different sink. Until then, the local file path above is the only supported sink.
+Traces land at `./traces.jsonl` (or wherever `HALO_TRACES_PATH` points). Pass that file directly to the Engine, it reads plain JSONL and writes a sidecar `traces.jsonl.engine-index.jsonl` next to it on first read.
 
 ## Trace shape
 
