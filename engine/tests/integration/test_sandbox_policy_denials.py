@@ -353,7 +353,7 @@ async def test_cannot_write_to_runner_via_allowed_read_path(
     assert result.exit_code != 0
     # And host file must still be untouched.
     assert "import pyodideModule" in runner_path.read_text(), (
-        f"runner.js modified through JS bridge despite --allow-write being denied"
+        "runner.js modified through JS bridge despite --allow-write being denied"
     )
 
 
