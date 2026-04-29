@@ -130,14 +130,16 @@ class ModelConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     name: str
-    instructions: str
+    instructions: str | None = None
     model: ModelConfig
     maximum_turns: int
 ```
 
 `AgentConfig` is used when constructing OpenAI Agents SDK `Agent` instances.
 
-Location: `engine/agents/agent_config.py`.
+`instructions` is optional. When `None`, the engine auto-injects `DEFAULT_SYSTEM_PROMPT` (a built-in usage manual for the trace tools) at prompt-render time inside `render_root_system_prompt` / `render_subagent_system_prompt`. Pass an explicit string to override.
+
+Location: `engine/agents/agent_config.py`. The default lives alongside the prompt templates in `engine/agents/prompt_templates.py` (`DEFAULT_SYSTEM_PROMPT`).
 
 `AvailableModelName` and `ModelConfig` live in `engine/model_config.py`. The model name is a literal union so supported models are explicit in code and configuration validation fails fast for unknown names.
 
@@ -776,7 +778,11 @@ Available tools are configured on the SDK `Agent`, not on individual messages:
 ```python
 sdk_agent = Agent(
     name=agent_config.name,
-    instructions=agent_config.instructions,
+    instructions=render_root_system_prompt(
+        instructions=agent_config.instructions,  # `None` ⇒ engine injects DEFAULT_SYSTEM_PROMPT
+        maximum_depth=engine_config.maximum_depth,
+        maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+    ),
     tools=[query_traces_tool, view_trace_tool, run_code_tool],
 )
 ```
