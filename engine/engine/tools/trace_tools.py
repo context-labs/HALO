@@ -23,14 +23,10 @@ class GetDatasetOverviewTool:
 
     name = "get_dataset_overview"
     description = (
-        "Return high-level stats about the trace dataset: counts, services, models, "
-        "totals, `raw_jsonl_bytes`, and a `sample_trace_ids` list (up to 20) of real "
-        "matching trace ids — call this before `view_trace` so you have real ids to "
-        "pass.\n\n"
-        "Indexed `filters` are cheap. `filters.regex_pattern` is the one scan-heavy "
-        "filter — use it only after narrowing with the indexed fields or after "
-        "confirming via `raw_jsonl_bytes` that the matched dataset is small enough "
-        "to scan cheaply."
+        "Dataset rollup: counts, services, models, totals, `raw_jsonl_bytes`, and "
+        "`sample_trace_ids` (real ids to pass to view/search tools). "
+        "`filters.regex_pattern` is opt-in raw-span scanning; expensive on large "
+        "datasets — narrow with indexed filter fields first."
     )
     arguments_model = DatasetOverviewArguments
     result_model = DatasetOverviewResult
@@ -48,12 +44,9 @@ class QueryTracesTool:
 
     name = "query_traces"
     description = (
-        "List trace summaries matching `filters` with pagination. Each summary "
-        "includes `raw_jsonl_bytes` so you can decide whether `view_trace` is safe "
-        "before calling it.\n\n"
-        "Indexed `filters` are cheap. `filters.regex_pattern` is the one scan-heavy "
-        "filter — prefer narrowing with the indexed fields first, or sizing the "
-        "dataset via `get_dataset_overview` before issuing it."
+        "Paginated trace summaries; each carries `raw_jsonl_bytes` so you can size "
+        "traces before calling `view_trace`. `filters.regex_pattern` is opt-in "
+        "raw-span scanning; narrow with indexed filter fields first."
     )
     arguments_model = QueryTracesArguments
     result_model = QueryTracesResult
@@ -78,8 +71,8 @@ class CountTracesTool:
 
     name = "count_traces"
     description = (
-        "Count traces matching `filters`. `filters.regex_pattern` is the one "
-        "scan-heavy filter — same caveats as on `query_traces`/`get_dataset_overview`."
+        "Count traces matching `filters`. `filters.regex_pattern` is opt-in "
+        "raw-span scanning; narrow with indexed filter fields first."
     )
     arguments_model = CountTracesArguments
     result_model = CountTracesResult
@@ -97,21 +90,10 @@ class ViewTraceTool:
 
     name = "view_trace"
     description = (
-        "Return ALL spans of a trace by id. Per-attribute payloads (input.value, "
-        "output.value, llm.input_messages, etc.) are head-capped at ~4096 chars each, "
-        "with a marker showing the original length.\n\n"
-        "If the trace's truncated total exceeds the per-call budget (~150_000 bytes), "
-        "this tool returns an empty `spans` list and an `oversized` summary instead "
-        "of the full payload. The summary contains span_count, "
-        "`truncated_response_bytes`, `response_bytes_budget`, per-span response size "
-        "min/median/max in bytes, top_span_names (most frequent span names with "
-        "counts), and error_span_count. When you receive an `oversized` response, "
-        "DO NOT retry view_trace — switch to `search_trace(trace_id, regex_pattern)` "
-        "to surface only the matches you need, then `view_spans(trace_id, span_ids="
-        "[...])` for surgical reads (or `search_span` for an individual large span).\n\n"
-        "Best used for traces you already know are small (use the `raw_jsonl_bytes` "
-        "from `query_traces` summaries to decide). For unknown or large traces, go "
-        "straight to search_trace + view_spans."
+        "Return all spans of a trace (per-attribute payloads head-capped ~4KB). "
+        "If the response would exceed ~150KB, returns `oversized` summary instead — "
+        "switch to `search_trace` + `view_spans`/`search_span`. Use `raw_jsonl_bytes` "
+        "from `query_traces` to decide if a trace is small enough."
     )
     arguments_model = ViewTraceArguments
     result_model = ViewTraceResult
@@ -129,17 +111,9 @@ class ViewSpansTool:
 
     name = "view_spans"
     description = (
-        "Return only the named spans from a trace, with the same per-attribute "
-        "truncation as `view_trace`. Use after `search_trace` has surfaced "
-        "interesting `span_id`s.\n\n"
-        "Avoid calling on individual spans whose `raw_jsonl_bytes` exceeds ~4096, "
-        "or where the total selected size exceeds ~150_000. The tool also enforces "
-        "these budgets: if the truncated selected spans exceed the per-call byte "
-        "budget, `spans` is returned empty and `oversized` carries summary "
-        "statistics + a recommendation to use `search_span` for large individual "
-        "spans or to call again with a smaller `span_ids` set.\n\n"
-        "Pass up to 200 `span_ids`. Span ids that don't match any span in the trace "
-        "are silently skipped."
+        "Return named spans (up to 200) at a 16KB per-attribute cap (4× `view_trace`). "
+        "If the response would exceed ~150KB, returns `oversized` summary — switch to "
+        "`search_span` for large individual spans or call with a smaller set."
     )
     arguments_model = ViewSpansArguments
     result_model = ViewTraceResult
@@ -157,16 +131,10 @@ class SearchTraceTool:
 
     name = "search_trace"
     description = (
-        "Regex-search inside one trace. Returns up to `max_matches` `SpanMatchRecord`s "
-        "(span metadata + matched text + surrounding context) plus the unbounded "
-        "`match_count` and a `has_more` flag.\n\n"
-        "`regex_pattern` is a Python regex matched against the raw on-disk JSON, "
-        "so it can target attribute keys (`STATUS_CODE_ERROR`, `MaxTurnsExceeded`), "
-        "tool names (`spotify__login`), or any literal substring. Invalid regex "
-        "fails fast.\n\n"
-        "Use this for traces too large for `view_trace`. After identifying interesting "
-        "`span_id`s in the records, follow up with `view_spans` for small spans "
-        "(`raw_jsonl_bytes` ≤ ~4096) or `search_span` for large individual spans."
+        "Regex-search a trace (Python regex over raw span JSON). Returns up to "
+        "`max_matches` `SpanMatchRecord`s (span metadata + matched text + context) "
+        "plus unbounded `match_count` and `has_more`. Follow up with `view_spans` or "
+        "`search_span` on the returned `span_id`s."
     )
     arguments_model = SearchTraceArguments
     result_model = SearchTraceResult
@@ -191,13 +159,8 @@ class SearchSpanTool:
 
     name = "search_span"
     description = (
-        "Regex-search inside a single span. Returns up to `max_matches` "
-        "`SpanMatchRecord`s with matched text, surrounding context, and span "
-        "metadata; `match_count` is the unbounded total.\n\n"
-        "Use this when `view_spans` of a particular span is too large (its "
-        "`raw_jsonl_bytes` exceeds ~4096, or `view_spans` returned `oversized` "
-        "for a set including this span). Pair with the `span_id`s surfaced by "
-        "`search_trace`. Invalid regex fails fast."
+        "Regex-search a single span. Same shape as `search_trace`. Use when one span "
+        "is too large for `view_spans`."
     )
     arguments_model = SearchSpanArguments
     result_model = SearchSpanResult
