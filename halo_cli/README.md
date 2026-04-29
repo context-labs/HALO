@@ -1,6 +1,6 @@
 # HALO CLI
 
-Thin Typer wrapper around `halo-engine` that streams the engine over a JSONL trace file.
+Thin Typer wrapper around the HALO engine that streams the engine over a JSONL trace file.
 
 ## Install
 
@@ -8,15 +8,15 @@ Thin Typer wrapper around `halo-engine` that streams the engine over a JSONL tra
 pip install halo-engine
 ```
 
-Or from a checkout of this repo:
+This installs the `halo` script onto your `PATH`. No extra configuration — the script is registered as a console entry point in the `halo-engine` wheel.
+
+Verify:
 
 ```bash
-uv sync
+halo --help
 ```
 
-Both install the `halo-engine` script onto your `PATH`.
-
-## Setup
+### Setup
 
 The engine needs real LLM access:
 
@@ -27,7 +27,7 @@ export OPENAI_API_KEY=sk-...
 ## Usage
 
 ```bash
-halo-engine TRACE_PATH --prompt "your question"
+halo TRACE_PATH --prompt "your question"
 ```
 
 ### Required
@@ -50,10 +50,22 @@ halo-engine TRACE_PATH --prompt "your question"
 ## Example
 
 ```bash
-halo-engine tests/fixtures/realistic_traces.jsonl \
+halo tests/fixtures/realistic_traces.jsonl \
   -p "What are the most common failure modes?" \
   --max-depth 2 \
   --max-turns 12
 ```
 
 Output streams to stdout: text deltas inline, then a rule-separated panel for each agent output item.
+
+## Developing locally
+
+If you want to hack on the CLI or the engine itself, install from a checkout of this repo with [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/context-labs/HALO
+cd HALO
+uv sync
+```
+
+`uv sync` creates `.venv/` and installs `halo-engine` in editable mode. Use `uv run halo ...` (or activate the venv) to invoke the CLI against your local checkout.

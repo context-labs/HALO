@@ -53,7 +53,7 @@ cd $HALO
 uv sync                       # creates .venv with halo-engine (CLI bundled)
 ```
 
-That's it for the engine side. The CLI entry point is `halo-engine` (registered by `pyproject.toml`).
+That's it for the engine side. The CLI entry point is `halo` (registered by `pyproject.toml`).
 
 ## Trace-format prerequisites — what the harness must produce
 
@@ -114,13 +114,13 @@ Once the harness emits valid traces:
 
 Run the harness once and capture eval results. Note the score so you can measure improvement later. If running an existing demo (e.g. AppWorld), the run command typically also produces an evaluation report.
 
-### Step 2 — Diagnose with halo-engine
+### Step 2 — Diagnose with halo
 
 Invoke the CLI with a **question**, not a command:
 
 ```bash
 cd $HALO
-uv run halo-engine /absolute/path/to/traces.jsonl \
+uv run halo /absolute/path/to/traces.jsonl \
     --prompt "What are the most common failure modes across the failed traces? For each, give me trace_id evidence and the precise error string." \
     --model gpt-4.1-2025-04-14 \
     --max-turns 15
@@ -239,7 +239,7 @@ cd $HALO && uv sync
 
 # Diagnose an existing trace file
 cd $HALO
-uv run halo-engine /abs/path/traces.jsonl \
+uv run halo /abs/path/traces.jsonl \
     --prompt "Your diagnostic question, framed as data inquiry." \
     --model gpt-4.1-2025-04-14 \
     --max-turns 15
@@ -247,7 +247,7 @@ uv run halo-engine /abs/path/traces.jsonl \
 # After answer comes back: verify in the repo
 rg "<the literal string the engine cited>" /path/to/harness
 # Read the actual file. Form a hypothesis. Make the minimal change.
-# Re-run harness, re-run halo-engine, compare.
+# Re-run harness, re-run halo, compare.
 ```
 
 Stay diagnostic in your prompts. Stay surgical in your edits. Verify before you patch.
