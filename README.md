@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/context-labs/uwu">
-    <span style="font-size:100px; display:inline-block;">😇</span>
+    <span><img src="https://em-content.zobj.net/thumbs/240/apple/354/smiling-face-with-halo_1f607.png" alt="😇" width="100" height="100" style="vertical-align:middle;"></span>
   </a>
   <br>
   <span style="font-size:2.2em; font-weight:bold;">HALO</span>
