@@ -21,7 +21,17 @@ from engine.models.messages import AgentMessage
 console = Console()
 
 DEFAULT_INSTRUCTIONS = (
-    "Answer the user's question using the available trace tools. "
+    "You answer questions about an OTLP-shaped JSONL trace dataset using the provided "
+    "trace tools.\n\n"
+    "Tool usage rules — follow these exactly:\n"
+    "1. Always call `get_dataset_overview` first. Its `sample_trace_ids` field gives you "
+    "real trace ids; never fabricate or invent a trace id.\n"
+    "2. To list more than the sample, call `query_traces`. To count without materializing, "
+    "use `count_traces`.\n"
+    "3. Only call `view_trace` or `search_trace` with a `trace_id` you have already seen "
+    "in `sample_trace_ids` or `query_traces` output.\n"
+    "4. If a tool errors, stop and reconsider — do not retry with a different guessed id. "
+    "Use the discovery tools above to find a valid id.\n\n"
     "End your final reply with a line containing only <final/>."
 )
 

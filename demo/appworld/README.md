@@ -1,0 +1,192 @@
+# HALO demo: AppWorld → HALO trace JSONL
+
+Vendored fork of [StonyBrookNLP/appworld](https://github.com/StonyBrookNLP/appworld) wired to emit HALO-shaped trace JSONL from its OpenAI Agents SDK harness. AppWorld is an ACL'24 benchmark of 9 simulated apps (Spotify, Splitwise, Gmail, Venmo, etc.) operable via 457 APIs, with a public leaderboard at [appworld.dev/leaderboard](https://appworld.dev/leaderboard).
+
+What this demo gives you:
+
+- **End-to-end runs** on any of the four splits (`train`, `dev`, `test_normal`, `test_challenge`)
+- **HALO traces** at `experiments/outputs/<experiment>/traces.jsonl` after every run, ready to feed to the HALO Engine
+- **A Taskfile-driven workflow** so you don't have to memorize the install dance
+
+For the full list of changes from upstream, see [`HALO_PATCH.md`](HALO_PATCH.md).
+
+## Prereqs
+
+- macOS or Linux (Windows untested)
+- [`uv`](https://docs.astral.sh/uv/) for Python env management
+- [Task](https://taskfile.dev) (`brew install go-task`) — recommended; everything is reachable manually too
+- An OpenAI API key (or another provider's; see [Other models](#other-models))
+
+## Setup
+
+```bash
+cp .env.example .env   # then fill in OPENAI_API_KEY
+task setup
+```
+
+`task setup` is idempotent. It runs four steps; each only does work the first time:
+
+| Step | What it does | First-run cost |
+|---|---|---|
+| `setup:venv` | Creates `.venv` with Python 3.12 | ~5s |
+| `setup:install` | Installs `appworld` and `appworld-agents[openai_agents]` editable | ~30s, ~250MB |
+| `setup:bundles` | `appworld install --repo` — unpacks the four encrypted bundles | ~2s |
+| `setup:data` | `appworld download data` — fetches the 728-task dataset from S3 | ~10s, ~190MB |
+
+After setup, `task --list` shows everything available.
+
+## Run a smoke test
+
+```bash
+task run:smoke
+```
+
+Runs one task (`50e1ac9_1` from `dev`) with `gpt-4o-mini-2024-07-18`. Takes ~20 seconds, costs about $0.005. On success you'll see:
+
+```
+1 of 1 tasks completed.
+Json evaluation report saved in: ./experiments/outputs/.../evaluations/on_only_50e1ac9_1.json
+Text Evaluation Report:
+    type     | task_goal_completion | scenario_goal_completion
+    ...
+```
+
+The trace lands at `experiments/outputs/openai_agents_mcp_agent/openai/gpt-4o-mini-2024-07-18/dev/traces.jsonl`. To verify it conforms to the HALO spec:
+
+```bash
+task verify:traces
+# expected: OK: 17 spans passed all spec assertions
+```
+
+## Run on a full split
+
+```bash
+task run:dev               # 57 tasks  (~5 min, ~$0.30 with gpt-4o-mini)
+task run:test-normal       # 168 tasks
+task run:test-challenge    # 417 tasks
+task run:train             # 90 tasks
+```
+
+Override the model or agent paradigm with task variables:
+
+```bash
+task run:dev MODEL=gpt-4.1-2025-04-14
+task run:dev AGENT=simplified_react_code_agent  # different harness shape
+```
+
+For the full menu of supported model and agent names:
+
+```bash
+task models:list
+task agents:list
+```
+
+## Where outputs land
+
+For an experiment run with the default config and `dev` split:
+
+```
+experiments/outputs/openai_agents_mcp_agent/openai/gpt-4o-mini-2024-07-18/dev/
+├── traces.jsonl                       # HALO traces (one line per span)
+├── configs/{dev.json, dev.jsonnet}    # the config that was actually run
+├── evaluations/                       # JSON + text reports per task / per dataset
+├── logs/server.log                    # AppWorld background-server log
+└── tasks/<task_id>/
+    ├── dbs/                           # per-task simulated app state snapshots
+    └── logs/lm_calls.jsonl            # per-task LLM-call log (separate from HALO traces)
+```
+
+The HALO trace shape per span:
+
+| Field | Notes |
+|---|---|
+| `trace_id`, `span_id`, `parent_span_id` | OTLP IDs; one trace per task |
+| `name` | `agent.Assistant`, `generation.<model>`, `function.<app>__<tool>`, `mcp_tools` |
+| `attributes."inference.observation_kind"` | `AGENT` / `LLM` / `TOOL` |
+| `attributes."inference.project_id"` | `appworld-<experiment_name_with_slashes_underscored>` |
+| `attributes."inference.llm.{model_name,input_tokens,output_tokens}"` | LLM spans only |
+| `attributes."tool.name"`, `input.value`, `output.value` | TOOL spans only |
+
+A typical 20-step task trace contains ~50 spans: 1 root AGENT, ~10 LLM, ~10 TOOL function calls, ~10 MCP tool-listing spans.
+
+## Feeding traces to the HALO Engine
+
+```bash
+task analyze
+```
+
+Streams the most recent `traces.jsonl` through the HALO Engine with a default question about harness improvements. To customize:
+
+```bash
+task analyze \
+  TRACE_PATH=experiments/outputs/.../traces.jsonl \
+  PROMPT="Which tasks failed because the API predictor under-fetched? Group by app." \
+  MODEL=gpt-5.4-mini
+```
+
+This task assumes the demo lives at `HALO/demo/appworld/` so it can find the HALO CLI at `../../cli`. If you've moved things, edit `HALO_CLI_DIR` in `Taskfile.yml`.
+
+## Iterating on the harness
+
+The whole point of this demo is HALO-driven harness improvement. The loop:
+
+1. `task run:dev` — produce traces + eval results
+2. `task analyze` — ask HALO Engine what to fix
+3. Edit the harness (most likely places below)
+4. `task clean:run-outputs && task run:dev` — re-run on the same split
+5. Diff the eval reports
+
+Most-improvable surfaces:
+
+| Path | What's there |
+|---|---|
+| `experiments/code/openai_agents/run.py` | The agent loop, including the API predictor → main agent handoff and the `ModelBehaviorError` recovery gap that upstream itself flagged with `# no easy way to give it feedback about the error in this framework, so leave it.` |
+| `experiments/code/openai_agents/api_predictor.py` | The first-pass model that whitelists ≤20 APIs per task; under-fetching here cascades into main-agent failures |
+| `experiments/prompts/function_calling_agent/instructions.txt` | The agent's system prompt template |
+| `experiments/prompts/function_calling_agent/demos.json` | Few-shot demonstrations |
+| `experiments/prompts/api_predictor.txt` | The API predictor's prompt |
+| `experiments/configs/_generator/templates/openai_agents_mcp_agent.jsonnet.j2` | The template that produces per-model run configs (`max_steps`, tool_choice, parallelism, etc.) |
+
+## Other models
+
+The default is `gpt-4o-mini-2024-07-18`. The harness supports many providers via litellm — see `experiments/configs/_generator/models/` for the registry. Set the relevant API key in `.env` before invoking with a non-OpenAI model.
+
+`task models:list` prints the full list. Some good cheap options for HALO-loop work:
+
+- OpenAI: `gpt-4o-mini-2024-07-18`, `gpt-5-nano-2025-08-07-minimal-reasoning`, `gpt-4.1-mini-2025-04-14`
+
+## Cleaning up
+
+```bash
+task clean:run-outputs   # delete just experiments/outputs/
+task clean               # delete .venv, data, run outputs, and unpacked bundles (prompts for confirmation)
+```
+
+After `task clean`, a `task setup` from scratch takes ~1–2 minutes.
+
+## Troubleshooting
+
+**`uv pip install -e 'experiments[openai_agents]'` installs the wrong package.**
+There is a generic PyPI package named `experiments`. Use `'./experiments[openai_agents]'` with the leading `./`. The Taskfile already does this; this only bites if you run `uv pip install` by hand.
+
+**`appworld download data` fails with "package not fully installed".**
+You ran `appworld install` (package mode) instead of `appworld install --repo`. The verify-installation heuristic checks paths that only the `--repo` mode populates when AppWorld is installed editable from outside `site-packages`. The Taskfile uses `--repo`; if running by hand, do the same.
+
+**Traces are empty or missing.**
+The HALO file processor flushes on `processor.shutdown()`. The patched `run.py` calls this in a `finally` block. If you killed the run with `SIGKILL` rather than `SIGTERM` / Ctrl-C, the gzip stream may have been truncated. Re-run the task.
+
+**`appworld run` errors with "Could not find dataset".**
+You skipped `task setup:data`. Run `task setup` (or just `task setup:data`) first.
+
+**Some non-OpenAI model fails to load a prompt at `experiments/prompts/function_calling_v2_zero_shot.txt`.**
+That prompt isn't shipped in this fork. Models with `function_calling_demos: True` in `experiments/configs/_generator/models/<creator>.py` are unaffected. For a model that needs the zero-shot prompt, either flip the flag or supply the file.
+
+## Related docs
+
+- [HALO_PATCH.md](HALO_PATCH.md) — what this fork changes vs upstream and how to resync
+- Upstream AppWorld: [stonybrooknlp/appworld](https://github.com/StonyBrookNLP/appworld), [appworld.dev](https://appworld.dev), [paper](https://arxiv.org/abs/2407.18901)
+- HALO OpenAI Agents SDK integration: [`docs/integrations/openai-agents-sdk.md`](../../docs/integrations/openai-agents-sdk.md)
+
+## License
+
+Apache 2.0, inherited from upstream — see [`LICENSE`](LICENSE).

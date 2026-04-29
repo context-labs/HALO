@@ -1,0 +1,53 @@
+# Source: https://platform.moonshot.ai/docs/pricing/chat#product-pricing
+MODEL_INFOS = [
+    {
+        "model_name": "kimi-k2-0905-preview",
+        "client_name": "openai",
+        "model_id": "kimi-k2-0905-preview",
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "base_url": "https://api.moonshot.ai/v1",
+            "api_key_env_name": "MOONSHOT_API_KEY",
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "cost_per_token": {
+                "input_cache_miss": 0.60 / 1e6,
+                "input_cache_hit": 0.15 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 2.50 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["v2"],
+        "provider": "moonshot",
+    },
+    {
+        "model_name": "kimi-k2-0711-preview",
+        "client_name": "openai",
+        "model_id": "kimi-k2-0711-preview",
+        "model_kwargs": {
+            "api_type": "chat_completions",
+            "base_url": "https://api.moonshot.ai/v1",
+            "api_key_env_name": "MOONSHOT_API_KEY",
+            "temperature": 0,
+            "seed": 100,
+            "tool_parser_name": None,
+            "parallel_tool_calls": True,
+            "cost_per_token": {
+                "input_cache_miss": 0.60 / 1e6,
+                "input_cache_hit": 0.15 / 1e6,
+                "input_cache_write": 0.0,
+                "output": 2.50 / 1e6,
+            },
+        },
+        "function_calling": True,
+        "tool_choice": "auto",
+        "function_calling_demos": True,
+        "part_of": ["vn"],
+        "provider": "moonshot",
+    },
+]

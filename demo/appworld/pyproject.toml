@@ -1,0 +1,289 @@
+[project]
+name = "appworld"
+version = "0.2.0.dev0"
+description = "AppWorld: A Controllable World of Apps and People for Benchmarking Function Calling and Interactive Coding Agents"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+readme = "README.pypi.md"
+keywords = [
+    "ai-agents",
+    "ai-assistants",
+    "ai-planning",
+    "autonomous-agents",
+    "ai-environment",
+    "tool-usage",
+    "coding-agents",
+    "interactive-coding",
+    "nlp-machine-learning",
+    "nlp-datasets",
+    "llm",
+    "function-calling",
+    "llm-agents",
+    "ai-apis",
+    "acl-2024",
+]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: Software Development :: Code Generators",
+    "Development Status :: 3 - Alpha",
+]
+authors = [
+    { name = "Harsh Trivedi", email = "harshjtrivedi94@gmail.com" },
+    { name = "Tushar Khot", email = "tushark@allenai.org" },
+    { name = "Mareike Hartmann", email = "mareikeh@coli.uni-saarland.de" },
+    { name = "Ruskin Manku", email = "rmanku@cs.stonybrook.edu" },
+    { name = "Vinty Dong", email = "vidong@cs.stonybrook.edu" },
+    { name = "Edward Li", email = "ejli@cs.stonybrook.edu" },
+    { name = "Shashank Gupta", email = "shashankg@allenai.org" },
+    { name = "Ashish Sabharwal", email = "AshishS@allenai.org" },
+    { name = "Niranjan Balasubramanian", email = "niranjan@cs.stonybrook.edu" },
+]
+maintainers = [{ name = "Harsh Trivedi", email = "harshjtrivedi94@gmail.com" }]
+
+dependencies = [
+    # primary dependencies
+    "fastapi>=0.110",                                     # >= 2024-02 | bottom-pin-required for reliability but is not the tightest bound.
+    "fastapi-login>=1.10.2,<=1.10.3",                     # == 2024-09 | both-pin-required as _get_current_user is overriden in apps/api_lib.py.
+    "sqlmodel>=0.0.19",                                   # >= 2024-06 | bottom-pin-required for reliability but is not the tightest bound.
+    "pydantic>=2.12.0",                                   # >= 2025-10 | bottom-pin-required for python 3.14 compatibility.
+    "sqlalchemy-utils>=0.41.1",                           # >= 2023-04 | bottom-pin-required for reliability but is not the tightest bound.
+    "pendulum>=3.0.0",                                    # >= 2023-12 | bottom-pin-required for reliability but is not the tightest bound.
+    "freezegun>=1.5.0,<=1.5.1",                           # == 2024-04 | top-pin-required to obtain true time via the current approach
+    "uvicorn>=0.27",                                      # >= 2024-01
+    "ipython>=8.18.0",                                    # >= 2023-11 | bottom-pin-required to fix memory leak (prevents leaving fd open).
+    "typer>=0.16.0",                                      # >= 2025-05 | bottom-pin-required to avoid rich incompatibility.
+    "text2num>=0.3.0",                                    # >= 2025-05 | bottom-pin-preferred for better algorithm.
+    # secondary dependencies
+    "orjson>=3.10.12",                                    # >= 2024-11 | bottom-pin-required as it's the earliest version uv builds successfully on windows
+    "pydantic-extra-types[pendulum]>=2.8.0",              # >= 2023-06 | bottom-pin-required as it's the earliest version with pendulum support.
+    "requests>=2.28.0",                                   # >= 2022-06
+    "inflection>=0.5.1",                                  # >= 2020-06
+    "email-validator>=2.0.0",                             # >= 2023-04
+    "polyfactory>=2.15.0",                                # >= 2024-03
+    "faker>=18.0.0",                                      # >= 2023-03
+    "xxhash>=3.0.0",                                      # >= 2022-02
+    "munch>=4.0.0",                                       # >= 2023-07
+    "rich>=13.0.0",                                       # >= 2022-12
+    "tqdm>=4.60.0",                                       # >= 2021-04
+    "python-dotenv>=1.0.1",                               # >= 2023-02
+    "cryptography>=44.0.0",                               # >= 2024-11
+    "python-multipart>=0.0.5",                            # >= 2023-02
+    "httpx>=0.20.0",                                      # >= 2021-10
+    "libcst>=1.2.0",                                      # >= 2024-02
+    "typing-extensions>=4.12.2",                          # >= 2024-07  | bottom-pin-required as per pydantic for python < 3.12
+    "pyyaml>=6.0.1",                                      # >= 2023-07
+    "pytest>=7.0.0",                                      # >= 2022-02
+    "pytest-xdist>=3.1.0",                                # >= 2022-12
+    "psutil>=5.9.0",                                      # >= 2021-12
+    "jsonref>=1.1.0",                                     # >= 2023-01
+    "filelock>=3.1.0",                                    # >= 2021-09
+    "uvloop>=0.21.0; sys_platform == \"linux\" or sys_platform == \"darwin\"",  # >= 2024-10
+    "winloop>=0.2.0; sys_platform == \"win32\"",                                # >= 2025-07 | bottom-pin-required as it's the earliest version uv builds successfully on windows
+]
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.19.0",                                        # >= 2025-10  | bottom-pin-required for CallToolResult output type.
+]
+ci = [
+    # ci
+    "black>=23.1.0",                                      # >= 2023-02
+    "icecream>=2.1.0",                                    # >= 2021-01
+    "types-pyyaml>=6.0.0",                                # >= 2021-10
+    "types-psutil>=5.9.0",                                # >= 2022-07
+    "types-requests>=2.28.0",                             # >= 2022-06
+    "types-tqdm>=4.66.0",                                 # >= 2022-07
+    "types-decorator>=5.1.0",                             # >= 2021-10
+    "types-setuptools>=68.0.0",                           # >= 2023-06
+    "types-six>=1.16.0",                                  # >= 2021-08
+    "types-typed-ast>=1.5.0",                             # >= 2021-11
+    "types-ujson>=5.6.0",                                 # >= 2022-12
+    "types-tabulate>=0.8.0",                              # >= 2021-08
+    "types-pymysql>=1.1.0",                               # >= 2022-07
+    "types-python-dateutil>=2.9.0",                       # >= 2024-03
+    "types-sqlalchemy-utils>=1.1.0",                      # >= 2024-05
+    "ruff==0.8.0",                                        # == 2024-11 | pin for CI stability.
+    "mypy==1.15.0",                                       # == 2024-02 | pin for CI stability.
+    "pytest-timeout>=2.0.0",                              # >= 2021-10
+    "pyperclip>=1.8.0",                                   # >= 2020-03
+    "jsonschema>=4.19.0",                                 # >= 2023-08
+    "jinja2>=3.1.3",                                      # >= 2024-10
+    "mcp>=1.19.0",                                        # >= 2025-07
+]
+all = [
+    # internal development
+    "pre-commit>=4.0.0",                                  # >= 2024-10
+    "openapi-spec-validator>=0.7.1",                      # >= 2023-10
+    "numpy>=1.20.0",                                      # >= 2021-01
+    "matplotlib>=3.3.0",                                  # >= 2020-07
+    "seaborn>=0.12.0",                                    # >= 2022-09
+    "plotext>=5.0.0",                                     # >= 2022-04
+    "coverage>=7.0.0",                                    # >= 2022-12
+    "gitpython>=3.1.0",                                   # >= 2020-02
+    "pyperclip>=1.8.0",                                   # >= 2020-03
+    # ci
+    "black>=23.1.0",                                      # >= 2023-02
+    "icecream>=2.1.0",                                    # >= 2021-01
+    "types-pyyaml>=6.0.0",                                # >= 2021-10
+    "types-psutil>=5.9.0",                                # >= 2022-07
+    "types-requests>=2.28.0",                             # >= 2022-06
+    "types-tqdm>=4.66.0",                                 # >= 2022-07
+    "types-decorator>=5.1.0",                             # >= 2021-10
+    "types-setuptools>=68.0.0",                           # >= 2023-06
+    "types-six>=1.16.0",                                  # >= 2021-08
+    "types-typed-ast>=1.5.0",                             # >= 2021-11
+    "types-ujson>=5.6.0",                                 # >= 2022-12
+    "types-tabulate>=0.8.0",                              # >= 2021-08
+    "types-pymysql>=1.1.0",                               # >= 2022-07
+    "types-python-dateutil>=2.9.0",                       # >= 2024-03
+    "ruff==0.8.0",                                        # == 2024-11
+    "mypy==1.15.0",                                       # == 2024-02
+    "pytest-timeout>=2.0.0",                              # >= 2021-10
+    "pyperclip>=1.8.0",                                   # >= 2020-03
+    "jsonschema>=4.19.0",                                 # >= 2023-08
+    "jinja2>=3.1.3",                                      # >= 2024-10
+    "mcp>=1.19.0",                                        # >= 2025-07
+]
+
+[project.urls]
+Homepage = "https://appworld.dev/"
+Repository = "https://github.com/stonybrooknlp/appworld"
+paper = "https://arxiv.org/abs/2407.18901"
+
+[project.scripts]
+appworld = "appworld.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-exclude = [
+    "src/appworld/apps/api_docs/**",
+    "src/appworld/apps/admin/**",
+    "src/appworld/apps/supervisor/**",
+    "src/appworld/apps/amazon/**",
+    "src/appworld/apps/file_system/**",
+    "src/appworld/apps/gmail/**",
+    "src/appworld/apps/phone/**",
+    "src/appworld/apps/simple_note/**",
+    "src/appworld/apps/splitwise/**",
+    "src/appworld/apps/spotify/**",
+    "src/appworld/apps/todoist/**",
+    "src/appworld/apps/venmo/**",
+    "**/*.yaml",
+]
+source-include = [
+    "src/**/appworld/*.bundle",
+    "src/**/appworld/serve/playground.html",
+    "src/**/appworld/serve/static/icon.png",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+respect-gitignore = true
+output-format = "full"
+extend-exclude = ["./archive", "./data", "./experiments/outputs"]
+
+[tool.ruff.lint]
+select = [
+    "F",  # pyflakes (default)
+    "E",  # pycodestyle errors (default)
+    # enable others progressively:
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "N",  # pep8-naming
+    "UP", # pyupgrade
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+    "RUF", # ruff
+    "TID251", # flake8-tidy-imports
+    # following are unnecessary for now.
+    # "ANN", # flake8-annotations
+    # "A",  # flake8-builtins
+    # "ARG", # flake8-unused-arguments
+    # "PTH", # flake8-use-pathlib
+    # "PL", # pylint
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "E731",  # can't assign lambda a name.
+    "B023",  # Checks for function definitions that use a loop variable.
+    "W605",  # invalid escape sequence
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.TypedDict".msg = "Use typing_extensions.TypedDict instead as Pydantic requires it for Python < 3.12"
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["appworld", "appworld_agents"]
+known-third-party = ["recoma"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = [
+    "api: custom marker for API tests",
+    "app: custom marker for Base DB tests",
+]
+filterwarnings = ["ignore::Warning"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+timeout = 20
+addopts = "--showlocals --tb=long"
+
+[tool.coverage.html]
+directory = ".coverage_report"
+
+[tool.mypy]
+plugins = [
+  "pydantic.mypy",
+]
+exclude = [
+  "^archive/",
+  "^data/",
+  "^scripts/",
+  "^generate/data/",
+  "^experiments/code/legacy/",
+  "^tests/",
+]
+ignore_missing_imports = true
+mypy_path = ["src"]
+strict = true
+
+[[tool.mypy.overrides]]  # this is not movable to exclude due to CI constraints
+module = ["generate.tasks.task_generators.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["generate.tasks.task_generators.base"]
+ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = ["generate.tasks.task_generators.lib"]
+ignore_errors = false
+
+[[tool.mypy.overrides]]  # Temporary
+module = ["generate.*"]
+disable_error_code = ["redundant-cast"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
