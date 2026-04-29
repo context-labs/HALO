@@ -754,6 +754,46 @@ async def test_run_python_does_not_hang_when_protocol_returns_early(
     assert proc_dead.is_set()
 
 
+# -- bootstrap + execute share output truncation ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_traceback_is_byte_capped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bootstrap failure with a huge traceback must not bloat the agent context.
+
+    Regression: bootstrap previously returned ``_result_from_rpc(...)``
+    raw, while execute applied ``_truncate_to_bytes``. A recursive
+    import error in ``halo_bootstrap`` (or any pyodide-side import
+    blowup) could push tens of megabytes of traceback back through the
+    JSON-RPC frame, which then flowed verbatim into the agent's prompt.
+    Both phases share ``_result_from_rpc`` now, so the byte cap applies
+    to either kind of failure.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace, index = _trace_and_index(tmp_path)
+
+    huge_traceback = "Traceback (most recent call last):\n" + ("  " + "x" * 200 + "\n") * 5000
+
+    def _responder(method: str):
+        if method == "mount_file":
+            return _rpc_ok({"mounted": "/x"})
+        if method == "bootstrap":
+            return _rpc_ok({"exit_code": 1, "stdout": "", "stderr": huge_traceback})
+        raise AssertionError(f"unexpected method {method!r}")
+
+    _install_session_internals_stubs(monkeypatch, rpc_responder=_responder)
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+    assert result.exit_code == 1
+    assert len(result.stderr.encode("utf-8")) <= sandbox_module._MAX_STDERR_BYTES, (
+        f"bootstrap stderr is {len(result.stderr.encode('utf-8'))} bytes, "
+        f"exceeds cap {sandbox_module._MAX_STDERR_BYTES}"
+    )
+    assert sandbox_module._TRUNCATION_MARKER in result.stderr
+
+
 # -- _RunnerSession._await_ready: tolerate unexpected JSON before sentinel ----
 
 
