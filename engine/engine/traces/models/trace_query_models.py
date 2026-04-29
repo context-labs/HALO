@@ -63,13 +63,42 @@ class TraceSearchResult(BaseModel):
     matches: list[str]
 
 
+class OversizedTraceSummary(BaseModel):
+    """Returned in place of ``TraceView.spans`` when the requested trace would exceed the per-call size budget.
+
+    Carries enough metadata for the agent to plan a smaller follow-up call:
+    counts, per-span size distribution, the top span names, and an explicit
+    recommendation to use ``search_trace`` + ``view_spans`` instead of retrying
+    ``view_trace``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    span_count: int = Field(ge=0)
+    total_serialized_chars: int = Field(ge=0)
+    char_budget: int = Field(ge=0)
+    span_size_min: int = Field(ge=0)
+    span_size_median: int = Field(ge=0)
+    span_size_max: int = Field(ge=0)
+    top_span_names: list[tuple[str, int]] = Field(default_factory=list)
+    error_span_count: int = Field(ge=0)
+    recommendation: str = ""
+
+
 class TraceView(BaseModel):
-    """All canonical SpanRecords belonging to one trace, in file order."""
+    """All canonical SpanRecords belonging to one trace, in file order.
+
+    When the trace's serialized size would exceed the per-call budget, ``spans`` is
+    returned empty and ``oversized`` carries summary statistics + a recommendation
+    to use ``search_trace`` and ``view_spans`` instead.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     trace_id: str
     spans: list[SpanRecord]
+    oversized: OversizedTraceSummary | None = None
 
 
 class DatasetOverview(BaseModel):
@@ -114,6 +143,15 @@ class ViewTraceArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     trace_id: str
+
+
+class ViewSpansArguments(BaseModel):
+    """Tool arguments for ``view_spans``: trace id plus the set of span ids to read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    span_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class SearchTraceArguments(BaseModel):

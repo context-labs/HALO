@@ -26,6 +26,7 @@ EXPECTED_TOOL_NAMES = {
     "query_traces",
     "count_traces",
     "view_trace",
+    "view_spans",
     "search_trace",
     "get_context_item",
     "synthesize_traces",

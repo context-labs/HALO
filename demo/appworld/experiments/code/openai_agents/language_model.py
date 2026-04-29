@@ -7,6 +7,11 @@ from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
 
+# HALO patch: per-request timeout for the API-predictor's OpenAI client. See
+# run.py for rationale; same value applied here for consistency.
+_OPENAI_REQUEST_TIMEOUT_SECONDS = 90.0
+
+
 class LanguageModel:
     def __init__(
         self,
@@ -18,9 +23,10 @@ class LanguageModel:
         self.settings = ModelSettings(**(settings or {}))
         self._model: OpenAIChatCompletionsModel | LitellmModel
         if type == "openai":
+            extras = {"timeout": _OPENAI_REQUEST_TIMEOUT_SECONDS, **(extras or {})}
             self._model = OpenAIChatCompletionsModel(
                 model=name,
-                openai_client=AsyncOpenAI(**(extras or {})),
+                openai_client=AsyncOpenAI(**extras),
             )
         elif type == "litellm":
             self._model = LitellmModel(model=name, **(extras or {}))
