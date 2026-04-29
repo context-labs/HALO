@@ -58,7 +58,7 @@ HALO is great at finding issues in production agent deployments. We find product
 
 ### Why an RLM?
 
-A general-purpose harness like Claude Code is the wrong tool for trace analysis. It isn’t because the model isn’t smart, but because traces can get extremely long, and you need a specialized toolkit in order to make observations about systemic agentic behavior. We noticed in our testing that harnesses like CC would often overfit to an error present in a single/few traces rather than generalize to harness-level problems. This led us to creating a specialized form of a RLM.
+A general-purpose harness like Claude Code is the wrong tool for trace analysis. This isn’t because the model isn’t smart, but because traces can get extremely long, and you need a specialized toolkit in order to make observations about systemic agentic behavior. We noticed in our testing that harnesses like CC would often overfit to an error present in a single/few traces rather than generalize to harness-level problems. This led us to creating a specialized form of a RLM.
 
 <img src="./assets//halo-rlm.png" alt="rlm"  style="border-radius:8px;" width="600px">
 
