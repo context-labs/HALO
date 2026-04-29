@@ -43,7 +43,7 @@
 HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains:
 - Information on HALO methodology.
 - A Python package that implements the core HALO-RLM engine. [View on PyPI](https://pypi.org/project/halo-engine/)
-- A demo project that shows how to build HALO loops for your agents using the Python package. [View demo](/demo)
+- A demo project that shows how to build HALO loops for your agents using the Python package. [View demo](/demo/openai-agents-sdk-demo/)
 - Benchmarking examples applying HALO to popular agent benchmarks. (View [AppWorld](#appworld)).
 
 ## HALO Loop
@@ -51,35 +51,43 @@ HALO (Hierarchical Agent Loop Optimization) is a methodology for building recurs
 The core HALO loop is suprisingly simple:
 
 1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing.
-2. Feed traces in the HALO RLM.
-3. The RLM decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
-4. This report is then fed to a coding agent like Cursor or Claude Code, which is responsible for generating and applying a set of changes to your harness to improve performance.
-5. The harness is then re-deployed, more traces are gathered, and the cycle repeats again.
+2. Feed traces into HALO-RLM engine.
+3. The engine decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
+4. This report is fed into a coding agent like Cursor or Claude Code to generate and apply a set of changes to your harness.
+5. The harness is then re-deployed, more traces are gathered, and the cycle repeats.
 
-HALO is great at finding issues in production agent deployments. We find production environments tend to generate more data with higher variance across executions, creating the type of issues that HALO’s RLM-decomposition is great at spotting.
-
-## Install
-
-Install the HALO engine + CLI from PyPI:
-
-```bash
-pip install halo-engine
-
-# Verify
-halo --help
-```
-
-## Get Started
-
-For instructions on using the HALO loop with your OpenAI Agents SDK Agent, see our [integration guide](docs/integrations/openai-agents-sdk.md) to start gathering traces. Then, use the HALO [Python package](https://pypi.org/project/halo-engine/) to generate a report you can use to improve your agent. Included in the package is a [CLI](/halo_cli/README.md).
-
-For integration examples, we have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
+HALO is great at finding issues in production agent deployments. We find high-traffic environments tend to generate more data with higher variance across executions, creating the type of issues that HALO is great at identifying.
 
 ### Why an RLM?
 
 A general-purpose harness like Claude Code is the wrong tool for trace analysis. This isn’t because the model isn’t smart, but because traces can get extremely long, and you need a specialized toolkit in order to make observations about systemic agentic behavior. We noticed in our testing that harnesses like CC would often overfit to an error present in a single/few traces rather than generalize to harness-level problems. This led us to creating a specialized form of a RLM.
 
 <img src="./assets//halo-rlm.png" alt="rlm"  style="border-radius:8px;" width="600">
+
+## Get Started
+
+### Install
+
+Install the HALO engine + CLI from PyPI:
+
+```bash
+pip install halo-engine
+
+# Verify installation
+halo --help
+```
+
+### Usage
+
+1. [Integrate Tracing](docs/integrations/openai-agents-sdk.md)
+2. Collect traces by running your agent
+3. Run the HALO engine, see the [CLI](/halo_cli/README.md) docs for more info
+```bash
+export OPENAI_API_KEY=...
+halo path_to_your_traces.jsonl
+```
+
+We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
 
 ## Benchmarks
 
