@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import typer
-from loguru import logger
 from rich.console import Console
 from rich.rule import Rule
 
@@ -78,7 +77,7 @@ def _run(
 ) -> None:
     """Run the HALO engine against TRACE_PATH and stream output to stdout."""
     if not os.environ.get("OPENAI_API_KEY"):
-        logger.error("OPENAI_API_KEY not set; the engine needs real LLM access.")
+        typer.echo("OPENAI_API_KEY not set; the engine needs real LLM access.", err=True)
         raise typer.Exit(1)
     cfg = _make_config(model, max_depth, max_turns, max_parallel, instructions)
     asyncio.run(_stream(trace_path, prompt, cfg))

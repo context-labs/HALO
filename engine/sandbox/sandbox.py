@@ -26,7 +26,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, NotRequired, TypedDict
+from typing import ClassVar, TypedDict
 
 from engine.sandbox.models import CodeExecutionResult
 
@@ -335,12 +335,15 @@ async def _run_protocol(
 # ---------------------------------------------------------------------------
 
 
-class _RpcError(TypedDict):
-    """JSON-RPC 2.0 error object. ``data`` is optional in the spec."""
-
+class _RpcErrorRequired(TypedDict):
     code: int
     message: str
-    data: NotRequired[object]
+
+
+class _RpcError(_RpcErrorRequired, total=False):
+    """JSON-RPC 2.0 error object. ``data`` is optional in the spec."""
+
+    data: object
 
 
 class _ExecutionPayload(TypedDict):

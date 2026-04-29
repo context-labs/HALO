@@ -5,7 +5,7 @@ Wire your existing OpenAI Agents SDK app into HALO's trace pipeline. Drop in one
 
 ## Prereqs
 
-- Python 3.12+ and [uv](https://docs.astral.sh/uv/)
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/)
 - An OpenAI API key (`OPENAI_API_KEY`)
 
 ## Install
