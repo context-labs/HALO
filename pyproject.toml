@@ -1,6 +1,6 @@
 [project]
 name = "halo-engine"
-version = "0.1.1"
+version = "0.1.2"
 description = "HALO engine: LLM agent runtime over OTel trace data, with bundled CLI."
 requires-python = ">=3.10"
 readme = "README.md"
