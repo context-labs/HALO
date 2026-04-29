@@ -438,7 +438,7 @@ async def test_merge_rollups_across_chunks(tmp_path: Path, monkeypatch: pytest.M
     services and OR has_errors across them.
     """
     monkeypatch.setattr(TraceIndexBuilder, "SMALL_FILE_THRESHOLD", 0)
-    monkeypatch.setattr("os.cpu_count", lambda: 4)
+    monkeypatch.setattr("engine.traces.trace_index_builder._available_cpus", lambda: 4)
 
     spans: list[str] = []
 
