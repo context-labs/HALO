@@ -26,7 +26,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, NotRequired, TypedDict
 
 from engine.sandbox.models import CodeExecutionResult
 
@@ -247,6 +247,22 @@ class Sandbox:
                 stderr=f"sandbox runner failure: {exc}",
                 timed_out=False,
             )
+        except Exception as exc:
+            # Anything else — ``OSError`` from a spawn failure,
+            # ``json`` errors from a corrupt cache, surprising bugs in the
+            # driver itself — must not crash the agent loop. ``run_code``
+            # is a tool: the right behavior is to log the failure for
+            # operators and hand the agent a sad result it can recover
+            # from. ``BaseException`` (cancel/interrupt) is intentionally
+            # NOT caught here so user-initiated termination still works.
+            _logger.warning("sandbox.run_python failed unexpectedly: %r", exc)
+            await session.stop(hard=True)
+            return CodeExecutionResult(
+                exit_code=1,
+                stdout="",
+                stderr=f"sandbox unexpected failure: {exc!r}",
+                timed_out=False,
+            )
         except BaseException:
             await session.stop(hard=True)
             raise
@@ -314,12 +330,36 @@ async def _run_protocol(
 # ---------------------------------------------------------------------------
 
 
+class _RpcError(TypedDict):
+    """JSON-RPC 2.0 error object. ``data`` is optional in the spec."""
+
+    code: int
+    message: str
+    data: NotRequired[object]
+
+
+class _ExecutionPayload(TypedDict):
+    """Shape of the result dict returned by ``halo_bootstrap`` / ``halo_execute``."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 @dataclass
 class _RpcResult:
-    """One JSON-RPC response line, parsed for the caller."""
+    """One JSON-RPC response line, parsed for the caller.
+
+    ``result`` is the runner's payload — typed loosely as ``dict``
+    because the *caller* knows whether it expects an
+    ``_ExecutionPayload`` (bootstrap/execute) or a small ack
+    (mount_file). Caller-side validation in ``_result_from_rpc``
+    coerces to ``CodeExecutionResult`` with defaults so a malformed
+    runner reply can't crash the host.
+    """
 
     result: dict | None
-    error: dict | None
+    error: _RpcError | None
 
 
 class _RunnerSession:
@@ -658,50 +698,39 @@ def _normalize_pkg_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _resolve_required_wheels(pyodide_dir: Path) -> tuple[str, ...]:
+def _resolve_required_wheels(pyodide_dir: Path) -> list[str]:
     """Walk ``pyodide-lock.json`` from ``_REQUIRED_PACKAGES`` to wheel filenames.
 
-    The lockfile lists every package Pyodide ships with its WASM build,
-    keyed by PEP 503-normalized distribution name (``"numpy"``,
-    ``"python-dateutil"``, ``"pydantic-core"``). Each entry has a
-    ``"file_name"`` (the wheel) and ``"depends"`` (a list of names —
-    same form, with the occasional underscore leak). BFS the graph
-    from ``_REQUIRED_PACKAGES`` and collect every transitively-required
-    wheel filename. On a Pyodide bump, the package names stay stable
-    but the resolved filenames update automatically — no human
-    bookkeeping per release.
+    The lockfile keys ``packages`` by PEP 503-normalized distribution
+    name (``"numpy"``, ``"python-dateutil"``, ``"pydantic-core"``);
+    ``depends`` lists occasionally use the importable underscore form
+    (``"pydantic_core"``). Normalize once, then recursively collect
+    every ``file_name`` reachable from ``_REQUIRED_PACKAGES``. On a
+    Pyodide bump the resolved filenames update automatically — no
+    human bookkeeping per release.
     """
     lockfile = pyodide_dir / "pyodide-lock.json"
-    if not lockfile.is_file():
-        raise _ResolutionError(f"pyodide-lock.json missing at {lockfile}")
     try:
-        lock = json.loads(lockfile.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise _ResolutionError(f"failed to read {lockfile}: {exc}") from exc
-    packages = lock.get("packages")
-    if not isinstance(packages, dict):
-        raise _ResolutionError(f"{lockfile} has no 'packages' table")
-    by_norm = {_normalize_pkg_name(k): v for k, v in packages.items()}
+        packages_raw = json.loads(lockfile.read_text())["packages"]
+    except (OSError, json.JSONDecodeError, KeyError) as exc:
+        raise _ResolutionError(f"failed to read packages from {lockfile}: {exc}") from exc
 
-    seen: set[str] = set()
-    queue = [_normalize_pkg_name(p) for p in _REQUIRED_PACKAGES]
-    while queue:
-        name = queue.pop()
-        if name in seen:
-            continue
-        entry = by_norm.get(name)
+    packages = {_normalize_pkg_name(name): entry for name, entry in packages_raw.items()}
+    wheels: set[str] = set()
+
+    def collect(pkg_name: str) -> None:
+        entry = packages.get(_normalize_pkg_name(pkg_name))
         if entry is None:
-            raise _ResolutionError(f"{lockfile} has no entry for required package {name!r}")
-        seen.add(name)
+            raise _ResolutionError(f"{lockfile} has no entry for required package {pkg_name!r}")
+        if entry["file_name"] in wheels:
+            return  # dedup the diamond case (e.g., ``six`` reached twice)
+        wheels.add(entry["file_name"])
         for dep in entry.get("depends", []):
-            dep_norm = _normalize_pkg_name(dep)
-            if dep_norm not in seen:
-                queue.append(dep_norm)
+            collect(dep)
 
-    wheels = tuple(sorted(by_norm[name]["file_name"] for name in seen))
-    if not wheels:
-        raise _ResolutionError("resolved an empty wheel set — _REQUIRED_PACKAGES misconfigured")
-    return wheels
+    for pkg in _REQUIRED_PACKAGES:
+        collect(pkg)
+    return sorted(wheels)
 
 
 def _ensure_wheels(pyodide_dir: Path) -> None:
@@ -827,10 +856,8 @@ def _attach_deno_stderr(result: CodeExecutionResult, stderr_extra: bytes) -> Cod
     return result.model_copy(update={"stderr": result.stderr + sep + f"[deno stderr] {extra}"})
 
 
-def _format_rpc_error(context: str, error: dict) -> str:
-    code = error.get("code", "?")
-    message = error.get("message", "unknown")
-    return f"[{context}] runner error code={code}: {message}"
+def _format_rpc_error(context: str, error: _RpcError) -> str:
+    return f"[{context}] runner error code={error['code']}: {error['message']}"
 
 
 def _kill_process_group(pid: int) -> None:
