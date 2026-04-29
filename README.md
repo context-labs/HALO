@@ -40,7 +40,11 @@
 
 ## What is this?
 
-HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains information on HALO methodology, a [Python package](https://pypi.org/project/halo-engine/) that implements the core HALO RLM engine, a [demo project](/demo) that shows how to build HALO loops for your agents using the Python package, and a benchmarking example applying HALO to a popular agent benchmark ([AppWorld](#appworld)).
+HALO (Hierarchical Agent Loop Optimization) is a methodology for building recursively self-improving agent harnesses using [RLMs](https://github.com/alexzhang13/rlm). This repository contains:
+- Information on HALO methodology
+- A [Python package](https://pypi.org/project/halo-engine/) that implements the core HALO-RLM engine
+- A [demo project](/demo) that shows how to build HALO loops for your agents using the Python package
+- Benchmarking examples applying HALO to popular agent benchmarks ([AppWorld](#appworld)).
 
 ## HALO Loop
 
