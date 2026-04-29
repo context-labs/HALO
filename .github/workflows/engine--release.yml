@@ -68,9 +68,6 @@ jobs:
     runs-on: depot-ubuntu-latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
-    defaults:
-      run:
-        working-directory: engine
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +80,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Bump engine version
         id: bump
@@ -102,17 +99,14 @@ jobs:
         with:
           name: engine-release-manifests
           path: |
-            engine/pyproject.toml
-            engine/uv.lock
+            pyproject.toml
+            uv.lock
           retention-days: 1
 
   build:
     name: Build
     needs: [bump-version]
     runs-on: depot-ubuntu-latest
-    defaults:
-      run:
-        working-directory: engine
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +114,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: engine-release-manifests
-          path: engine/
+          path: .
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -131,7 +125,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Build distributions
         run: uv build
@@ -140,7 +134,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: halo-engine-dist
-          path: engine/dist/*
+          path: dist/*
           retention-days: 14
 
   publish:
@@ -154,9 +148,6 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/halo-engine/${{ needs.bump-version.outputs.new_version }}/
-    defaults:
-      run:
-        working-directory: engine
     steps:
       - uses: actions/checkout@v4
 
@@ -169,13 +160,13 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Download distribution artifact
         uses: actions/download-artifact@v4
         with:
           name: halo-engine-dist
-          path: engine/dist
+          path: dist
 
       - name: Publish to PyPI
         run: uv publish --trusted-publishing always
@@ -188,9 +179,6 @@ jobs:
     permissions:
       contents: write
       id-token: write # Required for OIDC-based Infisical auth
-    defaults:
-      run:
-        working-directory: engine
     steps:
       - name: Load Infisical secrets
         uses: Infisical/secrets-action@v1.0.15
@@ -218,7 +206,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: engine-release-manifests
-          path: engine/
+          path: .
 
       - name: Commit, tag, and push version bump
         env:

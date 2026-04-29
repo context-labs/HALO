@@ -12,5 +12,9 @@ __pycache__/
 .env
 !.env.example
 
-# RLM harness runtime artefacts — indexes, conversations, history
-rlm/data/
+# Engine runtime artefacts
+.cache/
+.pytest_cache/
+test-results/
+*.engine-index.jsonl
+*.engine-index.meta.json

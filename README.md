@@ -54,7 +54,7 @@ HALO is great at finding issues in production agent deployments. We find product
 
 ## Get Started
 
-For instructions on using the HALO loop with your OpenAI Agents SDK Agent, see our [integration guide](docs/integrations/openai-agents-sdk.md) to start gathering traces. Then, use the HALO [Python package](ttps://pypi.org/project/inference-catalyst-tracing/) to generate a report you can use to improve your agent. Included in the package is a [CLI](/cli/README.md). 
+For instructions on using the HALO loop with your OpenAI Agents SDK Agent, see our [integration guide](docs/integrations/openai-agents-sdk.md) to start gathering traces. Then, use the HALO [Python package](ttps://pypi.org/project/inference-catalyst-tracing/) to generate a report you can use to improve your agent. Included in the package is a [CLI](/halo_cli/README.md). 
 
 For integration examples, we have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
 

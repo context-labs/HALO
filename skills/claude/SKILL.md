@@ -23,7 +23,7 @@ Do **not** invoke this skill for:
 
 **Halo Engine is a trace-exploration runtime.** It's an LLM agent that has tools to read a JSONL trace dataset and answer questions about it. It is *not* a code-modification tool, *not* a fix proposer, and *not* a verifier.
 
-The engine's hard-coded root system prompt (`engine/engine/agents/prompt_templates.py`) starts with:
+The engine's hard-coded root system prompt (`engine/agents/prompt_templates.py`) starts with:
 
 > "You are the root agent in the HALO engine. You explore OTel trace data using the tools the runtime provides."
 
@@ -49,11 +49,11 @@ Prereqs:
 Install the engine + CLI once:
 
 ```bash
-cd $HALO/cli
-uv sync                       # creates .venv with halo-engine and halo-cli
+cd $HALO
+uv sync                       # creates .venv with halo-engine (CLI bundled)
 ```
 
-That's it for the engine side. The CLI entry point is `halo-engine` (registered by `cli/pyproject.toml`).
+That's it for the engine side. The CLI entry point is `halo-engine` (registered by `pyproject.toml`).
 
 ## Trace-format prerequisites — what the harness must produce
 
@@ -96,7 +96,7 @@ If the user has a harness that doesn't yet emit traces, the canonical setup patt
   ```
 - Call `processor.shutdown()` in a `finally` block before exit so the file flushes.
 
-For non-SDK harnesses, refer to the schema in `$HALO/engine/engine/traces/models/canonical_span.py` — the engine accepts any JSONL that matches that shape.
+For non-SDK harnesses, refer to the schema in `$HALO/engine/traces/models/canonical_span.py` — the engine accepts any JSONL that matches that shape.
 
 **Don't accidentally break the mechanism:**
 
@@ -104,7 +104,7 @@ For non-SDK harnesses, refer to the schema in `$HALO/engine/engine/traces/models
 - Don't strip the `inference.*` keys from `tracing.py` — those are what the engine indexes on. If a span loses `inference.project_id`, the engine still parses it (the model is `extra="allow"`) but filters and overviews silently drop it.
 - Don't use `OPENAI_AGENTS_DISABLE_TRACING=1` — same effect as `set_tracing_disabled`. The engine's default OpenAI-dashboard uploader is what we want to disable, *not* tracing as a whole. The pattern is "clear default, add HALO's processor on top".
 
-For deeper format details: `$HALO/docs/integrations/openai-agents-sdk.md` and `$HALO/engine/engine/traces/models/canonical_span.py`.
+For deeper format details: `$HALO/docs/integrations/openai-agents-sdk.md` and `$HALO/engine/traces/models/canonical_span.py`.
 
 ## The HALO loop — the workflow you should follow
 
@@ -119,7 +119,7 @@ Run the harness once and capture eval results. Note the score so you can measure
 Invoke the CLI with a **question**, not a command:
 
 ```bash
-cd $HALO/cli
+cd $HALO
 uv run halo-engine /absolute/path/to/traces.jsonl \
     --prompt "What are the most common failure modes across the failed traces? For each, give me trace_id evidence and the precise error string." \
     --model gpt-4.1-2025-04-14 \
@@ -223,11 +223,10 @@ If the engine OOMs on a `view_trace` of a long trace, that's a sign the trace is
 - `$HALO/README.md` — top-level project overview.
 - `$HALO/docs/integrations/openai-agents-sdk.md` — canonical trace format spec; how to wire a harness from scratch.
 - `$HALO/docs/engine-architecture-plan.md` — engine's design (input/output contracts, package layout).
-- `$HALO/engine/README.md` — engine quickstart.
-- `$HALO/engine/engine/tools/trace_tools.py` — tool class definitions (with up-to-date descriptions visible to the engine LLM).
-- `$HALO/engine/engine/traces/models/canonical_span.py` — `SpanRecord` schema.
-- `$HALO/engine/engine/traces/models/trace_query_models.py` — argument and result models for every trace tool (useful for understanding what each tool can take/return).
-- `$HALO/cli/halo_cli/main.py` — full set of CLI options and the default agent instructions.
+- `$HALO/engine/tools/trace_tools.py` — tool class definitions (with up-to-date descriptions visible to the engine LLM).
+- `$HALO/engine/traces/models/canonical_span.py` — `SpanRecord` schema.
+- `$HALO/engine/traces/models/trace_query_models.py` — argument and result models for every trace tool (useful for understanding what each tool can take/return).
+- `$HALO/halo_cli/main.py` — full set of CLI options and the default agent instructions.
 - `$HALO/demo/openai-agents-sdk-demo/` — minimal working harness reference (single-agent, three file tools).
 - `$HALO/demo/appworld/` — a real benchmark integration with parallel runs, eval reports, and `HALO_PATCH.md` documenting the per-harness changes needed; useful as a worked example of the loop.
 - `$HALO/demo/appworld/HALO_PATCH.md` — concrete patches a harness might need to emit valid traces.
@@ -236,10 +235,10 @@ If the engine OOMs on a `view_trace` of a long trace, that's a sign the trace is
 
 ```bash
 # One-time install
-cd $HALO/cli && uv sync
+cd $HALO && uv sync
 
 # Diagnose an existing trace file
-cd $HALO/cli
+cd $HALO
 uv run halo-engine /abs/path/traces.jsonl \
     --prompt "Your diagnostic question, framed as data inquiry." \
     --model gpt-4.1-2025-04-14 \

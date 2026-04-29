@@ -40,9 +40,9 @@ durable code is what survives the lifecycle.
 **Do not use this kit for:**
 
 - Plain assertions about a single pure function — write a unit test under
-  `engine/tests/unit/`.
+  `tests/unit/`.
 - Verifying real-LLM behavior — write a live test under
-  `engine/tests/integration/` (requires `OPENAI_API_KEY`).
+  `tests/integration/` (requires `OPENAI_API_KEY`).
 - Anything that doesn't go through `stream_engine_async` /
   `run_engine_async` — that's the only public surface this kit exercises.
 
@@ -85,7 +85,7 @@ You **MUST**:
    `make_default_config`, `run_with_fake`. They compose. If you think you
    need to mock something the kit doesn't provide, the seam is wrong — stop
    and report that, don't reach for `unittest.mock`.
-3. **Stay read-only on `engine/engine/**`.** You are testing, not fixing.
+3. **Stay read-only on `engine/**`.** You are testing, not fixing.
    When a probe surfaces a bug, write down what you observed and move on.
    Do not modify production code in this pass.
 4. **Print one line per check** in the format
@@ -166,7 +166,7 @@ You **MUST NOT**:
    `probe_*` functions, `main` that runs them and exits).
 
 4. **Run it:**
-   `cd engine && uv run python -m tests.probes.probe_<topic>`
+   `uv run python -m tests.probes.probe_<topic>`
 
 5. **Read the output.** If a check failed, ask whether the FAIL is a
    true bug or a flaw in your probe. Be honest. A `FAIL` is never
@@ -307,7 +307,7 @@ For **every FAIL**, one structured entry in this exact shape:
   and useful — it tells the reader to verify before applying.
 - **Repro:** *(optional, only when the probe file is left behind)* the
   one-line command to re-run the failing check, e.g.
-  `cd engine && uv run python -m tests.probes.probe_<topic>`. Skip this
+  `uv run python -m tests.probes.probe_<topic>`. Skip this
   field for ephemeral probes that you've deleted.
 ```
 

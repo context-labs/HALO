@@ -61,9 +61,11 @@ def _run(
         exists=True,
         readable=True,
         dir_okay=False,
-        help="JSONL trace file (e.g. engine/tests/fixtures/realistic_traces.jsonl).",
+        help="JSONL trace file (e.g. tests/fixtures/realistic_traces.jsonl).",
     ),
-    prompt: str = typer.Option(..., "--prompt", "-p", help="User prompt to send to the root agent."),
+    prompt: str = typer.Option(
+        ..., "--prompt", "-p", help="User prompt to send to the root agent."
+    ),
     model: str = typer.Option("gpt-5.4-mini", "--model", "-m"),
     max_depth: int = typer.Option(1, "--max-depth", min=0),
     max_turns: int = typer.Option(8, "--max-turns", min=1),

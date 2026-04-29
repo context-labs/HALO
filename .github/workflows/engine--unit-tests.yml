@@ -5,11 +5,23 @@ on:
     branches: [main]
     paths:
       - "engine/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Taskfile.yml"
+      - "pyrightconfig.json"
       - ".github/workflows/engine--unit-tests.yml"
   push:
     branches: [main]
     paths:
       - "engine/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Taskfile.yml"
+      - "pyrightconfig.json"
       - ".github/workflows/engine--unit-tests.yml"
   workflow_call:
 
@@ -28,9 +40,6 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: depot-ubuntu-latest
-    defaults:
-      run:
-        working-directory: engine
 
     steps:
       - name: Checkout code
@@ -45,7 +54,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-          cache-dependency-glob: "engine/uv.lock"
+          cache-dependency-glob: "uv.lock"
 
       - name: Install go-task
         uses: arduino/setup-task@v2
@@ -62,7 +71,7 @@ jobs:
         uses: mikepenz/action-junit-report@v5
         if: always()
         with:
-          report_paths: "engine/test-results/unit.xml"
+          report_paths: "test-results/unit.xml"
           update_check: true
           detailed_summary: true
           include_passed: true

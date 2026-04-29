@@ -2,13 +2,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-ENGINE_ROOT="$REPO_ROOT/engine"
 
 staged_files=()
 
 while IFS= read -r file; do
-  if [[ "$file" =~ ^engine/.*\.(py|pyi)$ ]]; then
-    staged_files+=("${file#engine/}")
+  if [[ "$file" =~ \.(py|pyi)$ ]]; then
+    staged_files+=("$file")
   fi
 done < <(git diff --cached --name-only --diff-filter=ACMR)
 
@@ -16,9 +15,9 @@ if [ "${#staged_files[@]}" -eq 0 ]; then
   exit 0
 fi
 
-cd "$ENGINE_ROOT"
+cd "$REPO_ROOT"
 task format:files -- "${staged_files[@]}" || {
-  echo "pre-commit: failed to format staged engine files."
+  echo "pre-commit: failed to format staged Python files."
   exit 1
 }
 
