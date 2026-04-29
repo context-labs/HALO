@@ -1,0 +1,12 @@
+# Include all Python source dirs
+recursive-include code *.py
+recursive-include configs *.py
+recursive-include prompts *.py
+
+# Include non-Python files in prompts/configs
+recursive-include prompts *.yaml *.json *.txt
+recursive-include configs *.jsonnet *.jsonnet.j2
+
+# Always include README and pyproject.toml
+include README.md
+include pyproject.toml
