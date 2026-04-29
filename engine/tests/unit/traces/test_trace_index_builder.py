@@ -557,9 +557,9 @@ async def test_small_file_uses_inline_path_no_pool_spawn(
     trace_path.write_bytes(src.read_bytes())
 
     def _boom(*args, **kwargs):
-        raise AssertionError("Pool should not be spawned for small files")
+        raise AssertionError("ProcessPoolExecutor should not be spawned for small files")
 
-    monkeypatch.setattr("engine.traces.trace_index_builder.Pool", _boom)
+    monkeypatch.setattr("engine.traces.trace_index_builder.ProcessPoolExecutor", _boom)
 
     index_path = await TraceIndexBuilder.ensure_index_exists(
         trace_path=trace_path,
