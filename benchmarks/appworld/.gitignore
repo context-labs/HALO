@@ -1,0 +1,17 @@
+# Local AppWorld dataset (downloaded via `appworld download data`).
+.data/
+
+# Local clone of the AppWorld upstream repo, used to provide LFS-pulled
+# `.bundle` files when installing in editable mode. See README.
+.appworld-src/
+
+# Per-task outputs written by AppWorld during a run.
+runs/
+
+# Per-run trace files (`<task_id>.jsonl`). Upload to HuggingFace as
+# benchmark fixtures; don't commit large data to git.
+traces/
+
+# Local stdout dumps from running batch / single-task scripts.
+.agent-run.log
+.batch-run.log
