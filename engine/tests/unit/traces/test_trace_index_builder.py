@@ -185,3 +185,387 @@ async def test_ensure_index_reuses_when_trace_unchanged(tmp_path: Path, fixtures
     )
     assert meta_path.stat().st_mtime_ns == first_meta_mtime
     assert index_path.stat().st_mtime_ns == first_index_mtime
+
+
+def test_row_accumulator_merge_in_combines_partial_state() -> None:
+    from engine.traces.trace_index_builder import _RowAccumulator
+
+    a = _RowAccumulator(trace_id="t-1")
+    a.byte_offsets = [0, 100]
+    a.byte_lengths = [80, 120]
+    a.span_count = 2
+    a.start_time = "2026-04-23T05:00:00.000000000Z"
+    a.end_time = "2026-04-23T05:00:01.000000000Z"
+    a.has_errors = False
+    a.service_names = {"svc-a"}
+    a.model_names = {"model-x"}
+    a.agent_names = {"agent-a"}
+    a.total_input_tokens = 100
+    a.total_output_tokens = 50
+    a.project_id = "prj_test"
+
+    b = _RowAccumulator(trace_id="t-1")
+    b.byte_offsets = [300, 500]
+    b.byte_lengths = [60, 90]
+    b.span_count = 2
+    b.start_time = "2026-04-23T05:00:02.000000000Z"
+    b.end_time = "2026-04-23T05:00:03.000000000Z"
+    b.has_errors = True
+    b.service_names = {"svc-b"}
+    b.model_names = {"model-y"}
+    b.agent_names = {"agent-b"}
+    b.total_input_tokens = 30
+    b.total_output_tokens = 20
+    b.project_id = None
+
+    a.merge_in(b)
+
+    assert a.byte_offsets == [0, 100, 300, 500]
+    assert a.byte_lengths == [80, 120, 60, 90]
+    assert a.span_count == 4
+    assert a.start_time == "2026-04-23T05:00:00.000000000Z"
+    assert a.end_time == "2026-04-23T05:00:03.000000000Z"
+    assert a.has_errors is True
+    assert a.service_names == {"svc-a", "svc-b"}
+    assert a.model_names == {"model-x", "model-y"}
+    assert a.agent_names == {"agent-a", "agent-b"}
+    assert a.total_input_tokens == 130
+    assert a.total_output_tokens == 70
+    assert a.project_id == "prj_test"
+
+
+def test_index_line_offsets_returns_non_empty_line_byte_ranges(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    payload = b'{"a":1}\n{"b":2}\n\n{"c":3}\n'
+    trace_path.write_bytes(payload)
+
+    offsets = _index_line_offsets(trace_path)
+
+    assert offsets == [(0, 8), (8, 8), (17, 8)]
+
+
+def test_index_line_offsets_empty_file_returns_empty_list(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_bytes(b"")
+    assert _index_line_offsets(trace_path) == []
+
+
+def test_index_line_offsets_handles_missing_trailing_newline(tmp_path: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets
+
+    trace_path = tmp_path / "t.jsonl"
+    trace_path.write_bytes(b'{"a":1}\n{"b":2}')
+
+    offsets = _index_line_offsets(trace_path)
+    assert offsets == [(0, 8), (8, 7)]
+
+
+def test_split_into_chunks_even_division() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(i, 1) for i in range(8)]
+    chunks = _split_into_chunks(items, 4)
+    assert chunks == [
+        [(0, 1), (1, 1)],
+        [(2, 1), (3, 1)],
+        [(4, 1), (5, 1)],
+        [(6, 1), (7, 1)],
+    ]
+
+
+def test_split_into_chunks_uneven_division_keeps_order() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(i, 1) for i in range(10)]
+    chunks = _split_into_chunks(items, 3)
+    flat = [t for c in chunks for t in c]
+    assert flat == items
+    assert all(len(c) > 0 for c in chunks)
+    assert sum(len(c) for c in chunks) == 10
+
+
+def test_split_into_chunks_caps_n_at_list_length() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    items = [(0, 1), (1, 1)]
+    chunks = _split_into_chunks(items, 8)
+    assert len(chunks) == 2
+    assert chunks == [[(0, 1)], [(1, 1)]]
+
+
+def test_split_into_chunks_empty_input_returns_empty_list() -> None:
+    from engine.traces.trace_index_builder import _split_into_chunks
+
+    assert _split_into_chunks([], 4) == []
+
+
+def test_process_chunk_accumulates_spans_by_trace_id(tmp_path: Path, fixtures_dir: Path) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets, _process_chunk
+
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    line_offsets = _index_line_offsets(trace_path)
+    result = _process_chunk(trace_path, line_offsets)
+
+    assert set(result.keys()) == {"t-aaaa", "t-bbbb", "t-cccc"}
+    bb = result["t-bbbb"]
+    assert bb.span_count == 2
+    assert bb.has_errors is True
+    assert "gpt-5.4" in bb.model_names
+    assert bb.total_input_tokens == 200
+    assert bb.total_output_tokens == 40
+
+
+def test_process_chunk_partial_chunk_only_sees_its_lines(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
+    from engine.traces.trace_index_builder import _index_line_offsets, _process_chunk
+
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    line_offsets = _index_line_offsets(trace_path)
+    first_two = _process_chunk(trace_path, line_offsets[:2])
+
+    assert set(first_two.keys()) == {"t-aaaa"}
+    assert first_two["t-aaaa"].span_count == 2
+
+
+def test_merge_accumulators_preserves_chunk_order_for_byte_offsets() -> None:
+    from engine.traces.trace_index_builder import _merge_accumulators, _RowAccumulator
+
+    chunk0_a = _RowAccumulator(trace_id="t-1")
+    chunk0_a.byte_offsets = [0]
+    chunk0_a.byte_lengths = [50]
+    chunk0_a.span_count = 1
+    chunk0_a.start_time = "2026-04-23T05:00:00.000000000Z"
+    chunk0_a.end_time = "2026-04-23T05:00:00.500000000Z"
+
+    chunk1_a = _RowAccumulator(trace_id="t-1")
+    chunk1_a.byte_offsets = [200]
+    chunk1_a.byte_lengths = [60]
+    chunk1_a.span_count = 1
+    chunk1_a.start_time = "2026-04-23T05:00:01.000000000Z"
+    chunk1_a.end_time = "2026-04-23T05:00:01.500000000Z"
+
+    chunk1_b = _RowAccumulator(trace_id="t-2")
+    chunk1_b.byte_offsets = [300]
+    chunk1_b.byte_lengths = [40]
+    chunk1_b.span_count = 1
+    chunk1_b.start_time = "2026-04-23T05:00:02.000000000Z"
+    chunk1_b.end_time = "2026-04-23T05:00:02.500000000Z"
+
+    per_worker = [
+        {"t-1": chunk0_a},
+        {"t-1": chunk1_a, "t-2": chunk1_b},
+    ]
+    merged = _merge_accumulators(per_worker)
+
+    assert set(merged.keys()) == {"t-1", "t-2"}
+    assert merged["t-1"].byte_offsets == [0, 200]
+    assert merged["t-1"].span_count == 2
+    assert merged["t-2"].byte_offsets == [300]
+
+
+def test_merge_accumulators_empty_input_returns_empty_dict() -> None:
+    from engine.traces.trace_index_builder import _merge_accumulators
+
+    assert _merge_accumulators([]) == {}
+    assert _merge_accumulators([{}, {}]) == {}
+
+
+@pytest.mark.asyncio
+async def test_parallel_matches_inline_byte_for_byte(
+    tmp_path: Path, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = fixtures_dir / "medium_traces.jsonl"
+
+    parallel_dir = tmp_path / "parallel"
+    parallel_dir.mkdir()
+    parallel_trace = parallel_dir / "traces.jsonl"
+    parallel_trace.write_bytes(src.read_bytes())
+    parallel_index = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=parallel_trace,
+        config=TraceIndexConfig(),
+    )
+
+    inline_dir = tmp_path / "inline"
+    inline_dir.mkdir()
+    inline_trace = inline_dir / "traces.jsonl"
+    inline_trace.write_bytes(src.read_bytes())
+    monkeypatch.setattr(TraceIndexBuilder, "SMALL_FILE_THRESHOLD", 10_000_000)
+    inline_index = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=inline_trace,
+        config=TraceIndexConfig(),
+    )
+
+    assert parallel_index.read_bytes() == inline_index.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_byte_offsets_within_trace_are_in_file_order(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
+    src = fixtures_dir / "medium_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+
+    rows = [TraceIndexRow.model_validate_json(line) for line in index_path.read_text().splitlines()]
+    for row in rows:
+        assert row.byte_offsets == sorted(row.byte_offsets), (
+            f"byte_offsets out of file order for trace {row.trace_id}: {row.byte_offsets}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_merge_rollups_across_chunks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trace ``t-split`` has 4 spans deliberately scattered across the file.
+
+    With ``SMALL_FILE_THRESHOLD = 0`` and 4 cpus, the four lines belonging to
+    ``t-split`` end up in different chunks; the merge step must union models and
+    services and OR has_errors across them.
+    """
+    monkeypatch.setattr(TraceIndexBuilder, "SMALL_FILE_THRESHOLD", 0)
+    monkeypatch.setattr("engine.traces.trace_index_builder._available_cpus", lambda: 4)
+
+    spans: list[str] = []
+
+    def _line(
+        *,
+        trace_id: str,
+        span_idx: int,
+        svc: str,
+        model: str | None,
+        in_tok: int,
+        out_tok: int,
+        error: bool,
+    ) -> str:
+        attrs: dict = {
+            "openinference.span.kind": "AGENT" if model is None else "LLM",
+            "inference.export.schema_version": 1,
+            "inference.project_id": "prj_split",
+            "inference.observation_kind": "AGENT" if model is None else "LLM",
+            "inference.agent_name": svc,
+        }
+        if model is not None:
+            attrs["inference.llm.model_name"] = model
+            attrs["inference.llm.input_tokens"] = in_tok
+            attrs["inference.llm.output_tokens"] = out_tok
+        line = {
+            "trace_id": trace_id,
+            "span_id": f"s-{trace_id}-{span_idx}",
+            "parent_span_id": "" if span_idx == 0 else f"s-{trace_id}-{span_idx - 1}",
+            "trace_state": "",
+            "name": "step",
+            "kind": "SPAN_KIND_INTERNAL",
+            "start_time": f"2026-04-23T05:00:{span_idx:02d}.000000000Z",
+            "end_time": f"2026-04-23T05:00:{span_idx + 1:02d}.000000000Z",
+            "status": {
+                "code": "STATUS_CODE_ERROR" if error else "STATUS_CODE_OK",
+                "message": "",
+            },
+            "resource": {"attributes": {"service.name": svc}},
+            "scope": {"name": "@test/scope", "version": "0.0.1"},
+            "attributes": attrs,
+        }
+        return json.dumps(line, separators=(",", ":"))
+
+    for i in range(16):
+        if i % 4 == 0:
+            spans.append(
+                _line(
+                    trace_id="t-split",
+                    span_idx=i // 4,
+                    svc=f"svc-{i // 4}",
+                    model=f"model-{i // 4}" if i > 0 else None,
+                    in_tok=10 * (i // 4),
+                    out_tok=5 * (i // 4),
+                    error=(i // 4 == 2),
+                )
+            )
+        else:
+            spans.append(
+                _line(
+                    trace_id=f"t-other-{i}",
+                    span_idx=0,
+                    svc="svc-other",
+                    model=None,
+                    in_tok=0,
+                    out_tok=0,
+                    error=False,
+                )
+            )
+
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text("\n".join(spans) + "\n")
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    rows = {
+        TraceIndexRow.model_validate_json(line).trace_id: TraceIndexRow.model_validate_json(line)
+        for line in index_path.read_text().splitlines()
+    }
+
+    split = rows["t-split"]
+    assert split.span_count == 4
+    assert split.has_errors is True
+    assert set(split.service_names) == {"svc-0", "svc-1", "svc-2", "svc-3"}
+    assert set(split.model_names) == {"model-1", "model-2", "model-3"}
+    assert split.total_input_tokens == 10 + 20 + 30
+    assert split.total_output_tokens == 5 + 10 + 15
+    assert split.byte_offsets == sorted(split.byte_offsets)
+
+
+@pytest.mark.asyncio
+async def test_build_index_empty_file_writes_empty_index(tmp_path: Path) -> None:
+    trace_path = tmp_path / "empty.jsonl"
+    trace_path.write_bytes(b"")
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta_path = TraceIndexBuilder._meta_path_for(index_path)
+
+    assert index_path.read_text() == ""
+    meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
+    assert meta.trace_count == 0
+    assert meta.source_size == 0
+
+
+@pytest.mark.asyncio
+async def test_small_file_uses_inline_path_no_pool_spawn(
+    tmp_path: Path, fixtures_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tiny fixture is well under SMALL_FILE_THRESHOLD; building must not spawn a Pool."""
+    src = fixtures_dir / "tiny_traces.jsonl"
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes(src.read_bytes())
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("ProcessPoolExecutor should not be spawned for small files")
+
+    monkeypatch.setattr("engine.traces.trace_index_builder.ProcessPoolExecutor", _boom)
+
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=trace_path,
+        config=TraceIndexConfig(),
+    )
+    meta = TraceIndexMeta.model_validate_json(
+        TraceIndexBuilder._meta_path_for(index_path).read_text()
+    )
+    assert meta.trace_count == 3
