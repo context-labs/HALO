@@ -425,8 +425,19 @@ async def _run_session(
 
     A single function rather than a class because the subprocess is
     one-shot per ``run_python`` call: every call opens a fresh process,
-    sends a deterministic sequence, collects the result, sends shutdown,
-    waits. No state worth carrying between calls.
+    sends a deterministic sequence, collects the result, shuts the
+    runner down, drains stderr, waits. No state worth carrying between
+    calls.
+
+    Cleanup ownership: ``_drive`` is pure protocol — it returns a result
+    or raises. This function owns the subprocess lifecycle, so the
+    shutdown frame and ``proc.wait`` / ``stderr_task`` reaping happen
+    here exactly once per session, regardless of which ``_drive`` exit
+    path produced the result. Doing this inside ``_drive`` left the
+    runner orphaned on early-return paths (mount RPC error, bootstrap
+    error, bootstrap exit_code != 0): the process stayed alive waiting
+    for stdin, ``stderr_task`` waited forever for EOF, and the call
+    hung.
     """
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -442,8 +453,6 @@ async def _run_session(
                 _drive(proc, mounts, user_code),
                 timeout=_TIMEOUT_SECONDS,
             )
-            stderr_extra = await stderr_task
-            return _attach_deno_stderr(result, stderr_extra)
         except asyncio.TimeoutError:
             _kill_process_group(proc.pid)
             await proc.wait()
@@ -454,6 +463,22 @@ async def _run_session(
                 stderr=stderr_bytes.decode("utf-8", errors="replace"),
                 timed_out=True,
             )
+        # _drive returned a result by any path (happy or early-return).
+        # Tell the runner to exit so ``proc.wait`` and ``stderr_task``
+        # can resolve. Best-effort send: the runner may already be dead
+        # (e.g., crashed mid-response), in which case ``BrokenPipeError``
+        # is harmless — we still have the result.
+        try:
+            await _send(proc, {"jsonrpc": "2.0", "method": "shutdown"})
+        except (BrokenPipeError, ConnectionError):
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            _kill_process_group(proc.pid)
+            await proc.wait()
+        stderr_extra = await stderr_task
+        return _attach_deno_stderr(result, stderr_extra)
     except BaseException:
         _kill_process_group(proc.pid)
         await proc.wait()
@@ -469,7 +494,14 @@ async def _drive(
     mounts: list[tuple[Path, str]],
     user_code: str,
 ) -> CodeExecutionResult:
-    """Send the deterministic mount → bootstrap → execute sequence over JSON-RPC."""
+    """Send the deterministic mount → bootstrap → execute sequence over JSON-RPC.
+
+    Pure protocol: returns a ``CodeExecutionResult`` representing the
+    outcome of the runner work, or raises on a protocol-level failure
+    (timeout, runner died mid-call, ready sentinel never arrived).
+    Subprocess lifecycle (shutdown frame, ``proc.wait``, stderr drain)
+    is the caller's responsibility — see ``_run_session``.
+    """
     assert proc.stdin is not None and proc.stdout is not None
 
     await _read_ready(proc.stdout)
@@ -521,21 +553,6 @@ async def _drive(
 
     request_id += 1
     run = await _call(proc, "execute", {"code": user_code}, request_id)
-    # Shutdown is best-effort cleanup — the execute result is already in
-    # hand. A ``BrokenPipeError`` here means the runner exited between
-    # responding and reading our shutdown frame; the process is already
-    # gone, there's nothing to shut down, and propagating the OSError
-    # would discard a perfectly good ``CodeExecutionResult``.
-    try:
-        await _send(proc, {"jsonrpc": "2.0", "method": "shutdown"})
-    except (BrokenPipeError, ConnectionError):
-        pass
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=5.0)
-    except asyncio.TimeoutError:
-        _kill_process_group(proc.pid)
-        await proc.wait()
-
     if run.error is not None:
         return CodeExecutionResult(
             exit_code=1,
