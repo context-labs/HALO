@@ -11,8 +11,6 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
-from engine.sandbox.linux_client import LinuxClient
-from engine.sandbox.models import PythonRuntimeMounts, SandboxConfig
 from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
 
@@ -57,19 +55,26 @@ def _semaphores() -> dict[int, asyncio.Semaphore]:
 
 
 def _sandbox(tmp_path: Path) -> Sandbox:
-    bwrap = tmp_path / "bwrap"
-    bwrap.write_text("")
-    python = tmp_path / "bin" / "python"
-    python.parent.mkdir()
-    python.write_text("")
+    """Stub Sandbox: this test only checks tool registration, never invokes the sandbox."""
+    deno = tmp_path / "deno"
+    deno.write_text("")
+    runner = tmp_path / "runner.js"
+    runner.write_text("")
+    runtime = tmp_path / "pyodide_runtime.py"
+    runtime.write_text("")
+    engine_init = tmp_path / "engine_init.py"
+    engine_init.write_text("")
+    traces_pkg = tmp_path / "traces"
+    traces_pkg.mkdir()
+    deno_dir = tmp_path / "deno-cache"
+    deno_dir.mkdir()
     return Sandbox(
-        client=LinuxClient(executable=bwrap),
-        runtime_mounts=PythonRuntimeMounts(
-            python_executable=python,
-            runtime_paths=(),
-            library_paths=(),
-        ),
-        config=SandboxConfig(),
+        deno_executable=deno,
+        runner_path=runner,
+        runtime_path=runtime,
+        engine_init_path=engine_init,
+        traces_pkg_dir=traces_pkg,
+        deno_dir=deno_dir,
     )
 
 

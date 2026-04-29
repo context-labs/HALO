@@ -33,6 +33,7 @@ from tests.probes.probe_kit import (
     isolated_trace_copy,
     make_assistant_text,
     make_default_config,
+    make_root_context,
     run_with_fake,
 )
 
@@ -85,6 +86,7 @@ async def probe_depth_zero_no_subagent_tool() -> None:
         engine_config=cfg,
         run_state=run_state,
         agent_execution=root_exec,
+        agent_context=make_root_context(cfg),
     )
     names = _tool_names(sdk_agent.tools)
     _check(
@@ -110,6 +112,7 @@ async def probe_depth_one_root_has_subagent_tool() -> None:
         engine_config=cfg,
         run_state=run_state,
         agent_execution=root_exec,
+        agent_context=make_root_context(cfg),
     )
     names = _tool_names(sdk_agent.tools)
     _check(
@@ -138,6 +141,7 @@ async def probe_depth_one_subagent_has_no_subagent_tool() -> None:
         run_state=run_state,
         semaphores_by_depth=semaphore,
         parent_execution=parent,
+        parent_context=make_root_context(cfg),
     )
     names = _tool_names(depth1_tools)
     _check(
@@ -163,14 +167,23 @@ async def probe_depth_two_intermediate_has_subagent_tool() -> None:
         parent_agent_id=None,
         parent_tool_call_id=None,
     )
+    parent_context = make_root_context(cfg)
     d1 = _tool_names(
         _child_tools_for_depth(
-            depth=1, run_state=run_state, semaphores_by_depth=semaphore, parent_execution=parent
+            depth=1,
+            run_state=run_state,
+            semaphores_by_depth=semaphore,
+            parent_execution=parent,
+            parent_context=parent_context,
         )
     )
     d2 = _tool_names(
         _child_tools_for_depth(
-            depth=2, run_state=run_state, semaphores_by_depth=semaphore, parent_execution=parent
+            depth=2,
+            run_state=run_state,
+            semaphores_by_depth=semaphore,
+            parent_execution=parent,
+            parent_context=parent_context,
         )
     )
     _check(
