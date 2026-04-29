@@ -44,11 +44,13 @@ async def test_synthesize_traces_through_sdk_adapter_live(
         parent_execution=root_execution(cfg),
     )
 
-    async with asyncio.timeout(LIVE_TIMEOUT_SECONDS):
-        raw = await tools["synthesize_traces"].on_invoke_tool(
+    raw = await asyncio.wait_for(
+        tools["synthesize_traces"].on_invoke_tool(
             MagicMock(spec=SdkToolContext),
             '{"trace_ids": ["t-bbbb"], "focus": "errors"}',
-        )
+        ),
+        LIVE_TIMEOUT_SECONDS,
+    )
     payload = json.loads(raw)
     assert isinstance(payload["summary"], str)
     assert payload["summary"].strip(), "live synthesize_traces returned empty summary"

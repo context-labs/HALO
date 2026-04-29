@@ -58,8 +58,10 @@ async def test_call_subagent_through_sdk_adapter_live(tmp_path: Path, fixtures_d
         }
     )
 
-    async with asyncio.timeout(LIVE_TIMEOUT_SECONDS):
-        raw = await tools["call_subagent"].on_invoke_tool(sdk_ctx, raw_args)
+    raw = await asyncio.wait_for(
+        tools["call_subagent"].on_invoke_tool(sdk_ctx, raw_args),
+        LIVE_TIMEOUT_SECONDS,
+    )
 
     result = SubagentToolResult.model_validate_json(raw)
     assert result.answer.strip(), "subagent returned empty answer"

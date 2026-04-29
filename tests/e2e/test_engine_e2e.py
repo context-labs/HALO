@@ -77,8 +77,10 @@ async def test_engine_runs_on_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -
         )
     ]
 
-    async with asyncio.timeout(E2E_TIMEOUT_SECONDS):
-        results = await run_engine_async(messages, cfg, trace_path)
+    results = await asyncio.wait_for(
+        run_engine_async(messages, cfg, trace_path),
+        E2E_TIMEOUT_SECONDS,
+    )
 
     assert len(results) >= 1
     assert any(item.final for item in results), "no AgentOutputItem with final=True emitted"
@@ -129,12 +131,14 @@ async def test_engine_streams_subagent_chain(tmp_path: Path, fixtures_dir: Path)
     items: list[AgentOutputItem] = []
     deltas: list[AgentTextDelta] = []
 
-    async with asyncio.timeout(E2E_TIMEOUT_SECONDS * 2):
+    async def _drain() -> None:
         async for event in stream_engine_async(messages, cfg, trace_path):
             if isinstance(event, AgentOutputItem):
                 items.append(event)
             elif isinstance(event, AgentTextDelta):
                 deltas.append(event)
+
+    await asyncio.wait_for(_drain(), E2E_TIMEOUT_SECONDS * 2)
 
     assert deltas, "stream_engine_async emitted no AgentTextDelta events"
 
@@ -188,8 +192,10 @@ async def test_engine_run_code_executes_in_sandbox(tmp_path: Path, fixtures_dir:
         )
     ]
 
-    async with asyncio.timeout(E2E_TIMEOUT_SECONDS * 2):
-        results = await run_engine_async(messages, cfg, trace_path)
+    results = await asyncio.wait_for(
+        run_engine_async(messages, cfg, trace_path),
+        E2E_TIMEOUT_SECONDS * 2,
+    )
 
     # Pair each ``run_code`` tool_call with its tool-role result by
     # ``tool_call_id``. The mapper preserves call_id on both sides, so a
