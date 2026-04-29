@@ -64,14 +64,9 @@ Install the HALO engine + CLI from PyPI:
 
 ```bash
 pip install halo-engine
-```
 
-This puts the `halo` command on your `PATH`. Verify with `halo --help`.
-
-The engine needs an OpenAI key:
-
-```bash
-export OPENAI_API_KEY=sk-...
+# Verify
+halo --help
 ```
 
 ## Get Started
