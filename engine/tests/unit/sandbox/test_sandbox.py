@@ -242,6 +242,101 @@ async def test_run_python_does_not_pass_unsafe_flags(
 
 
 @pytest.mark.asyncio
+async def test_run_python_returns_sad_result_on_unexpected_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any non-``SandboxError``, non-``BaseException`` failure must degrade gracefully.
+
+    ``run_code`` is a tool the agent calls — a hard crash from
+    ``run_python`` (e.g., ``OSError`` on subprocess spawn, a JSON
+    decode error in the driver, a surprise ``ValueError`` from a
+    refactor bug) would propagate up through the SDK's tool dispatch
+    and crash the agent loop mid-conversation. The right behavior is:
+    log a warning so operators can investigate, and hand the agent a
+    failed ``CodeExecutionResult`` it can recover from.
+
+    ``BaseException`` (CancelledError / KeyboardInterrupt) must still
+    propagate — that's user-initiated termination and shouldn't be
+    swallowed.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("")
+    index = tmp_path / "i.jsonl"
+    index.write_text("")
+
+    class _ExplodingSession:
+        def __init__(self, *, argv: list[str]) -> None: ...
+        @property
+        def returncode(self) -> int | None:
+            return None
+
+        async def start(self) -> None:
+            raise OSError("simulated spawn failure")
+
+        async def stop(self, *, hard: bool) -> bytes:
+            return b""
+
+        async def mount(self, _h: Path, _v: str) -> None: ...
+        async def bootstrap(self, _t: str, _i: str) -> CodeExecutionResult:
+            return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+        async def execute(self, _c: str) -> CodeExecutionResult:
+            return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+    monkeypatch.setattr(sandbox_module, "_RunnerSession", _ExplodingSession)
+
+    result = await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+    assert result.exit_code == 1
+    assert result.timed_out is False
+    assert "OSError" in result.stderr or "simulated spawn failure" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_run_python_does_not_swallow_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``asyncio.CancelledError`` must propagate, not become a sad result.
+
+    Cancellation is BaseException, not Exception — the broad ``except
+    Exception`` graceful path doesn't catch it, and the
+    ``except BaseException: raise`` guard explicitly preserves it. A
+    regression that swapped these would mean asyncio cancel signals
+    silently turn into a fake sandbox failure, which would deadlock
+    callers waiting on a cancellation that never propagates.
+    """
+    sandbox = _fake_sandbox(tmp_path)
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("")
+    index = tmp_path / "i.jsonl"
+    index.write_text("")
+
+    class _CancellingSession:
+        def __init__(self, *, argv: list[str]) -> None: ...
+        @property
+        def returncode(self) -> int | None:
+            return None
+
+        async def start(self) -> None:
+            raise asyncio.CancelledError()
+
+        async def stop(self, *, hard: bool) -> bytes:
+            return b""
+
+        async def mount(self, _h: Path, _v: str) -> None: ...
+        async def bootstrap(self, _t: str, _i: str) -> CodeExecutionResult:
+            return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+        async def execute(self, _c: str) -> CodeExecutionResult:
+            return CodeExecutionResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+    monkeypatch.setattr(sandbox_module, "_RunnerSession", _CancellingSession)
+
+    with pytest.raises(asyncio.CancelledError):
+        await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+
+
+@pytest.mark.asyncio
 async def test_run_python_returns_runner_result_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -790,7 +885,7 @@ def test_resolve_required_wheels_walks_transitive_dependencies(tmp_path: Path) -
 
 def test_resolve_required_wheels_raises_when_lockfile_missing(tmp_path: Path) -> None:
     """A missing ``pyodide-lock.json`` must raise ``_ResolutionError``."""
-    with pytest.raises(sandbox_module._ResolutionError, match="pyodide-lock.json missing"):
+    with pytest.raises(sandbox_module._ResolutionError, match="failed to read packages"):
         sandbox_module._resolve_required_wheels(tmp_path / "nonexistent-pyodide")
 
 
