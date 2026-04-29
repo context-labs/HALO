@@ -1,12 +1,10 @@
-<h1 align="center">
-  <br>
+<p align="center">
   <a href="https://github.com/context-labs/uwu">
-    <div style="font-size:160px;">😇</div>
+    <span style="font-size:100px; display:inline-block;">😇</span>
   </a>
-   <br>
-  HALO
   <br>
-</h1>
+  <span style="font-size:2.2em; font-weight:bold;">HALO</span>
+</p>
 
 
 <h4 align="center">✨ RLM-based Automatic Agent Optimization Loop ✨</h4>
