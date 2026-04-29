@@ -43,13 +43,13 @@ HALO (Hierarchical Agent Loop Optimization) is a methodology for building recurs
 
 This repository contains information on HALO methodology, a [Python package](https://pypi.org/project/inference-catalyst-tracing/) that implements the core HALO RLM engine, and [demo projects](/demo) that show how to build HALO loops for your agents using the Python package. 
 
-This repository also contains benchmarking examples that apply HALO to popular agent benchmarks, like [AppWorld](appworld).
+This repository also contains benchmarking examples that apply HALO to popular agent benchmarks, like [AppWorld](#appworld).
 
 ## HALO Loop
 
 The core HALO loop is suprising simple:
-1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing. See [here](/example) for an example using the OpenAI Agents SDK. 
-2. Feed traces in the HALO RLM as a .jsonl file. We recomend starting with at least 100 traces; HALO RLM can support up to 100k traces per execution. See the [CLI Guide](cli) for instuctions.
+1. Collect execution traces from your agent harness. HALO uses OpenTelemetry-compatible tracing. See [here](/demo/openai-agents-sdk-demo/) for an example using the OpenAI Agents SDK. 
+2. Feed traces in the HALO RLM as a .jsonl file. We recomend starting with at least 100 traces; HALO RLM can support up to 100k traces per execution. See the [CLI Guide](get-started) for instuctions.
 3. The RLM decomposes the traces to understand common failure modes and across harness executions and produces a report with it’s findings.
 4. This report is then fed to a coding agent like Cursor or Claude Code, which is responsible for generating and applying a set of changes to your harness to improve performance.
 5. The harness is then re-deployed, more traces are gathered, and the cycle repeats again. 
@@ -78,7 +78,7 @@ The feedback from HALO Engine surfaced failures in the harnesses such as halluci
 The peak improvements over baseline were substantial for both models. For Gemini 3 Flash, dev SGC went from 36.8% to 52.6% (+15.8 points) and test_normal SGC went from 37.5% to 48.2% (+10.7 points). For Sonnet 4.6, dev SGC went from 73.7% to 89.5% (+15.8 points) and test_normal SGC went from 62.5% to 73.2% (+10.7 points). 
 
 
-## Get Started with HALO
+## Get Started
 
 TBD
 
