@@ -22,9 +22,9 @@ class EngineRunState:
     a fake (see ``RunnerProtocol``).
 
     ``sandbox`` is resolved once at run start. ``None`` means the host could not
-    provide a working sandbox (e.g. bubblewrap missing or namespaces blocked) —
-    in that case the tool factory simply does not register ``run_code`` so the
-    agent never sees it.
+    provide a working sandbox (e.g. Deno not installed or Pyodide wheels could
+    not be pre-cached) — in that case the tool factory simply does not register
+    ``run_code`` so the agent never sees it.
     """
 
     trace_store: TraceStore
