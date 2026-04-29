@@ -240,6 +240,11 @@ class Sandbox:
             # the runner is already dead — graceful stop degrades to a
             # best-effort write that ``BrokenPipeError``s, then ``proc.wait``
             # resolves immediately. Either way, no orphan.
+            #
+            # The agent sees ``stderr`` on its end; operators don't, so log
+            # at warning so a tail of the host process surfaces the failure
+            # too. Same shape as the broader ``Exception`` handler below.
+            _logger.warning("sandbox.run_python: runner failure: %s", exc)
             await session.stop(hard=False)
             return CodeExecutionResult(
                 exit_code=1,
@@ -411,7 +416,12 @@ class _RunnerSession:
             if self._stderr_task is not None:
                 try:
                     return await self._stderr_task
-                except Exception:
+                except Exception as exc:
+                    # ``_drain_capped`` blew up reading the pipe — rare,
+                    # but worth a breadcrumb. Without this, an empty
+                    # stderr in the result silently hides a real I/O
+                    # failure.
+                    _logger.debug("stderr_task failed on re-entry stop: %r", exc)
                     return b""
             return b""
         self._stopped = True
@@ -426,19 +436,32 @@ class _RunnerSession:
             try:
                 await self._write_message({"jsonrpc": "2.0", "method": "shutdown"})
             except (BrokenPipeError, ConnectionError):
-                # Runner already gone — that's fine, we have whatever
-                # result it sent before exiting.
+                # Expected race: the runner can exit between us building
+                # the shutdown frame and writing it (e.g., it just finished
+                # responding to ``execute`` and tore down). The OS error
+                # IS the "runner already left" signal — silent pass is
+                # correct, logging would spam every happy-path session.
                 pass
             try:
                 await asyncio.wait_for(self._proc.wait(), timeout=_SHUTDOWN_GRACE_SECONDS)
             except asyncio.TimeoutError:
+                # Runner accepted shutdown but didn't exit in 5s — that's
+                # a wedge (deadlock in pyodide_runtime, an unkillable
+                # async task in the runner, ...). Operators want to know
+                # this happened before we SIGKILL.
+                _logger.warning(
+                    "runner did not exit within %.1fs of shutdown; escalating to SIGKILL",
+                    _SHUTDOWN_GRACE_SECONDS,
+                )
                 _kill_process_group(self._proc.pid)
                 await self._proc.wait()
 
         if self._stderr_task is not None:
             try:
                 return await self._stderr_task
-            except Exception:
+            except Exception as exc:
+                # Same rationale as the re-entry case above.
+                _logger.debug("stderr_task failed during stop: %r", exc)
                 return b""
         return b""
 
@@ -538,6 +561,10 @@ class _RunnerSession:
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError:
+                # ``{`` start-byte heuristic isn't enough — a status line
+                # could legitimately begin with one. Skip-and-continue is
+                # the loader-noise control flow; logging would fire on
+                # every cold boot.
                 continue
             if msg.get("id") != expected_id:
                 continue
@@ -571,6 +598,8 @@ class _RunnerSession:
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError:
+                # Same rationale as ``_read_until_id``: status-line noise
+                # is the rule during boot, not the exception.
                 continue
             if msg.get("error") is not None:
                 raise SandboxError(f"runner failed at startup: {msg['error']}")
@@ -612,11 +641,20 @@ def _locate_deno() -> Path | None:
     try:
         import deno as deno_module  # type: ignore[import-not-found]
     except ImportError:
+        # Expected when the user is running with a system-managed Deno
+        # and didn't install the ``deno`` PyPI extra. Fall through to
+        # ``shutil.which``; silent is correct because PATH discovery is
+        # the documented alternative path.
         bundled_path: str | None = None
     else:
         try:
             bundled_path = deno_module.find_deno_bin()
-        except Exception:
+        except Exception as exc:
+            # The PyPI wheel is broken in some way (corrupt install,
+            # missing per-platform binary). We fall back to PATH, but
+            # leave a breadcrumb so an operator who later finds nothing
+            # on PATH either can connect the two.
+            _logger.debug("deno.find_deno_bin() raised, falling back to PATH: %r", exc)
             bundled_path = None
 
     if bundled_path:
@@ -874,6 +912,9 @@ def _kill_process_group(pid: int) -> None:
     try:
         os.killpg(os.getpgid(pid), signal.SIGKILL)
     except ProcessLookupError:
+        # The proc died between us deciding to kill and getpgid/killpg
+        # actually running — common race, semantically "already done".
+        # Logging would fire on every clean-shutdown timeout escalation.
         pass
 
 
