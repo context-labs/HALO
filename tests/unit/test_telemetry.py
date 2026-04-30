@@ -175,3 +175,26 @@ def test_shutdown_swallows_backend_errors(monkeypatch) -> None:
     handle = setup_telemetry(enable=True, run_id="x")
     assert handle is not None
     handle.shutdown()  # must NOT raise
+
+
+def test_clears_default_openai_dashboard_processor_on_local_path(
+    monkeypatch, tmp_path
+) -> None:
+    """Local backend also clears the openai-agents default processor."""
+    monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
+    monkeypatch.setenv("HALO_TELEMETRY_PATH", str(tmp_path / "out.jsonl"))
+
+    cleared: list[list] = []
+
+    def _stub_set_trace_processors(procs: list) -> None:
+        cleared.append(list(procs))
+
+    monkeypatch.setattr(
+        "engine.telemetry.setup.set_trace_processors",
+        _stub_set_trace_processors,
+    )
+
+    handle = setup_telemetry(enable=True, run_id="x")
+    assert handle is not None
+    assert cleared == [[]]
+    handle.shutdown()
