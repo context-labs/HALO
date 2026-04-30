@@ -8,7 +8,6 @@ presence of ``CATALYST_OTLP_TOKEN`` in the environment.
 from __future__ import annotations
 
 import os
-import uuid
 from typing import Any
 
 from agents import set_trace_processors
@@ -47,16 +46,14 @@ def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHand
     if not enable:
         return None
 
-    rid = run_id or uuid.uuid4().hex
-
     set_trace_processors([])
 
     if os.environ.get("CATALYST_OTLP_TOKEN"):
-        return _setup_catalyst(rid)
-    return _setup_local(rid)
+        return _setup_catalyst()
+    return _setup_local(run_id=run_id)
 
 
-def _setup_catalyst(_run_id: str) -> TelemetryHandle:
+def _setup_catalyst() -> TelemetryHandle:
     try:
         from inference_catalyst_tracing import setup
     except ImportError as exc:
@@ -70,5 +67,5 @@ def _setup_catalyst(_run_id: str) -> TelemetryHandle:
     return TelemetryHandle(backend=backend)
 
 
-def _setup_local(_run_id: str) -> TelemetryHandle:
+def _setup_local(*, run_id: str | None) -> TelemetryHandle:
     raise NotImplementedError("Local backend added in Task 6")
