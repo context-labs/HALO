@@ -18,11 +18,21 @@ from engine.main import stream_engine_async
 from engine.model_config import ModelConfig, ReasoningEffort
 from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage
+from engine.traces.source_adapters import TraceSource, TraceSourceError
 
 console = Console()
 
 REASONING_EFFORT_CHOICES: tuple[str, ...] = get_args(ReasoningEffort)
 _REASONING_EFFORT_ADAPTER: TypeAdapter[ReasoningEffort | None] = TypeAdapter(ReasoningEffort | None)
+_TRACE_SOURCE_ADAPTER: TypeAdapter[TraceSource] = TypeAdapter(TraceSource)
+
+
+def _parse_trace_source(value: str) -> TraceSource:
+    """Validate the CLI string against the supported ingestion source modes."""
+    try:
+        return _TRACE_SOURCE_ADAPTER.validate_python(value)
+    except ValidationError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--source") from exc
 
 
 def _parse_reasoning_effort(value: str | None) -> ReasoningEffort | None:
@@ -76,9 +86,24 @@ def _make_config(
     )
 
 
-async def _stream(trace_path: Path, prompt: str, cfg: EngineConfig) -> None:
+async def _stream(
+    trace_path: Path,
+    prompt: str,
+    cfg: EngineConfig,
+    *,
+    trace_source: TraceSource,
+    pi_session_full_content: bool,
+    pi_session_excerpt_chars: int,
+) -> None:
     msgs = [AgentMessage(role="user", content=prompt)]
-    async for ev in stream_engine_async(msgs, cfg, trace_path):
+    async for ev in stream_engine_async(
+        msgs,
+        cfg,
+        trace_path,
+        trace_source=trace_source,
+        pi_session_full_content=pi_session_full_content,
+        pi_session_excerpt_chars=pi_session_excerpt_chars,
+    ):
         if isinstance(ev, AgentTextDelta):
             console.print(ev.text_delta, end="", soft_wrap=True)
         elif isinstance(ev, AgentOutputItem):
@@ -92,8 +117,11 @@ def _run(
         ...,
         exists=True,
         readable=True,
-        dir_okay=False,
-        help="JSONL trace file (e.g. tests/fixtures/realistic_traces.jsonl).",
+        dir_okay=True,
+        help=(
+            "JSONL trace file or Pi session JSONL directory "
+            "(e.g. tests/fixtures/realistic_traces.jsonl or ~/.pi/agent/sessions/...)."
+        ),
     ),
     prompt: str = typer.Option(
         ..., "--prompt", "-p", help="User prompt to send to the root agent."
@@ -106,6 +134,22 @@ def _run(
         None,
         "--instructions",
         help="Override the engine's default trace-tool agent instructions.",
+    ),
+    source: str = typer.Option(
+        "auto",
+        "--source",
+        help="Input source type: auto, otel, or pi-session.",
+    ),
+    pi_session_full_content: bool = typer.Option(
+        False,
+        "--pi-session-full-content/--pi-session-redacted-content",
+        help="Index full Pi session text/tool payloads instead of bounded excerpts.",
+    ),
+    pi_session_excerpt_chars: int = typer.Option(
+        240,
+        "--pi-session-excerpt-chars",
+        min=0,
+        help="Maximum characters per Pi session excerpt when full content indexing is off.",
     ),
     reasoning_effort: str | None = typer.Option(
         None,
@@ -131,7 +175,20 @@ def _run(
         instructions,
         _parse_reasoning_effort(reasoning_effort),
     )
-    asyncio.run(_stream(trace_path, prompt, cfg))
+    try:
+        asyncio.run(
+            _stream(
+                trace_path,
+                prompt,
+                cfg,
+                trace_source=_parse_trace_source(source),
+                pi_session_full_content=pi_session_full_content,
+                pi_session_excerpt_chars=pi_session_excerpt_chars,
+            )
+        )
+    except TraceSourceError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
 
 
 def app() -> None:
