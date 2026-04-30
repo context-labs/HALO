@@ -155,7 +155,6 @@ class OpenAiAgentRunner:
                 continue
 
             agent_execution.record_llm_success()
-            # TODO: Remove passing in compactor_factory, the compactor agent/llm config should be instantiated once and re used
             await agent_context.compact_old_items(self._compactor_factory(agent_execution))
             return
 

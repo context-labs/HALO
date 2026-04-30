@@ -144,7 +144,6 @@ def _process_chunk(trace_path: Path, chunk: list[tuple[int, int]]) -> dict[str, 
     return rows
 
 
-# TODO: Switch all dataclasses to pydantic
 @dataclass
 class _RowAccumulator:
     """Mutable per-trace_id rollup used during a single index-building pass; converts to TraceIndexRow at the end."""
@@ -163,7 +162,6 @@ class _RowAccumulator:
     total_output_tokens: int = 0
     project_id: str | None = None
 
-    # TODO: Use LLM for smart parsing
     def absorb(self, *, span: SpanRecord, byte_offset: int, byte_length: int) -> None:
         """Fold one span into the accumulator: record its byte slice and update rollup fields."""
         self.byte_offsets.append(byte_offset)

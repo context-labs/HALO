@@ -26,10 +26,6 @@ def build_compactor_factory(
     compaction routes through whichever OpenAI-compatible endpoint the run is
     configured for.
     """
-    # TODO: Build one AsyncOpenAI per engine run in main.py and inject the
-    # same instance into the compactor factory, SynthesisTool, and
-    # configure_default_sdk_client. Then model_provider is read in exactly
-    # one place and the lazy-construct branch below disappears.
     openai_client = client
 
     def factory(_execution: AgentExecution) -> Compactor:
