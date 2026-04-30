@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, omit
 from pydantic import BaseModel, ConfigDict
 
 from engine.agents.prompt_templates import SYNTHESIS_SYSTEM_PROMPT
+from engine.model_config import ModelConfig
 from engine.model_provider_config import ModelProviderConfig
 from engine.tools.tool_protocol import ToolContext
 
@@ -39,12 +40,12 @@ class SynthesisTool:
 
     def __init__(
         self,
-        model_name: str,
+        model: ModelConfig,
         model_provider: ModelProviderConfig,
         client: AsyncOpenAI | None = None,
     ) -> None:
         """``client`` is injectable for tests; otherwise built from ``model_provider``."""
-        self._model_name = model_name
+        self._model = model
         self._model_provider = model_provider
         self._client = client
 
@@ -68,11 +69,12 @@ class SynthesisTool:
             )
 
         response = await self._client.chat.completions.create(
-            model=self._model_name,
+            model=self._model.name,
             messages=[
                 {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
                 {"role": "user", "content": "\n\n".join(user_text_parts)},
             ],
+            reasoning_effort=self._model.effective_reasoning_effort() or omit,
         )
         summary = (response.choices[0].message.content or "").strip()
         return SynthesizeTracesResult(summary=summary)

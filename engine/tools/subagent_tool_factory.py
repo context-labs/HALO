@@ -68,6 +68,7 @@ def build_root_sdk_agent(
         name=engine_config.root_agent.name,
         instructions="",
         model=engine_config.root_agent.model.name,
+        model_settings=engine_config.root_agent.model.to_sdk_model_settings(),
         tools=tools,
     )
 
@@ -125,7 +126,7 @@ def _child_tools_for_depth(
         to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
         to_sdk_function_tool(
             SynthesisTool(
-                model_name=engine_config.synthesis_model.name,
+                model=engine_config.synthesis_model,
                 model_provider=engine_config.model_provider,
             ),
             context_factory=make_ctx,
@@ -177,6 +178,7 @@ def _build_subagent_as_tool(
         name=engine_config.subagent.name,
         instructions="",
         model=engine_config.subagent.model.name,
+        model_settings=engine_config.subagent.model.to_sdk_model_settings(),
         tools=[],
     )
 
@@ -237,6 +239,7 @@ def _build_subagent_as_tool(
                 name=engine_config.subagent.name,
                 instructions="",
                 model=engine_config.subagent.model.name,
+                model_settings=engine_config.subagent.model.to_sdk_model_settings(),
                 tools=_child_tools_for_depth(
                     depth=child_depth,
                     run_state=run_state,
