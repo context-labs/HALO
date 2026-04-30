@@ -124,3 +124,54 @@ def test_local_path_default_uses_run_id(monkeypatch, tmp_path) -> None:
     assert expected.exists(), f"expected {expected} to exist"
 
     handle.shutdown()
+
+
+def test_shutdown_is_idempotent(monkeypatch) -> None:
+    """Calling shutdown twice does not raise and only flushes the backend once."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "tok")
+
+    calls: list[None] = []
+
+    class _StubCatalyst:
+        def shutdown(self) -> None:
+            calls.append(None)
+
+    monkeypatch.setattr(
+        "inference_catalyst_tracing.setup",
+        lambda: _StubCatalyst(),
+    )
+    monkeypatch.setattr(
+        "engine.telemetry.setup.set_trace_processors",
+        lambda procs: None,
+    )
+
+    handle = setup_telemetry(enable=True, run_id="x")
+    assert handle is not None
+
+    handle.shutdown()
+    handle.shutdown()  # second call — must be a no-op
+
+    assert len(calls) == 1, "backend.shutdown should be invoked exactly once"
+
+
+def test_shutdown_swallows_backend_errors(monkeypatch) -> None:
+    """A backend that raises during shutdown must not propagate the error;
+    the engine's outer try/finally must not be masked."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "tok")
+
+    class _ExplodingCatalyst:
+        def shutdown(self) -> None:
+            raise RuntimeError("flush kaboom")
+
+    monkeypatch.setattr(
+        "inference_catalyst_tracing.setup",
+        lambda: _ExplodingCatalyst(),
+    )
+    monkeypatch.setattr(
+        "engine.telemetry.setup.set_trace_processors",
+        lambda procs: None,
+    )
+
+    handle = setup_telemetry(enable=True, run_id="x")
+    assert handle is not None
+    handle.shutdown()  # must NOT raise
