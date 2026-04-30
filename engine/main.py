@@ -17,6 +17,7 @@ from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
+from engine.traces.source_adapters import TraceSource, prepare_trace_input
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
@@ -26,6 +27,9 @@ async def stream_engine_async(
     engine_config: EngineConfig,
     trace_path: Path,
     *,
+    trace_source: TraceSource = "auto",
+    pi_session_full_content: bool = False,
+    pi_session_excerpt_chars: int = 240,
     runner: RunnerProtocol | None = None,
 ) -> AsyncIterator[EngineStreamEvent]:
     """Run the HALO engine and stream events as they happen.
@@ -42,11 +46,18 @@ async def stream_engine_async(
     configure_default_sdk_client(engine_config.model_provider)
     sandbox = Sandbox.get()
 
-    index_path = await TraceIndexBuilder.ensure_index_exists(
+    prepared_input = prepare_trace_input(
         trace_path=trace_path,
         config=engine_config.trace_index,
+        source=trace_source,
+        pi_session_full_content=pi_session_full_content,
+        pi_session_excerpt_chars=pi_session_excerpt_chars,
     )
-    trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
+    index_path = await TraceIndexBuilder.ensure_index_exists(
+        trace_path=prepared_input.trace_path,
+        config=prepared_input.config,
+    )
+    trace_store = TraceStore.load(trace_path=prepared_input.trace_path, index_path=index_path)
 
     output_bus = EngineOutputBus()
     run_state_kwargs: dict = {
@@ -134,6 +145,9 @@ async def run_engine_async(
     engine_config: EngineConfig,
     trace_path: Path,
     *,
+    trace_source: TraceSource = "auto",
+    pi_session_full_content: bool = False,
+    pi_session_excerpt_chars: int = 240,
     runner: RunnerProtocol | None = None,
 ) -> list[AgentOutputItem]:
     """Run the engine to completion and return all ``AgentOutputItem``s.
@@ -144,7 +158,15 @@ async def run_engine_async(
     the ``runner`` test seam.
     """
     out: list[AgentOutputItem] = []
-    async for event in stream_engine_async(messages, engine_config, trace_path, runner=runner):
+    async for event in stream_engine_async(
+        messages,
+        engine_config,
+        trace_path,
+        trace_source=trace_source,
+        pi_session_full_content=pi_session_full_content,
+        pi_session_excerpt_chars=pi_session_excerpt_chars,
+        runner=runner,
+    ):
         if isinstance(event, AgentOutputItem):
             out.append(event)
     return out
@@ -155,6 +177,9 @@ def stream_engine(
     engine_config: EngineConfig,
     trace_path: Path,
     *,
+    trace_source: TraceSource = "auto",
+    pi_session_full_content: bool = False,
+    pi_session_excerpt_chars: int = 240,
     runner: RunnerProtocol | None = None,
 ) -> list[EngineStreamEvent]:
     """Synchronous wrapper around ``stream_engine_async``. Collects every
@@ -163,7 +188,15 @@ def stream_engine(
 
     async def _collect() -> list[EngineStreamEvent]:
         out: list[EngineStreamEvent] = []
-        async for ev in stream_engine_async(messages, engine_config, trace_path, runner=runner):
+        async for ev in stream_engine_async(
+            messages,
+            engine_config,
+            trace_path,
+            trace_source=trace_source,
+            pi_session_full_content=pi_session_full_content,
+            pi_session_excerpt_chars=pi_session_excerpt_chars,
+            runner=runner,
+        ):
             out.append(ev)
         return out
 
@@ -175,7 +208,20 @@ def run_engine(
     engine_config: EngineConfig,
     trace_path: Path,
     *,
+    trace_source: TraceSource = "auto",
+    pi_session_full_content: bool = False,
+    pi_session_excerpt_chars: int = 240,
     runner: RunnerProtocol | None = None,
 ) -> list[AgentOutputItem]:
     """Synchronous wrapper around ``run_engine_async``."""
-    return asyncio.run(run_engine_async(messages, engine_config, trace_path, runner=runner))
+    return asyncio.run(
+        run_engine_async(
+            messages,
+            engine_config,
+            trace_path,
+            trace_source=trace_source,
+            pi_session_full_content=pi_session_full_content,
+            pi_session_excerpt_chars=pi_session_excerpt_chars,
+            runner=runner,
+        )
+    )
