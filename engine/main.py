@@ -145,16 +145,19 @@ async def run_engine_async(
     trace_path: Path,
     *,
     runner: RunnerProtocol | None = None,
+    telemetry: bool = False,
 ) -> list[AgentOutputItem]:
     """Run the engine to completion and return all ``AgentOutputItem``s.
 
     Streaming text deltas are filtered out; only durable items (assistant
     messages, tool calls, tool results) are returned. See
-    ``stream_engine_async`` for the streaming variant and for the meaning of
-    the ``runner`` test seam.
+    ``stream_engine_async`` for the streaming variant and the meaning of
+    the ``runner`` and ``telemetry`` test seams.
     """
     out: list[AgentOutputItem] = []
-    async for event in stream_engine_async(messages, engine_config, trace_path, runner=runner):
+    async for event in stream_engine_async(
+        messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+    ):
         if isinstance(event, AgentOutputItem):
             out.append(event)
     return out
@@ -166,6 +169,7 @@ def stream_engine(
     trace_path: Path,
     *,
     runner: RunnerProtocol | None = None,
+    telemetry: bool = False,
 ) -> list[EngineStreamEvent]:
     """Synchronous wrapper around ``stream_engine_async``. Collects every
     streamed event into a list and returns it. Use the async variant if you
@@ -173,7 +177,9 @@ def stream_engine(
 
     async def _collect() -> list[EngineStreamEvent]:
         out: list[EngineStreamEvent] = []
-        async for ev in stream_engine_async(messages, engine_config, trace_path, runner=runner):
+        async for ev in stream_engine_async(
+            messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+        ):
             out.append(ev)
         return out
 
@@ -186,6 +192,11 @@ def run_engine(
     trace_path: Path,
     *,
     runner: RunnerProtocol | None = None,
+    telemetry: bool = False,
 ) -> list[AgentOutputItem]:
     """Synchronous wrapper around ``run_engine_async``."""
-    return asyncio.run(run_engine_async(messages, engine_config, trace_path, runner=runner))
+    return asyncio.run(
+        run_engine_async(
+            messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+        )
+    )
