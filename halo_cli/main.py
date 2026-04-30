@@ -111,9 +111,11 @@ def _run(
         None,
         "--reasoning-effort",
         help=(
-            "Reasoning effort forwarded to the model on every call "
-            f"(root, subagent, synthesis, compaction). One of: "
-            f"{', '.join(REASONING_EFFORT_CHOICES)}. Omit to use the provider default."
+            "Reasoning effort forwarded to the model on root, subagent, and "
+            f"synthesis calls (compaction never uses reasoning). One of: "
+            f"{', '.join(REASONING_EFFORT_CHOICES)}. Omit to use the model "
+            "family's documented max for known reasoning models, or the "
+            "provider default for non-reasoning models."
         ),
     ),
 ) -> None:
