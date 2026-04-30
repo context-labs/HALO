@@ -160,8 +160,10 @@ class SearchSpanTool:
 
     name = "search_span"
     description = (
-        "Regex-search a single span. Same shape as `search_trace`. Use when one span "
-        "is too large for `view_spans`."
+        "Regex-search inside one span. Same shape as `search_trace`. Use when a "
+        "single span itself is too large to read whole (its `raw_jsonl_bytes` is "
+        "near/above the response budget, or `view_spans` returned `oversized` "
+        "because of it)."
     )
     arguments_model = SearchSpanArguments
     result_model = SearchSpanResult

@@ -234,8 +234,9 @@ class SearchSpanArguments(BaseModel):
     """Tool arguments for ``search_span``: regex over the raw JSON of one span.
 
     Same regex/context/limit semantics as ``search_trace`` but scoped to a single
-    span. Use this when ``view_spans`` of a single span would exceed the response
-    budget.
+    span. Use when a single span itself is too large to read whole — i.e. its
+    ``raw_jsonl_bytes`` is near/above the response budget, or ``view_spans``
+    returned ``oversized`` because of it.
     """
 
     model_config = ConfigDict(extra="forbid")
