@@ -17,22 +17,18 @@ with the upstream API.
 def max_reasoning_effort_for_model(name: str) -> ReasoningEffort | None:
     """Highest reasoning effort known to be supported by ``name``.
 
-    Returns ``None`` for models we don't recognize as reasoning models, so
-    the engine can omit the parameter entirely on providers that would
-    400 on it. Returns the strongest documented effort otherwise.
+    * ``xhigh`` — ``gpt-5.4``, ``gpt-5.5``, and ``gpt-5.1-codex-max``.
+    * ``high`` — other ``gpt-5`` and o-series reasoning models.
+    * ``None`` — everything else, so the engine can omit the parameter on
+      providers that don't accept it.
 
-    Conservative prefix match against OpenAI's published support matrix:
-    ``xhigh`` is reserved for families that explicitly support it
-    (``gpt-5.1-codex-max`` and HALO's default ``gpt-5.5``). Other ``gpt-5``
-    and o-series families max at ``"high"``. Update this table when new
-    families ship.
-
-    Explicit overrides on ``ModelConfig.reasoning_effort`` always win — see
+    Update the explicit lists when new families ship. Explicit overrides
+    on ``ModelConfig.reasoning_effort`` always win — see
     ``ModelConfig.effective_reasoning_effort``.
     """
     n = name.lower()
 
-    if n.startswith(("gpt-5.1-codex-max", "gpt-5.5")):
+    if n.startswith(("gpt-5.4", "gpt-5.5", "gpt-5.1-codex-max")):
         return "xhigh"
 
     if n.startswith(("gpt-5", "o1", "o3", "o4")):

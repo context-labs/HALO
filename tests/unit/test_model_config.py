@@ -34,20 +34,27 @@ def test_reasoning_effort_rejects_unsupported_value() -> None:
 @pytest.mark.parametrize(
     "name,expected",
     [
+        # xhigh tier.
         ("gpt-5.1-codex-max", "xhigh"),
+        ("gpt-5.4", "xhigh"),
+        ("gpt-5.4-mini", "xhigh"),
         ("gpt-5.5", "xhigh"),
-        ("gpt-5.5-mini", "xhigh"),
+        ("gpt-5.5-pro", "xhigh"),
+        ("GPT-5.5", "xhigh"),
+        # high tier — other gpt-5 family + o-series.
         ("gpt-5", "high"),
         ("gpt-5-pro", "high"),
         ("gpt-5.1", "high"),
-        ("gpt-5.4-mini", "high"),
+        ("gpt-5.1-mini", "high"),
         ("o1", "high"),
         ("o1-mini", "high"),
         ("o3", "high"),
+        ("o3-mini", "high"),
         ("o4-mini", "high"),
-        ("GPT-5.1-codex-max", "xhigh"),
+        # Non-reasoning / unknown families.
         ("claude-opus-4-7", None),
         ("gpt-4o", None),
+        ("gpt-4-turbo", None),
         ("meta-llama/Llama-3.1-70B-Instruct", None),
     ],
 )
