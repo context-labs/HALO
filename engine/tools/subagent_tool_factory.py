@@ -31,8 +31,6 @@ from engine.tools.trace_tools import (
     ViewTraceTool,
 )
 
-# TODO: Move this to an "openai agents sdk client" file or folder, keep all usage of the library isolated to that module.
-# Combine with OpenAiAgentRunner
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +66,7 @@ def build_root_sdk_agent(
         name=engine_config.root_agent.name,
         instructions="",
         model=engine_config.root_agent.model.name,
+        model_settings=engine_config.root_agent.model.to_sdk_model_settings(),
         tools=tools,
     )
 
@@ -105,7 +104,6 @@ def _child_tools_for_depth(
     """
     engine_config = run_state.config
 
-    # TODO: Simplify passing in callback funcs. Maybe we can pass in the run_state directly and let to_sdk_function_tool set everything up.
     def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
         return ToolContext.model_construct(
             run_state=run_state,
@@ -125,7 +123,7 @@ def _child_tools_for_depth(
         to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
         to_sdk_function_tool(
             SynthesisTool(
-                model_name=engine_config.synthesis_model.name,
+                model=engine_config.synthesis_model,
                 model_provider=engine_config.model_provider,
             ),
             context_factory=make_ctx,
@@ -177,6 +175,7 @@ def _build_subagent_as_tool(
         name=engine_config.subagent.name,
         instructions="",
         model=engine_config.subagent.model.name,
+        model_settings=engine_config.subagent.model.to_sdk_model_settings(),
         tools=[],
     )
 
@@ -200,10 +199,6 @@ def _build_subagent_as_tool(
                 f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
             )
 
-        # TODO: Can we simplify this by instantiating child_execution above stub_child_agent, but not registering it until on_invoke_tool
-        # is called, allowing us to only create a single Agent[EngineRunState] instance?
-        # The current pattern is required so that the child_execution is available to pass into _child_tools_for_depth.
-        # If we do need to keep this pattern ,split out this inline function into a standalone for readability
         # ``as_tool()`` builds a tool whose ``raw_arguments`` is JSON-encoded
         # ``AgentAsToolInput`` (i.e. ``{"input": "..."}``); the SDK's own
         # ``_run_agent_impl`` extracts ``params["input"]`` before calling the
@@ -237,6 +232,7 @@ def _build_subagent_as_tool(
                 name=engine_config.subagent.name,
                 instructions="",
                 model=engine_config.subagent.model.name,
+                model_settings=engine_config.subagent.model.to_sdk_model_settings(),
                 tools=_child_tools_for_depth(
                     depth=child_depth,
                     run_state=run_state,

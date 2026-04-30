@@ -42,7 +42,6 @@ async def stream_engine_async(
     configure_default_sdk_client(engine_config.model_provider)
     sandbox = Sandbox.get()
 
-    # TODO: ensure_index_exists could return the trace itself so we dont need to re load it from file in TraceStore.load
     index_path = await TraceIndexBuilder.ensure_index_exists(
         trace_path=trace_path,
         config=engine_config.trace_index,
@@ -50,8 +49,6 @@ async def stream_engine_async(
     trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
     output_bus = EngineOutputBus()
-    # TODO: dotn use untyped dict
-    # TODO: Use proper mock (ie MagicMock) for test runner so we dont need to make it swappable in prod code. Get rid of runner completely from EngineRunState
     run_state_kwargs: dict = {
         "trace_store": trace_store,
         "output_bus": output_bus,
