@@ -8,9 +8,12 @@ presence of ``CATALYST_OTLP_TOKEN`` in the environment.
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any
 
 from agents import set_trace_processors
+
+from engine.telemetry.local_processor import attach_local_processor
 
 
 class TelemetryHandle:
@@ -68,4 +71,12 @@ def _setup_catalyst() -> TelemetryHandle:
 
 
 def _setup_local(*, run_id: str | None) -> TelemetryHandle:
-    raise NotImplementedError("Local backend added in Task 6")
+    rid = run_id or uuid.uuid4().hex
+    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{rid}.jsonl"
+    service_name = os.environ.get("CATALYST_SERVICE_NAME", "halo-engine")
+    processor = attach_local_processor(
+        path=path,
+        service_name=service_name,
+        project_id="halo-engine",
+    )
+    return TelemetryHandle(backend=processor)
