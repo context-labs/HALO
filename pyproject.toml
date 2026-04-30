@@ -20,6 +20,11 @@ dependencies = [
     "rich==15.0.0",
 ]
 
+[project.optional-dependencies]
+telemetry = [
+    "inference-catalyst-tracing[openai-agents]==0.0.8; python_version >= '3.11'",
+]
+
 [project.scripts]
 halo = "halo_cli.main:app"
 
