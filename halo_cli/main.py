@@ -99,8 +99,8 @@ def _run(
         ..., "--prompt", "-p", help="User prompt to send to the root agent."
     ),
     model: str = typer.Option("gpt-5.4-mini", "--model", "-m"),
-    max_depth: int = typer.Option(1, "--max-depth", min=0),
-    max_turns: int = typer.Option(8, "--max-turns", min=1),
+    max_depth: int = typer.Option(2, "--max-depth", min=0),
+    max_turns: int = typer.Option(20, "--max-turns", min=1),
     max_parallel: int = typer.Option(2, "--max-parallel", min=1),
     instructions: str | None = typer.Option(
         None,
