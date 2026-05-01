@@ -177,9 +177,7 @@ def test_shutdown_swallows_backend_errors(monkeypatch) -> None:
     handle.shutdown()  # must NOT raise
 
 
-def test_clears_default_openai_dashboard_processor_on_local_path(
-    monkeypatch, tmp_path
-) -> None:
+def test_clears_default_openai_dashboard_processor_on_local_path(monkeypatch, tmp_path) -> None:
     """Local backend also clears the openai-agents default processor."""
     monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
     monkeypatch.setenv("HALO_TELEMETRY_PATH", str(tmp_path / "out.jsonl"))
@@ -197,4 +195,93 @@ def test_clears_default_openai_dashboard_processor_on_local_path(
     handle = setup_telemetry(enable=True, run_id="x")
     assert handle is not None
     assert cleared == [[]]
+    handle.shutdown()
+
+
+def test_catalyst_path_sets_service_name_default(monkeypatch) -> None:
+    """Catalyst path defaults CATALYST_SERVICE_NAME to 'halo-engine' when unset."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "tok")
+    monkeypatch.delenv("CATALYST_SERVICE_NAME", raising=False)
+    monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
+
+    class _Stub:
+        def shutdown(self) -> None: ...
+
+    monkeypatch.setattr("inference_catalyst_tracing.setup", lambda: _Stub())
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    handle = setup_telemetry(enable=True, run_id="abc")
+    assert handle is not None
+
+    # setdefault must have populated the env var.
+    import os
+
+    assert os.environ["CATALYST_SERVICE_NAME"] == "halo-engine"
+
+
+def test_catalyst_path_respects_user_service_name(monkeypatch) -> None:
+    """If CATALYST_SERVICE_NAME is already set, the Catalyst path doesn't override it."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "tok")
+    monkeypatch.setenv("CATALYST_SERVICE_NAME", "user-supplied")
+    monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
+
+    class _Stub:
+        def shutdown(self) -> None: ...
+
+    monkeypatch.setattr("inference_catalyst_tracing.setup", lambda: _Stub())
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    setup_telemetry(enable=True, run_id="abc")
+
+    import os
+
+    assert os.environ["CATALYST_SERVICE_NAME"] == "user-supplied"
+
+
+def test_catalyst_path_stamps_halo_run_id(monkeypatch) -> None:
+    """The Catalyst path adds halo.run_id to OTEL_RESOURCE_ATTRIBUTES,
+    merging with any existing value."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "tok")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.env=staging")
+
+    class _Stub:
+        def shutdown(self) -> None: ...
+
+    monkeypatch.setattr("inference_catalyst_tracing.setup", lambda: _Stub())
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    setup_telemetry(enable=True, run_id="run-abc-123")
+
+    import os
+
+    val = os.environ["OTEL_RESOURCE_ATTRIBUTES"]
+    assert "deployment.env=staging" in val
+    assert "halo.run_id=run-abc-123" in val
+
+
+def test_local_path_stamps_halo_run_id(monkeypatch, tmp_path) -> None:
+    """The local backend includes halo.run_id in ExportContext.extra_resource_attributes."""
+    monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
+    monkeypatch.setenv("HALO_TELEMETRY_PATH", str(tmp_path / "out.jsonl"))
+
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    captured: list = []
+
+    real_attach = __import__(
+        "engine.telemetry.local_processor",
+        fromlist=["attach_local_processor"],
+    ).attach_local_processor
+
+    def _spy(**kwargs):
+        captured.append(kwargs)
+        return real_attach(**kwargs)
+
+    monkeypatch.setattr("engine.telemetry.setup.attach_local_processor", _spy)
+
+    handle = setup_telemetry(enable=True, run_id="run-xyz")
+    assert handle is not None
+    assert len(captured) == 1
+    assert captured[0]["extra_resource_attributes"] == {"halo.run_id": "run-xyz"}
+
     handle.shutdown()

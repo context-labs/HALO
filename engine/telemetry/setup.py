@@ -51,12 +51,13 @@ def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHand
 
     set_trace_processors([])
 
+    rid = run_id or uuid.uuid4().hex
     if os.environ.get("CATALYST_OTLP_TOKEN"):
-        return _setup_catalyst()
-    return _setup_local(run_id=run_id)
+        return _setup_catalyst(run_id=rid)
+    return _setup_local(run_id=rid)
 
 
-def _setup_catalyst() -> TelemetryHandle:
+def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
     try:
         from inference_catalyst_tracing import setup
     except ImportError as exc:
@@ -66,17 +67,26 @@ def _setup_catalyst() -> TelemetryHandle:
             "(requires Python >=3.11)."
         ) from exc
 
+    # catalyst-tracing.setup() in 0.0.8 does not accept kwargs; configure
+    # via env vars. Default the service name to "halo-engine" if the user
+    # hasn't set CATALYST_SERVICE_NAME, and stamp halo.run_id onto every
+    # span via OTEL_RESOURCE_ATTRIBUTES (merge-don't-clobber).
+    os.environ.setdefault("CATALYST_SERVICE_NAME", "halo-engine")
+    existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
+    halo_attr = f"halo.run_id={run_id}"
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = f"{existing},{halo_attr}" if existing else halo_attr
+
     backend = setup()
     return TelemetryHandle(backend=backend)
 
 
-def _setup_local(*, run_id: str | None) -> TelemetryHandle:
-    rid = run_id or uuid.uuid4().hex
-    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{rid}.jsonl"
+def _setup_local(*, run_id: str) -> TelemetryHandle:
+    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{run_id}.jsonl"
     service_name = os.environ.get("CATALYST_SERVICE_NAME", "halo-engine")
     processor = attach_local_processor(
         path=path,
         service_name=service_name,
         project_id="halo-engine",
+        extra_resource_attributes={"halo.run_id": run_id},
     )
     return TelemetryHandle(backend=processor)

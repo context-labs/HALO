@@ -28,18 +28,18 @@ EXPORT_SCHEMA_VERSION = 1
 # observation_kind vocabulary we emit. Pick from the same enum the router
 # uses server-side so the projection is stable across sources.
 OBSERVATION_KIND_BY_TYPE: dict[str, str] = {
-    "agent":        "AGENT",
-    "generation":   "LLM",
-    "response":     "LLM",
-    "function":     "TOOL",
-    "mcp_tools":    "TOOL",
-    "handoff":      "CHAIN",
-    "guardrail":    "GUARDRAIL",
-    "custom":       "SPAN",
-    "task":         "SPAN",
-    "turn":         "SPAN",
+    "agent": "AGENT",
+    "generation": "LLM",
+    "response": "LLM",
+    "function": "TOOL",
+    "mcp_tools": "TOOL",
+    "handoff": "CHAIN",
+    "guardrail": "GUARDRAIL",
+    "custom": "SPAN",
+    "task": "SPAN",
+    "turn": "SPAN",
     "transcription": "SPAN",
-    "speech":       "SPAN",
+    "speech": "SPAN",
     "speech_group": "SPAN",
 }
 
@@ -47,6 +47,7 @@ OBSERVATION_KIND_BY_TYPE: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Context you attach at export time (the SDK can't know any of this).
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ExportContext:
@@ -56,6 +57,7 @@ class ExportContext:
     ingest edge. When you're exporting directly from the SDK (no edge
     proxy in the path) you have to stamp them yourself.
     """
+
     project_id: str
     service_name: str
     service_version: str | None = None
@@ -68,6 +70,7 @@ class ExportContext:
 # ---------------------------------------------------------------------------
 # Pure conversion: one SDK span -> one dict shaped like our JSONL line.
 # ---------------------------------------------------------------------------
+
 
 def span_to_otlp_line(
     span: Span[Any],
@@ -133,19 +136,23 @@ def span_to_otlp_line(
         attributes.setdefault("agent.workflow.group_id", group_id)
 
     # inference.* projections — ALWAYS present per 07-export.md.
-    attributes.update({
-        "inference.export.schema_version": EXPORT_SCHEMA_VERSION,
-        "inference.project_id": ctx.project_id,
-        "inference.observation_kind": OBSERVATION_KIND_BY_TYPE.get(span_type, "SPAN"),
-        "inference.llm.provider": projection.get("llm_provider"),
-        "inference.llm.model_name": projection.get("llm_model_name"),
-        "inference.llm.input_tokens": projection.get("input_tokens"),
-        "inference.llm.output_tokens": projection.get("output_tokens"),
-        "inference.llm.cost.total": projection.get("cost_total"),   # we don't know cost client-side
-        "inference.user_id": projection.get("user_id"),
-        "inference.session_id": group_id,  # SDK's group_id is the closest analogue
-        "inference.agent_name": projection.get("agent_name") or "",
-    })
+    attributes.update(
+        {
+            "inference.export.schema_version": EXPORT_SCHEMA_VERSION,
+            "inference.project_id": ctx.project_id,
+            "inference.observation_kind": OBSERVATION_KIND_BY_TYPE.get(span_type, "SPAN"),
+            "inference.llm.provider": projection.get("llm_provider"),
+            "inference.llm.model_name": projection.get("llm_model_name"),
+            "inference.llm.input_tokens": projection.get("input_tokens"),
+            "inference.llm.output_tokens": projection.get("output_tokens"),
+            "inference.llm.cost.total": projection.get(
+                "cost_total"
+            ),  # we don't know cost client-side
+            "inference.user_id": projection.get("user_id"),
+            "inference.session_id": group_id,  # SDK's group_id is the closest analogue
+            "inference.agent_name": projection.get("agent_name") or "",
+        }
+    )
 
     return {
         "trace_id": trace_id,
@@ -167,6 +174,7 @@ def span_to_otlp_line(
 # Per-span-type mapping. Each branch returns:
 #   (raw_attributes_dict, projection_dict_for_inference_star)
 # ---------------------------------------------------------------------------
+
 
 def _attributes_for_span_type(
     span_type: str, d: Mapping[str, Any]
@@ -213,22 +221,24 @@ def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, A
         "llm.provider": "openai",
         "llm.model_name": model,
         "llm.invocation_parameters": _json(d.get("model_config")),
-        "llm.input_messages":  _json(list(input_msgs)),
+        "llm.input_messages": _json(list(input_msgs)),
         "llm.output_messages": _json(list(output_msgs)),
-        "llm.token_count.prompt":     _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
-        "llm.token_count.completion": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
-        "llm.token_count.total":      _int(usage.get("total_tokens")),
+        "llm.token_count.prompt": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+        "llm.token_count.completion": _int(
+            usage.get("output_tokens") or usage.get("completion_tokens")
+        ),
+        "llm.token_count.total": _int(usage.get("total_tokens")),
     }
 
     # Expand input/output into the flat OpenInference .N.message.* keys so
     # Phoenix / Arize-style viewers get a native read.
-    attrs.update(_expand_messages("llm.input_messages",  input_msgs))
+    attrs.update(_expand_messages("llm.input_messages", input_msgs))
     attrs.update(_expand_messages("llm.output_messages", output_msgs))
 
     projection = {
         "llm_provider": "openai",
         "llm_model_name": model,
-        "input_tokens":  _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+        "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
     }
     return _drop_none(attrs), projection
@@ -243,13 +253,15 @@ def _response_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         "openinference.span.kind": "LLM",
         "llm.provider": "openai",
         "llm.response.id": d.get("response_id"),
-        "llm.token_count.prompt":     _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
-        "llm.token_count.completion": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
-        "llm.token_count.total":      _int(usage.get("total_tokens")),
+        "llm.token_count.prompt": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+        "llm.token_count.completion": _int(
+            usage.get("output_tokens") or usage.get("completion_tokens")
+        ),
+        "llm.token_count.total": _int(usage.get("total_tokens")),
     }
     projection = {
         "llm_provider": "openai",
-        "input_tokens":  _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
+        "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
     }
     return _drop_none(attrs), projection
@@ -259,7 +271,7 @@ def _function_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
     attrs = {
         "openinference.span.kind": "TOOL",
         "tool.name": d.get("name"),
-        "input.value":  d.get("input"),
+        "input.value": d.get("input"),
         "output.value": d.get("output"),
         "mcp.data": _json(d.get("mcp_data")),
     }
@@ -279,7 +291,7 @@ def _handoff_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]
     attrs = {
         "openinference.span.kind": "CHAIN",
         "agent.handoff.from": d.get("from_agent"),
-        "agent.handoff.to":   d.get("to_agent"),
+        "agent.handoff.to": d.get("to_agent"),
     }
     return _drop_none(attrs), {"agent_name": d.get("to_agent")}
 
@@ -314,11 +326,12 @@ def _custom_attrs(span_type: str, d: Mapping[str, Any]) -> tuple[dict[str, Any],
 # Small helpers
 # ---------------------------------------------------------------------------
 
+
 def _strip_prefix(value: Any, prefix: str) -> str | None:
     if not value:
         return None
     s = str(value)
-    return s[len(prefix):] if s.startswith(prefix) else s
+    return s[len(prefix) :] if s.startswith(prefix) else s
 
 
 def _to_otlp_timestamp(iso_str: str | None) -> str:
@@ -374,7 +387,9 @@ def _expand_messages(prefix: str, messages: Iterable[Mapping[str, Any]]) -> dict
             fn = tc.get("function") or {}
             out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.id"] = tc.get("id")
             out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.name"] = fn.get("name")
-            out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.arguments"] = fn.get("arguments")
+            out[f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.arguments"] = fn.get(
+                "arguments"
+            )
         if msg.get("tool_call_id"):
             out[f"{prefix}.{i}.message.tool_call_id"] = msg["tool_call_id"]
         if msg.get("name"):
@@ -411,6 +426,7 @@ def _drop_none(d: Mapping[str, Any]) -> dict[str, Any]:
 def _sdk_version() -> str:
     try:
         from importlib.metadata import version
+
         return version("openai-agents")
     except Exception:
         return "unknown"
@@ -419,6 +435,7 @@ def _sdk_version() -> str:
 # ---------------------------------------------------------------------------
 # TracingProcessor — plugs the converter into the SDK.
 # ---------------------------------------------------------------------------
+
 
 class InferenceOtlpFileProcessor(TracingProcessor):
     """Append-only JSONL writer, one line per span, spec-compliant with
@@ -487,18 +504,24 @@ class InferenceOtlpFileProcessor(TracingProcessor):
 # One-call wiring — what most users will import.
 # ---------------------------------------------------------------------------
 
+
 def attach_local_processor(
     *,
     path: str,
     service_name: str,
     project_id: str,
+    extra_resource_attributes: Mapping[str, Any] | None = None,
 ) -> InferenceOtlpFileProcessor:
     """Construct ``InferenceOtlpFileProcessor`` and register it with the SDK.
 
     The caller owns the path and identity; this function does not read env
     vars. Returns the processor so the caller can ``shutdown()`` it.
     """
-    ctx = ExportContext(project_id=project_id, service_name=service_name)
+    ctx = ExportContext(
+        project_id=project_id,
+        service_name=service_name,
+        extra_resource_attributes=extra_resource_attributes,
+    )
     processor = InferenceOtlpFileProcessor(path, ctx=ctx)
     add_trace_processor(processor)
     return processor
