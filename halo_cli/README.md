@@ -58,6 +58,49 @@ halo tests/fixtures/realistic_traces.jsonl \
 
 Output streams to stdout: text deltas inline, then a rule-separated panel for each agent output item.
 
+## Telemetry (optional)
+
+HALO can emit OpenInference traces of its **own** LLM, tool, and agent activity — useful when you're tuning HALO and want to see what it actually did. This is opt-in and off by default; nothing is written or sent unless you pass `--telemetry`.
+
+### Install the extra
+
+The telemetry path requires Python ≥3.11 and a separate optional dependency:
+
+```bash
+pip install 'halo-engine[telemetry]'
+```
+
+### Enable on a run
+
+```bash
+halo TRACE_PATH --prompt "..." --telemetry
+```
+
+### Where the spans go
+
+| Condition | Destination |
+|---|---|
+| `CATALYST_OTLP_TOKEN` set | OTLP upload to inference.net Catalyst |
+| `CATALYST_OTLP_TOKEN` unset | Local JSONL file |
+
+Local file path defaults to `./halo-telemetry-{run_id}.jsonl`. Override with `HALO_TELEMETRY_PATH=/some/path.jsonl`.
+
+### Environment variables
+
+| Var | Default | Purpose |
+|---|---|---|
+| `CATALYST_OTLP_TOKEN` | *(unset)* | If set, uploads to Catalyst over OTLP. If unset, writes JSONL locally. |
+| `CATALYST_OTLP_ENDPOINT` | catalyst-tracing default | OTLP endpoint URL. |
+| `CATALYST_SERVICE_NAME` | `halo-engine` | Service identifier on traces. |
+| `HALO_TELEMETRY_PATH` | `./halo-telemetry-{run_id}.jsonl` | Local fallback file path. |
+
+Every span carries a `halo.run_id` resource attribute so a single run is filterable in Catalyst.
+
+### Notes
+
+- Enabling `--telemetry` clears the openai-agents SDK's default trace processor (which would otherwise upload to OpenAI's dashboard). HALO's own LLM traffic stays out of OpenAI's dashboard while telemetry is on.
+- When telemetry is off (the default), no env vars are read and no files are written.
+
 ## Developing locally
 
 If you want to hack on the CLI or the engine itself, install from a checkout of this repo with [`uv`](https://docs.astral.sh/uv/):
