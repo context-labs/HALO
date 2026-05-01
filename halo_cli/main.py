@@ -76,7 +76,9 @@ def _make_config(
     )
 
 
-async def _stream(trace_path: Path, prompt: str, cfg: EngineConfig, *, telemetry: bool = False) -> None:
+async def _stream(
+    trace_path: Path, prompt: str, cfg: EngineConfig, *, telemetry: bool = False
+) -> None:
     msgs = [AgentMessage(role="user", content=prompt)]
     async for ev in stream_engine_async(msgs, cfg, trace_path, telemetry=telemetry):
         if isinstance(ev, AgentTextDelta):
