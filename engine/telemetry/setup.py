@@ -1,8 +1,16 @@
-"""HALO engine telemetry: opt-in OTLP-or-local tracing for HALO itself.
+"""HALO engine telemetry: opt-in local JSONL tracing for HALO itself.
 
 Init lifecycle is owned by ``stream_engine_async`` in ``engine/main.py``.
-Callers pass ``telemetry=True`` to opt in. Routing is decided here, by
-presence of ``CATALYST_OTLP_TOKEN`` in the environment.
+Callers pass ``telemetry=True`` to opt in; spans are written to a local
+JSONL file at ``$HALO_TELEMETRY_PATH`` (default:
+``./halo-telemetry-{run_id}.jsonl``).
+
+A direct upload path to inference.net Catalyst is planned but currently
+blocked on an upstream incompatibility between ``catalyst-tracing``'s
+OpenAI instrumentation and the ``with_streaming_response.create`` path
+that ``openai-agents`` >= 0.11.0 uses. See
+``docs/superpowers/plans/2026-05-01-restore-catalyst-telemetry.md`` for
+the restoration plan.
 """
 
 from __future__ import annotations
@@ -17,7 +25,8 @@ from engine.telemetry.local_processor import attach_local_processor
 
 
 class TelemetryHandle:
-    """Owns shutdown for whichever backend was selected. Idempotent.
+    """Owns shutdown for the telemetry backend. Idempotent.
+
     ``shutdown()`` swallows backend errors so it cannot mask an engine
     exception in an outer ``finally``.
     """
@@ -39,9 +48,9 @@ class TelemetryHandle:
 def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHandle | None:
     """Initialize tracing. Returns None when ``enable`` is False (default).
 
-    Routing rule:
-      - ``CATALYST_OTLP_TOKEN`` set → OTLP via ``inference_catalyst_tracing``
-      - otherwise                    → local JSONL via ``InferenceOtlpFileProcessor``
+    Attaches the local JSONL processor to the openai-agents SDK. Path
+    defaults to ``./halo-telemetry-{run_id}.jsonl``; override with
+    ``$HALO_TELEMETRY_PATH``.
 
     Always clears the openai-agents SDK's default tracing processor list
     so HALO's own LLM activity does not leak to the OpenAI dashboard.
@@ -52,41 +61,11 @@ def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHand
     set_trace_processors([])
 
     rid = run_id or uuid.uuid4().hex
-    if os.environ.get("CATALYST_OTLP_TOKEN"):
-        return _setup_catalyst(run_id=rid)
-    return _setup_local(run_id=rid)
-
-
-def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
-    try:
-        from inference_catalyst_tracing import setup
-    except ImportError as exc:
-        raise RuntimeError(
-            "Telemetry is enabled but the optional 'telemetry' extra is "
-            "not installed. Install with: pip install 'halo-engine[telemetry]' "
-            "(requires Python >=3.11)."
-        ) from exc
-
-    # catalyst-tracing.setup() in 0.0.8 does not accept kwargs; configure
-    # via env vars. Default the service name to "halo-engine" if the user
-    # hasn't set CATALYST_SERVICE_NAME, and stamp halo.run_id onto every
-    # span via OTEL_RESOURCE_ATTRIBUTES (merge-don't-clobber).
-    os.environ.setdefault("CATALYST_SERVICE_NAME", "halo-engine")
-    existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
-    halo_attr = f"halo.run_id={run_id}"
-    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = f"{existing},{halo_attr}" if existing else halo_attr
-
-    backend = setup()
-    return TelemetryHandle(backend=backend)
-
-
-def _setup_local(*, run_id: str) -> TelemetryHandle:
-    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{run_id}.jsonl"
-    service_name = os.environ.get("CATALYST_SERVICE_NAME", "halo-engine")
+    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{rid}.jsonl"
     processor = attach_local_processor(
         path=path,
-        service_name=service_name,
+        service_name="halo-engine",
         project_id="halo-engine",
-        extra_resource_attributes={"halo.run_id": run_id},
+        extra_resource_attributes={"halo.run_id": rid},
     )
     return TelemetryHandle(backend=processor)
