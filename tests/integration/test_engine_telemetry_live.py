@@ -19,12 +19,13 @@ from engine.engine_config import EngineConfig
 from engine.main import run_engine_async
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
+from tests.probes.probe_kit import isolated_trace_copy
 
 
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_local_telemetry_backend_writes_jsonl(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY not set; live test requires LLM access")
@@ -45,7 +46,9 @@ async def test_local_telemetry_backend_writes_jsonl(
     )
 
     messages = [AgentMessage(role="user", content="Reply with the word ok and stop.")]
-    trace_path = fixtures_dir / "tiny_traces.jsonl"
+    # Copy the fixture into tmp so TraceIndexBuilder's sidecar files
+    # don't pollute tests/fixtures/. Same convention as every other test.
+    trace_path = isolated_trace_copy()
 
     await run_engine_async(messages, cfg, trace_path, telemetry=True)
 
