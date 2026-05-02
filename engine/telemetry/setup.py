@@ -16,10 +16,9 @@ the restoration plan.
 from __future__ import annotations
 
 import os
-import uuid
-from typing import Any
 
 from agents import set_trace_processors
+from agents.tracing.processor_interface import TracingProcessor
 
 from engine.telemetry.local_processor import attach_local_processor
 
@@ -31,7 +30,7 @@ class TelemetryHandle:
     exception in an outer ``finally``.
     """
 
-    def __init__(self, *, backend: Any) -> None:
+    def __init__(self, *, backend: TracingProcessor) -> None:
         self._backend = backend
         self._closed = False
 
@@ -45,8 +44,8 @@ class TelemetryHandle:
             pass
 
 
-def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHandle | None:
-    """Initialize tracing. Returns None when ``enable`` is False (default).
+def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
+    """Initialize tracing. Returns None when ``enable`` is False.
 
     Attaches the local JSONL processor to the openai-agents SDK. Path
     defaults to ``./halo-telemetry-{run_id}.jsonl``; override with
@@ -60,12 +59,11 @@ def setup_telemetry(*, enable: bool, run_id: str | None = None) -> TelemetryHand
 
     set_trace_processors([])
 
-    rid = run_id or uuid.uuid4().hex
-    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{rid}.jsonl"
+    path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{run_id}.jsonl"
     processor = attach_local_processor(
         path=path,
         service_name="halo-engine",
         project_id="halo-engine",
-        extra_resource_attributes={"halo.run_id": rid},
+        extra_resource_attributes={"halo.run_id": run_id},
     )
     return TelemetryHandle(backend=processor)

@@ -29,8 +29,6 @@ async def test_local_telemetry_backend_writes_jsonl(
     if not os.environ.get("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY not set; live test requires LLM access")
 
-    # Force the local backend regardless of the developer's environment.
-    monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
     out_path = tmp_path / "telemetry.jsonl"
     monkeypatch.setenv("HALO_TELEMETRY_PATH", str(out_path))
 

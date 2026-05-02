@@ -6,7 +6,7 @@ from engine.telemetry import setup_telemetry
 
 
 def test_setup_returns_none_when_disabled() -> None:
-    handle = setup_telemetry(enable=False)
+    handle = setup_telemetry(enable=False, run_id="unused")
     assert handle is None
 
 
