@@ -76,9 +76,11 @@ def _make_config(
     )
 
 
-async def _stream(trace_path: Path, prompt: str, cfg: EngineConfig) -> None:
+async def _stream(
+    trace_path: Path, prompt: str, cfg: EngineConfig, *, telemetry: bool = False
+) -> None:
     msgs = [AgentMessage(role="user", content=prompt)]
-    async for ev in stream_engine_async(msgs, cfg, trace_path):
+    async for ev in stream_engine_async(msgs, cfg, trace_path, telemetry=telemetry):
         if isinstance(ev, AgentTextDelta):
             console.print(ev.text_delta, end="", soft_wrap=True)
         elif isinstance(ev, AgentOutputItem):
@@ -118,6 +120,15 @@ def _run(
             "provider default for non-reasoning models."
         ),
     ),
+    telemetry: bool = typer.Option(
+        False,
+        "--telemetry/--no-telemetry",
+        help=(
+            "Emit OpenInference traces of HALO's own LLM/tool/agent "
+            "activity to a local JSONL file at $HALO_TELEMETRY_PATH "
+            "(default: ./halo-telemetry-{run_id}.jsonl)."
+        ),
+    ),
 ) -> None:
     """Run the HALO engine against TRACE_PATH and stream output to stdout."""
     if not os.environ.get("OPENAI_API_KEY"):
@@ -131,7 +142,7 @@ def _run(
         instructions,
         _parse_reasoning_effort(reasoning_effort),
     )
-    asyncio.run(_stream(trace_path, prompt, cfg))
+    asyncio.run(_stream(trace_path, prompt, cfg, telemetry=telemetry))
 
 
 def app() -> None:
