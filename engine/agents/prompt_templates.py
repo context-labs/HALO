@@ -50,6 +50,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "truncated payload from `view_spans` still matters, narrow further with "
     "`search_span` against a more specific regex rather than asking for the full "
     "payload again."
+    "10. If depth<maximum_depth, delegate well defined multi-turn subtasks to "
+    "subagents using the `call_subagent` tool rather than exploring the trace data "
+    "yourself."
 )
 
 ROOT_SYSTEM_PROMPT_TEMPLATE = """\
@@ -60,6 +63,9 @@ Depth rules:
 - You are at depth=0.
 - maximum_depth={maximum_depth}. Subagents you spawn are at depth=1.
 - Spawn at most {maximum_parallel_subagents} subagents concurrently.
+- If maximum_depth>0, prefer to spawn subagents rather than exploring the trace data
+  yourself. You should only call the "call_subagent" tool, delegate all other tool
+  calls to subagents.
 
 Output rules:
 - When you are finished and have produced your final answer, end that
