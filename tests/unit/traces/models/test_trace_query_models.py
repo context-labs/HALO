@@ -1,110 +1,51 @@
+"""Tests for the bits of ``trace_query_models`` that capture our own design
+decisions (custom Field constraints + defaults).
+
+Pydantic's own validation (required-field checks, JSON round-tripping, type
+coercion) is covered by Pydantic; basedpyright catches missing or misnamed
+fields on the construction side. Both are out of scope here.
+"""
+
 from __future__ import annotations
 
+import pytest
+
 from engine.traces.models.trace_query_models import (
-    CountTracesArguments,
-    CountTracesResult,
-    DatasetOverview,
-    DatasetOverviewArguments,
-    DatasetOverviewResult,
     QueryTracesArguments,
-    QueryTracesResult,
+    SearchSpanArguments,
     SearchTraceArguments,
-    SearchTraceResult,
-    TraceCountResult,
-    TraceFilters,
-    TraceQueryResult,
-    TraceSearchResult,
-    TraceSummary,
-    TraceView,
-    ViewTraceArguments,
-    ViewTraceResult,
+    ViewSpansArguments,
 )
 
 
-def test_filters_all_optional() -> None:
-    f = TraceFilters()
-    assert f.has_errors is None
-    assert f.model_names is None
-    assert f.service_names is None
-
-
-def test_query_arguments_defaults() -> None:
-    args = QueryTracesArguments(filters=TraceFilters())
+def test_query_arguments_pagination_defaults() -> None:
+    args = QueryTracesArguments()
     assert args.limit == 50
     assert args.offset == 0
 
 
-def test_trace_summary_roundtrip() -> None:
-    s = TraceSummary(
-        trace_id="t",
-        span_count=2,
-        start_time="a",
-        end_time="b",
-        has_errors=False,
-        service_names=["svc"],
-        model_names=["m"],
-        total_input_tokens=1,
-        total_output_tokens=2,
-        agent_names=["a"],
-    )
-    assert TraceSummary.model_validate_json(s.model_dump_json()) == s
+def test_search_argument_defaults() -> None:
+    trace = SearchTraceArguments(trace_id="t", regex_pattern="x")
+    span = SearchSpanArguments(trace_id="t", span_id="s", regex_pattern="x")
+    for args in (trace, span):
+        assert args.context_buffer_chars == 100
+        assert args.max_matches == 50
 
 
-def test_count_result() -> None:
-    r = TraceCountResult(total=7)
-    assert r.total == 7
+def test_search_argument_bounds() -> None:
+    with pytest.raises(ValueError):
+        SearchTraceArguments(trace_id="t", regex_pattern="x", max_matches=0)
+    with pytest.raises(ValueError):
+        SearchTraceArguments(trace_id="t", regex_pattern="x", max_matches=501)
+    with pytest.raises(ValueError):
+        SearchTraceArguments(trace_id="t", regex_pattern="x", context_buffer_chars=-1)
+    with pytest.raises(ValueError):
+        SearchTraceArguments(trace_id="t", regex_pattern="x", context_buffer_chars=2_001)
 
 
-def test_search_result_holds_matches() -> None:
-    r = TraceSearchResult(trace_id="t", match_count=2, matches=["hit1", "hit2"])
-    assert r.match_count == 2
-
-
-def test_view_has_span_list() -> None:
-    v = TraceView(trace_id="t", spans=[])
-    assert v.trace_id == "t"
-
-
-def test_dataset_overview() -> None:
-    ov = DatasetOverview(
-        total_traces=3,
-        total_spans=6,
-        earliest_start_time="a",
-        latest_end_time="b",
-        service_names=["svc"],
-        model_names=["m"],
-        agent_names=["a"],
-        error_trace_count=1,
-        total_input_tokens=330,
-        total_output_tokens=100,
-    )
-    assert ov.total_traces == 3
-
-
-def test_result_wrappers_tool_boundary() -> None:
-    assert QueryTracesResult(result=TraceQueryResult(traces=[], total=0)).result.total == 0
-    assert ViewTraceResult(result=TraceView(trace_id="t", spans=[])).result.trace_id == "t"
-    assert CountTracesResult(result=TraceCountResult(total=0)).result.total == 0
-    assert (
-        SearchTraceResult(
-            result=TraceSearchResult(trace_id="t", match_count=0, matches=[])
-        ).result.match_count
-        == 0
-    )
-    ov = DatasetOverview(
-        total_traces=0,
-        total_spans=0,
-        earliest_start_time="",
-        latest_end_time="",
-        service_names=[],
-        model_names=[],
-        agent_names=[],
-        error_trace_count=0,
-        total_input_tokens=0,
-        total_output_tokens=0,
-    )
-    assert DatasetOverviewResult(result=ov).result.total_traces == 0
-    assert DatasetOverviewArguments(filters=TraceFilters()).filters.has_errors is None
-    assert SearchTraceArguments(trace_id="t", pattern="x").pattern == "x"
-    assert ViewTraceArguments(trace_id="t").trace_id == "t"
-    assert CountTracesArguments(filters=TraceFilters()).filters.has_errors is None
+def test_view_spans_arguments_span_id_list_bounds() -> None:
+    ViewSpansArguments(trace_id="t", span_ids=["s-0"])
+    with pytest.raises(ValueError):
+        ViewSpansArguments(trace_id="t", span_ids=[])
+    with pytest.raises(ValueError):
+        ViewSpansArguments(trace_id="t", span_ids=[f"s-{i}" for i in range(201)])
