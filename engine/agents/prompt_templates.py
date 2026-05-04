@@ -49,7 +49,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "your answer, first try `view_spans` on that span id (~16KB cap). If a `~16KB`-"
     "truncated payload from `view_spans` still matters, narrow further with "
     "`search_span` against a more specific regex rather than asking for the full "
-    "payload again."
+    "payload again.\n"
     "10. If depth<maximum_depth, delegate well defined multi-turn subtasks to "
     "subagents using the `call_subagent` tool rather than exploring the trace data "
     "yourself."
