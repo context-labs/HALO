@@ -32,20 +32,21 @@ halo TRACE_PATH --prompt "your question"
 
 ### Required
 
-| Arg | Description |
-|---|---|
-| `TRACE_PATH` | JSONL trace file (e.g. `tests/fixtures/realistic_traces.jsonl`) |
-| `--prompt`, `-p` | User prompt sent to the root agent |
+| Arg              | Description                                                     |
+| ---------------- | --------------------------------------------------------------- |
+| `TRACE_PATH`     | JSONL trace file (e.g. `tests/fixtures/realistic_traces.jsonl`) |
+| `--prompt`, `-p` | User prompt sent to the root agent                              |
 
 ### Options
 
-| Flag | Default | Description |
-|---|---|---|
-| `--model`, `-m` | `gpt-5.4-mini` | Model name for root, sub, synthesis, and compaction |
-| `--max-depth` | `1` | Max subagent recursion depth |
-| `--max-turns` | `8` | Max turns per agent |
-| `--max-parallel` | `2` | Max concurrent subagents |
-| `--instructions` | *(engine default)* | Override default trace-tool agent instructions |
+| Flag                 | Default            | Description                                                                                                                                                                                                                      |
+| -------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--model`, `-m`      | `gpt-5.4-mini`     | Model name for root, sub, synthesis, and compaction                                                                                                                                                                              |
+| `--max-depth`        | `1`                | Max subagent recursion depth                                                                                                                                                                                                     |
+| `--max-turns`        | `8`                | Max turns per agent                                                                                                                                                                                                              |
+| `--max-parallel`     | `2`                | Max concurrent subagents                                                                                                                                                                                                         |
+| `--instructions`     | _(engine default)_ | Override default trace-tool agent instructions                                                                                                                                                                                   |
+| `--reasoning-effort` | _(model default)_  | Reasoning effort for root, subagent, and synthesis calls. One of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Compaction never uses reasoning. Omit to use the model family's documented max for known reasoning models. |
 
 ## Example
 
@@ -53,7 +54,8 @@ halo TRACE_PATH --prompt "your question"
 halo tests/fixtures/realistic_traces.jsonl \
   -p "What are the most common failure modes?" \
   --max-depth 2 \
-  --max-turns 12
+  --max-turns 12 \
+  --reasoning-effort high
 ```
 
 Output streams to stdout: text deltas inline, then a rule-separated panel for each agent output item.
