@@ -42,9 +42,11 @@ async def stream_engine_async(
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
 
     Set ``telemetry=True`` to emit OpenInference traces of HALO's own LLM /
-    tool / agent activity to a local JSONL file at ``$HALO_TELEMETRY_PATH``
-    (default: ``./halo-telemetry-{run_id}.jsonl``). Off by default — no
-    overhead, no file writes, no env var reads when ``telemetry=False``.
+    tool / agent activity. Routing: if ``CATALYST_OTLP_TOKEN`` is set, spans
+    are uploaded to inference.net Catalyst over OTLP. Otherwise spans are
+    written to the local JSONL file at ``$HALO_TELEMETRY_PATH`` (default:
+    ``./halo-telemetry-{run_id}.jsonl``). Off by default — no overhead, no
+    file writes, no env var reads when ``telemetry=False``.
     """
     run_id = uuid.uuid4().hex
     telemetry_handle = setup_telemetry(enable=telemetry, run_id=run_id)

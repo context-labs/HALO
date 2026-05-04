@@ -62,7 +62,7 @@ Output streams to stdout: text deltas inline, then a rule-separated panel for ea
 
 ## Telemetry (optional)
 
-HALO can emit OpenInference-shaped traces of its **own** LLM, tool, and agent activity to a local JSONL file — useful when you're tuning HALO and want to inspect what it actually did. Off by default; nothing is written unless you pass `--telemetry`.
+HALO can emit OpenInference-shaped traces of its **own** LLM, tool, and agent activity — useful when you're tuning HALO and want to inspect what it actually did. Off by default; nothing is emitted unless you pass `--telemetry`.
 
 ### Enable on a run
 
@@ -70,23 +70,33 @@ HALO can emit OpenInference-shaped traces of its **own** LLM, tool, and agent ac
 halo TRACE_PATH --prompt "..." --telemetry
 ```
 
-### Where the spans go
+### Routing
 
-Spans are written to `./halo-telemetry-{run_id}.jsonl` in the current working directory. Override with:
+The destination is decided by env vars:
 
-```bash
-export HALO_TELEMETRY_PATH=/some/path.jsonl
-```
+- `CATALYST_OTLP_TOKEN` set → spans are uploaded to **inference.net Catalyst** over OTLP. Requires the optional `telemetry` extra: `pip install 'halo-engine[telemetry]'` (Python ≥ 3.11).
+- `CATALYST_OTLP_TOKEN` unset → spans are written to a **local JSONL file** at `./halo-telemetry-{run_id}.jsonl` in the current working directory.
 
-The file format is the inference.net OTLP-shaped JSONL that HALO itself ingests, so traces produced by running HALO can be loaded back into HALO for analysis.
+Either way, every span carries a `halo.run_id` resource attribute so you can filter to a single run.
 
-Every span carries a `halo.run_id` resource attribute matching the file suffix, useful for filtering when multiple runs share a path.
+### Environment variables
+
+| Var | Default | Purpose |
+|---|---|---|
+| `CATALYST_OTLP_TOKEN` | *(unset)* | If set, uploads to Catalyst over OTLP. If unset, writes JSONL locally. |
+| `CATALYST_OTLP_ENDPOINT` | catalyst-tracing default | OTLP endpoint **base URL** (e.g. `https://telemetry.inference.net`). catalyst-tracing appends `/v1/traces` automatically — do **not** include the path, or you'll get a `.../v1/traces/v1/traces` 404 and silently no traces. |
+| `CATALYST_SERVICE_NAME` | `halo-engine` | Service identifier on traces. |
+| `CATALYST_DEBUG` | *(unset)* | Set to `1` to surface OTLP export errors at WARNING level. Useful for troubleshooting "no errors, no traces" — the default `BatchSpanProcessor` swallows export failures. |
+| `HALO_TELEMETRY_PATH` | `./halo-telemetry-{run_id}.jsonl` | Local fallback file path. Only consulted when `CATALYST_OTLP_TOKEN` is unset. |
+
+### Local file format
+
+The local JSONL is the inference.net OTLP-shaped form that HALO itself ingests, so traces produced by running HALO can be loaded back into HALO for analysis.
 
 ### Notes
 
 - Enabling `--telemetry` clears the openai-agents SDK's default trace processor (which would otherwise upload to OpenAI's dashboard). HALO's own LLM traffic stays out of OpenAI's dashboard while telemetry is on.
 - When telemetry is off (the default), no env vars are read and no files are written.
-- A direct upload path to inference.net Catalyst is planned; it is currently blocked on an upstream incompatibility between catalyst-tracing's OpenAI instrumentation and openai-agents 0.14+ streaming responses.
 
 ## Developing locally
 
