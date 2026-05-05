@@ -74,7 +74,7 @@ halo TRACE_PATH --prompt "..." --telemetry
 
 The destination is decided by env vars:
 
-- `CATALYST_OTLP_TOKEN` set → spans are uploaded to **inference.net Catalyst** over OTLP. Requires the optional `telemetry` extra: `pip install 'halo-engine[telemetry]'` (Python ≥ 3.11).
+- `CATALYST_OTLP_TOKEN` set → spans are uploaded to **inference.net Catalyst** over OTLP.
 - `CATALYST_OTLP_TOKEN` unset → spans are written to a **local JSONL file** at `./halo-telemetry-{run_id}.jsonl` in the current working directory.
 
 Either way, every span carries a `halo.run_id` resource attribute so you can filter to a single run.

@@ -6,8 +6,7 @@ Callers pass ``telemetry=True`` to opt in.
 Routing rule (decided here, not by callers):
 
 * ``CATALYST_OTLP_TOKEN`` is set → spans go to inference.net Catalyst
-  over OTLP via ``inference_catalyst_tracing``. Requires the optional
-  ``telemetry`` extra (Python >= 3.11).
+  over OTLP via ``inference_catalyst_tracing``.
 * ``CATALYST_OTLP_TOKEN`` is unset → spans go to a local JSONL file at
   ``$HALO_TELEMETRY_PATH`` (default ``./halo-telemetry-{run_id}.jsonl``)
   via ``InferenceOtlpFileProcessor``.
@@ -22,6 +21,7 @@ import os
 from typing import Protocol
 
 from agents import set_trace_processors
+from inference_catalyst_tracing import setup as catalyst_setup
 
 from engine.telemetry.local_processor import attach_local_processor
 
@@ -75,21 +75,12 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
 
 
 def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
-    try:
-        from inference_catalyst_tracing import setup
-    except ImportError as exc:
-        raise RuntimeError(
-            "Telemetry is enabled and CATALYST_OTLP_TOKEN is set, but the "
-            "optional 'telemetry' extra is not installed. Install with: "
-            "pip install 'halo-engine[telemetry]' (requires Python >=3.11)."
-        ) from exc
-
     os.environ.setdefault("CATALYST_SERVICE_NAME", "halo-engine")
     existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
     halo_attr = f"halo.run_id={run_id}"
     os.environ["OTEL_RESOURCE_ATTRIBUTES"] = f"{existing},{halo_attr}" if existing else halo_attr
 
-    backend = setup()
+    backend = catalyst_setup()
     return TelemetryHandle(backend=backend)
 
 

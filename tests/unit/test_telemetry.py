@@ -4,13 +4,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
-pytest.importorskip(
-    "inference_catalyst_tracing",
-    reason="telemetry extra not installed; install with `uv sync --extra telemetry`",
-)
-
 from engine.telemetry import setup_telemetry
 
 
@@ -181,8 +174,9 @@ class _StubCatalystBackend:
 
 
 def _install_stub_catalyst(monkeypatch) -> list[_StubCatalystBackend]:
-    """Replace inference_catalyst_tracing.setup with a stub. Returns the
-    list the stub appends backends to (one entry per setup() call)."""
+    """Replace the ``catalyst_setup`` reference bound in
+    ``engine.telemetry.setup`` with a stub. Returns the list the stub
+    appends backends to (one entry per setup() call)."""
     backends: list[_StubCatalystBackend] = []
 
     def _stub_setup(*args, **kwargs):
@@ -190,9 +184,7 @@ def _install_stub_catalyst(monkeypatch) -> list[_StubCatalystBackend]:
         backends.append(be)
         return be
 
-    import inference_catalyst_tracing as ict
-
-    monkeypatch.setattr(ict, "setup", _stub_setup)
+    monkeypatch.setattr("engine.telemetry.setup.catalyst_setup", _stub_setup)
     return backends
 
 

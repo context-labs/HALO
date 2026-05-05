@@ -43,7 +43,7 @@ You should never ask HALO Engine to propose code changes. You should ask it ques
 Prereqs:
 
 - A clone of `https://github.com/inference-net/HALO` somewhere on disk. The path is referred to below as `$HALO`.
-- Python 3.10+, `uv` for environment management.
+- Python 3.11+, `uv` for environment management.
 - An `OPENAI_API_KEY` env var (the engine itself uses an LLM to drive tool calls).
 
 Install the engine + CLI once:
