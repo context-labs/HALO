@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PYTHON_VERSION: "3.10"
+  PYTHON_VERSION: "3.11"
   CI_BOT_GITHUB_APP_ID: "1281730"
 
   INFISICAL_IDENTITY_ID: "dc1d9282-7640-471d-bc3e-926297a5ef85" # halo-github-ci

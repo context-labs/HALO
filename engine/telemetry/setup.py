@@ -1,26 +1,36 @@
-"""HALO engine telemetry: opt-in local JSONL tracing for HALO itself.
+"""HALO engine telemetry: opt-in tracing for HALO itself.
 
 Init lifecycle is owned by ``stream_engine_async`` in ``engine/main.py``.
-Callers pass ``telemetry=True`` to opt in; spans are written to a local
-JSONL file at ``$HALO_TELEMETRY_PATH`` (default:
-``./halo-telemetry-{run_id}.jsonl``).
+Callers pass ``telemetry=True`` to opt in.
 
-A direct upload path to inference.net Catalyst is planned but currently
-blocked on an upstream incompatibility between ``catalyst-tracing``'s
-OpenAI instrumentation and the ``with_streaming_response.create`` path
-that ``openai-agents`` >= 0.11.0 uses. See
-``docs/superpowers/plans/2026-05-01-restore-catalyst-telemetry.md`` for
-the restoration plan.
+Routing rule (decided here, not by callers):
+
+* ``CATALYST_OTLP_TOKEN`` is set → spans go to inference.net Catalyst
+  over OTLP via ``inference_catalyst_tracing``.
+* ``CATALYST_OTLP_TOKEN`` is unset → spans go to a local JSONL file at
+  ``$HALO_TELEMETRY_PATH`` (default ``./halo-telemetry-{run_id}.jsonl``)
+  via ``InferenceOtlpFileProcessor``.
+
+Both backends carry a ``halo.run_id`` resource attribute so traces can
+be filtered to a single HALO run server-side.
 """
 
 from __future__ import annotations
 
 import os
+from typing import Protocol
 
 from agents import set_trace_processors
-from agents.tracing.processor_interface import TracingProcessor
+from inference_catalyst_tracing import setup as catalyst_setup
 
 from engine.telemetry.local_processor import attach_local_processor
+
+
+class _Shutdownable(Protocol):
+    """Backend protocol — both Catalyst (``CatalystTracing``) and local
+    (``InferenceOtlpFileProcessor``) implement ``shutdown()``."""
+
+    def shutdown(self) -> None: ...
 
 
 class TelemetryHandle:
@@ -30,7 +40,7 @@ class TelemetryHandle:
     exception in an outer ``finally``.
     """
 
-    def __init__(self, *, backend: TracingProcessor) -> None:
+    def __init__(self, *, backend: _Shutdownable) -> None:
         self._backend = backend
         self._closed = False
 
@@ -47,9 +57,9 @@ class TelemetryHandle:
 def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     """Initialize tracing. Returns None when ``enable`` is False.
 
-    Attaches the local JSONL processor to the openai-agents SDK. Path
-    defaults to ``./halo-telemetry-{run_id}.jsonl``; override with
-    ``$HALO_TELEMETRY_PATH``.
+    Routing rule:
+      - ``CATALYST_OTLP_TOKEN`` set → OTLP via ``inference_catalyst_tracing``
+      - otherwise                    → local JSONL via ``InferenceOtlpFileProcessor``
 
     Always clears the openai-agents SDK's default tracing processor list
     so HALO's own LLM activity does not leak to the OpenAI dashboard.
@@ -59,6 +69,22 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
 
     set_trace_processors([])
 
+    if os.environ.get("CATALYST_OTLP_TOKEN"):
+        return _setup_catalyst(run_id=run_id)
+    return _setup_local(run_id=run_id)
+
+
+def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
+    os.environ.setdefault("CATALYST_SERVICE_NAME", "halo-engine")
+    existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
+    halo_attr = f"halo.run_id={run_id}"
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = f"{existing},{halo_attr}" if existing else halo_attr
+
+    backend = catalyst_setup()
+    return TelemetryHandle(backend=backend)
+
+
+def _setup_local(*, run_id: str) -> TelemetryHandle:
     path = os.environ.get("HALO_TELEMETRY_PATH") or f"halo-telemetry-{run_id}.jsonl"
     processor = attach_local_processor(
         path=path,

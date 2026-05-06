@@ -17,6 +17,7 @@ from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.prompt_templates import render_subagent_system_prompt
 from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
+from engine.telemetry.tracing import halo_agent_span
 from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
@@ -257,45 +258,46 @@ def _build_subagent_as_tool(
                 compactor_factory=build_compactor_factory(engine_config),
             )
 
-            try:
-                await runner.run(
-                    sdk_agent=child_agent,
-                    agent_context=child_context,
-                    agent_execution=child_execution,
-                    output_bus=run_state.output_bus,
-                    is_root=False,
-                    run_context=run_state,
-                )
-            except EngineAgentExhaustedError as exc:
-                logger.warning(
-                    "subagent %s exhausted retries at depth=%s: %s",
-                    child_execution.agent_id,
-                    child_depth,
-                    exc,
-                )
-                return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
-            except Exception as exc:
-                logger.warning(
-                    "subagent %s failed at depth=%s: %s: %s",
-                    child_execution.agent_id,
-                    child_depth,
-                    type(exc).__name__,
-                    exc,
-                )
-                return _failure_result(
-                    child_execution, f"Subagent failed: {type(exc).__name__}: {exc}"
-                )
+            with halo_agent_span(name=engine_config.subagent.name, system="openai"):
+                try:
+                    await runner.run(
+                        sdk_agent=child_agent,
+                        agent_context=child_context,
+                        agent_execution=child_execution,
+                        output_bus=run_state.output_bus,
+                        is_root=False,
+                        run_context=run_state,
+                    )
+                except EngineAgentExhaustedError as exc:
+                    logger.warning(
+                        "subagent %s exhausted retries at depth=%s: %s",
+                        child_execution.agent_id,
+                        child_depth,
+                        exc,
+                    )
+                    return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
+                except Exception as exc:
+                    logger.warning(
+                        "subagent %s failed at depth=%s: %s: %s",
+                        child_execution.agent_id,
+                        child_depth,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    return _failure_result(
+                        child_execution, f"Subagent failed: {type(exc).__name__}: {exc}"
+                    )
 
-            answer = _extract_final_answer(child_context)
-            result = SubagentToolResult(
-                child_agent_id=child_execution.agent_id,
-                answer=answer,
-                output_start_sequence=child_execution.output_start_sequence or 0,
-                output_end_sequence=child_execution.output_end_sequence or 0,
-                turns_used=child_execution.turns_used,
-                tool_calls_made=child_execution.tool_calls_made,
-            )
-            return result.model_dump_json()
+                answer = _extract_final_answer(child_context)
+                result = SubagentToolResult(
+                    child_agent_id=child_execution.agent_id,
+                    answer=answer,
+                    output_start_sequence=child_execution.output_start_sequence or 0,
+                    output_end_sequence=child_execution.output_end_sequence or 0,
+                    turns_used=child_execution.turns_used,
+                    tool_calls_made=child_execution.tool_calls_made,
+                )
+                return result.model_dump_json()
 
     sdk_tool.on_invoke_tool = guarded_invoke
     return sdk_tool

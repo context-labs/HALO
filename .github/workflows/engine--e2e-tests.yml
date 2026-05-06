@@ -10,7 +10,7 @@ on:
         required: true
 
 env:
-  PYTHON_VERSION: "3.10"
+  PYTHON_VERSION: "3.11"
   INFISICAL_CLI_VERSION: "0.41.2"
   INFISICAL_PROJECT_ID: "822ab0ec-ad72-4b7d-9f49-93b43be4eda0"
 

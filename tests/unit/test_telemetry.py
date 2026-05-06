@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from engine.telemetry import setup_telemetry
 
 
@@ -155,3 +157,101 @@ def test_shutdown_swallows_backend_errors(monkeypatch, tmp_path) -> None:
     handle = setup_telemetry(enable=True, run_id="x")
     assert handle is not None
     handle.shutdown()  # must NOT raise
+
+
+# ---------------------------------------------------------------------------
+# Catalyst-path tests: stub `inference_catalyst_tracing.setup` so no real
+# OTLP traffic leaves the test process.
+# ---------------------------------------------------------------------------
+
+
+class _StubCatalystBackend:
+    def __init__(self) -> None:
+        self.shutdown_calls = 0
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+
+
+def _install_stub_catalyst(monkeypatch) -> list[_StubCatalystBackend]:
+    """Replace the ``catalyst_setup`` reference bound in
+    ``engine.telemetry.setup`` with a stub. Returns the list the stub
+    appends backends to (one entry per setup() call)."""
+    backends: list[_StubCatalystBackend] = []
+
+    def _stub_setup(*args, **kwargs):
+        be = _StubCatalystBackend()
+        backends.append(be)
+        return be
+
+    monkeypatch.setattr("engine.telemetry.setup.catalyst_setup", _stub_setup)
+    return backends
+
+
+def test_setup_picks_catalyst_when_token_set(monkeypatch) -> None:
+    """When CATALYST_OTLP_TOKEN is set, setup_telemetry routes to the
+    Catalyst backend and does not touch the local file path."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.delenv("HALO_TELEMETRY_PATH", raising=False)
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    backends = _install_stub_catalyst(monkeypatch)
+
+    local_calls: list = []
+    monkeypatch.setattr(
+        "engine.telemetry.setup.attach_local_processor",
+        lambda **kwargs: local_calls.append(kwargs),
+    )
+
+    handle = setup_telemetry(enable=True, run_id="run-cat")
+
+    assert handle is not None
+    assert len(backends) == 1, "Catalyst setup() must be called exactly once"
+    assert local_calls == [], "local backend must not be touched on Catalyst path"
+
+    handle.shutdown()
+    assert backends[0].shutdown_calls == 1
+
+
+def test_catalyst_path_sets_service_name_default(monkeypatch) -> None:
+    """When the user has not set CATALYST_SERVICE_NAME, _setup_catalyst
+    defaults it to 'halo-engine' before calling setup()."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.delenv("CATALYST_SERVICE_NAME", raising=False)
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-default")
+    assert handle is not None
+    assert os.environ.get("CATALYST_SERVICE_NAME") == "halo-engine"
+    handle.shutdown()
+
+
+def test_catalyst_path_respects_user_service_name(monkeypatch) -> None:
+    """A user-set CATALYST_SERVICE_NAME must NOT be overwritten."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("CATALYST_SERVICE_NAME", "my-service")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-user")
+    assert handle is not None
+    assert os.environ.get("CATALYST_SERVICE_NAME") == "my-service"
+    handle.shutdown()
+
+
+def test_catalyst_path_stamps_halo_run_id(monkeypatch) -> None:
+    """halo.run_id is appended to OTEL_RESOURCE_ATTRIBUTES; pre-existing
+    attributes must be preserved."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=dev")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-abc")
+    assert handle is not None
+
+    attrs = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    assert "deployment.environment=dev" in attrs
+    assert "halo.run_id=run-abc" in attrs
+    handle.shutdown()

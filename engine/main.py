@@ -17,6 +17,7 @@ from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
 from engine.telemetry import setup_telemetry
+from engine.telemetry.tracing import halo_agent_span
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
@@ -42,98 +43,101 @@ async def stream_engine_async(
     Agents SDK. Production callers leave it ``None`` to use ``agents.Runner``.
 
     Set ``telemetry=True`` to emit OpenInference traces of HALO's own LLM /
-    tool / agent activity to a local JSONL file at ``$HALO_TELEMETRY_PATH``
-    (default: ``./halo-telemetry-{run_id}.jsonl``). Off by default — no
-    overhead, no file writes, no env var reads when ``telemetry=False``.
+    tool / agent activity. Routing: if ``CATALYST_OTLP_TOKEN`` is set, spans
+    are uploaded to inference.net Catalyst over OTLP. Otherwise spans are
+    written to the local JSONL file at ``$HALO_TELEMETRY_PATH`` (default:
+    ``./halo-telemetry-{run_id}.jsonl``). Off by default — no overhead, no
+    file writes, no env var reads when ``telemetry=False``.
     """
     run_id = uuid.uuid4().hex
     telemetry_handle = setup_telemetry(enable=telemetry, run_id=run_id)
     try:
-        configure_default_sdk_client(engine_config.model_provider)
-        sandbox = Sandbox.get()
+        with halo_agent_span(name="halo-engine", system="openai"):
+            configure_default_sdk_client(engine_config.model_provider)
+            sandbox = Sandbox.get()
 
-        index_path = await TraceIndexBuilder.ensure_index_exists(
-            trace_path=trace_path,
-            config=engine_config.trace_index,
-        )
-        trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
+            index_path = await TraceIndexBuilder.ensure_index_exists(
+                trace_path=trace_path,
+                config=engine_config.trace_index,
+            )
+            trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
-        output_bus = EngineOutputBus()
-        run_state_kwargs: dict = {
-            "trace_store": trace_store,
-            "output_bus": output_bus,
-            "config": engine_config,
-            "sandbox": sandbox,
-        }
-        if runner is not None:
-            run_state_kwargs["runner"] = runner
-        run_state = EngineRunState(**run_state_kwargs)
+            output_bus = EngineOutputBus()
+            run_state_kwargs: dict = {
+                "trace_store": trace_store,
+                "output_bus": output_bus,
+                "config": engine_config,
+                "sandbox": sandbox,
+            }
+            if runner is not None:
+                run_state_kwargs["runner"] = runner
+            run_state = EngineRunState(**run_state_kwargs)
 
-        root_execution = AgentExecution(
-            agent_id=f"root-{uuid.uuid4().hex[:8]}",
-            agent_name=engine_config.root_agent.name,
-            depth=0,
-            parent_agent_id=None,
-            parent_tool_call_id=None,
-        )
-        run_state.register(root_execution)
+            root_execution = AgentExecution(
+                agent_id=f"root-{uuid.uuid4().hex[:8]}",
+                agent_name=engine_config.root_agent.name,
+                depth=0,
+                parent_agent_id=None,
+                parent_tool_call_id=None,
+            )
+            run_state.register(root_execution)
 
-        root_context = AgentContext.from_input_messages(
-            messages=messages, engine_config=engine_config
-        )
-
-        sdk_agent = build_root_sdk_agent(
-            engine_config=engine_config,
-            run_state=run_state,
-            agent_execution=root_execution,
-            agent_context=root_context,
-        )
-
-        async def _run_streamed(*, agent, input, context):
-            return run_state.runner.run_streamed(
-                starting_agent=agent,
-                input=input,
-                context=context,
-                max_turns=engine_config.root_agent.maximum_turns,
+            root_context = AgentContext.from_input_messages(
+                messages=messages, engine_config=engine_config
             )
 
-        async def _drive() -> None:
-            agent_runner = OpenAiAgentRunner(
-                run_streamed=_run_streamed,
-                compactor_factory=build_compactor_factory(engine_config),
+            sdk_agent = build_root_sdk_agent(
+                engine_config=engine_config,
+                run_state=run_state,
+                agent_execution=root_execution,
+                agent_context=root_context,
             )
-            try:
-                await agent_runner.run(
-                    sdk_agent=sdk_agent,
-                    agent_context=root_context,
-                    agent_execution=root_execution,
-                    output_bus=output_bus,
-                    is_root=True,
-                    run_context=run_state,
+
+            async def _run_streamed(*, agent, input, context):
+                return run_state.runner.run_streamed(
+                    starting_agent=agent,
+                    input=input,
+                    context=context,
+                    max_turns=engine_config.root_agent.maximum_turns,
                 )
-                await output_bus.close()
-            except Exception as exc:
-                await output_bus.fail(exc)
-            except BaseException as exc:
-                # CancelledError / KeyboardInterrupt / SystemExit: drain the bus
-                # so the consumer doesn't hang on _queue.get(), then re-raise so
-                # the task transitions to the proper cancelled/failed state.
-                await output_bus.fail(exc)
-                raise
 
-        task = asyncio.create_task(_drive())
+            async def _drive() -> None:
+                agent_runner = OpenAiAgentRunner(
+                    run_streamed=_run_streamed,
+                    compactor_factory=build_compactor_factory(engine_config),
+                )
+                try:
+                    await agent_runner.run(
+                        sdk_agent=sdk_agent,
+                        agent_context=root_context,
+                        agent_execution=root_execution,
+                        output_bus=output_bus,
+                        is_root=True,
+                        run_context=run_state,
+                    )
+                    await output_bus.close()
+                except Exception as exc:
+                    await output_bus.fail(exc)
+                except BaseException as exc:
+                    # CancelledError / KeyboardInterrupt / SystemExit: drain the bus
+                    # so the consumer doesn't hang on _queue.get(), then re-raise so
+                    # the task transitions to the proper cancelled/failed state.
+                    await output_bus.fail(exc)
+                    raise
 
-        try:
-            async for event in output_bus.stream():
-                yield event
-            await task
-        except BaseException:
-            task.cancel()
+            task = asyncio.create_task(_drive())
+
             try:
+                async for event in output_bus.stream():
+                    yield event
                 await task
             except BaseException:
-                pass
-            raise
+                task.cancel()
+                try:
+                    await task
+                except BaseException:
+                    pass
+                raise
     finally:
         if telemetry_handle is not None:
             telemetry_handle.shutdown()
