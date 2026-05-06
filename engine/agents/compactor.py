@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from openai import NOT_GIVEN, AsyncOpenAI
+from openai import AsyncOpenAI, omit
 
 from engine.agents.agent_context import Compactor
 from engine.agents.agent_context_items import AgentContextItem
@@ -40,13 +40,11 @@ def build_compactor_factory(
             user_text = _item_as_prompt(item)
             # Frontier models (gpt-5.x, claude-opus-4-7+, …) reject
             # ``temperature`` as deprecated; only forward it when
-            # explicitly set on the compaction model. ``NOT_GIVEN`` is
-            # openai's typed sentinel for "omit from request" so the
-            # SDK's signature stays honest.
+            # explicitly set on the compaction model.
             temperature = (
                 engine_config.compaction_model.temperature
                 if engine_config.compaction_model.temperature is not None
-                else NOT_GIVEN
+                else omit
             )
             response = await openai_client.chat.completions.create(
                 model=engine_config.compaction_model.name,
