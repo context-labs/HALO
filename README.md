@@ -92,6 +92,31 @@ halo path_to_your_traces.jsonl -p "Diagnose errors you find and suggest fixes"
 
 We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
 
+### Python API
+
+The engine exposes four entry points from `engine.main`. Use whichever
+matches the trade-off you want between observability and code
+simplicity. The yielded types ([`AgentOutputItem`](engine/models/engine_output.py)
+and [`AgentTextDelta`](engine/models/engine_output.py)) are defined in
+[`engine/models/engine_output.py`](engine/models/engine_output.py):
+
+| Function                     | Sync / async | Returns                                            | When to use                                                                                              |
+| ---------------------------- | ------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `stream_engine_async`        | async        | `AsyncIterator[AgentOutputItem \| AgentTextDelta]` | You want every event including streaming-token deltas (live UI, custom rendering).                       |
+| `stream_engine_output_async` | async        | `AsyncIterator[AgentOutputItem]`                   | You want to log / persist each completed step (assistant message, tool call, tool result) as it lands.   |
+| `run_engine_async`           | async        | `list[AgentOutputItem]`                            | You want the final list at the end and don't care about per-step observability.                          |
+| `stream_engine`              | sync         | `Iterator[AgentOutputItem \| AgentTextDelta]`      | Sync generator; yields every event including deltas. Drives the async iterator on a private event loop.  |
+| `stream_engine_output`       | sync         | `Iterator[AgentOutputItem]`                        | Sync generator; yields completed items only. Same shape as the async variant for sync callers.           |
+| `run_engine`                 | sync         | `list[AgentOutputItem]`                            | Sync, collects to a list. Pure convenience over `asyncio.run(run_engine_async(...))`.                    |
+
+```python
+from engine.main import stream_engine_output_async
+
+async for item in stream_engine_output_async(messages, cfg, trace_path):
+    logger.info("step", extra={"sequence": item.sequence, "agent": item.agent_name})
+    # item.item is an AgentMessage (assistant / tool / etc.)
+```
+
 ## Benchmarks
 
 HALO is consistently capable of driving improvements on benchmarks, solely by optimizing the harness.
