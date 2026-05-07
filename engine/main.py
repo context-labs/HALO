@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
+from typing import TypeVar
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
@@ -21,6 +22,8 @@ from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.trace_index_builder import TraceIndexBuilder
 from engine.traces.trace_store import TraceStore
 
+_T = TypeVar("_T")
+
 
 async def stream_engine_async(
     messages: list[AgentMessage],
@@ -29,7 +32,7 @@ async def stream_engine_async(
     *,
     runner: RunnerProtocol | None = None,
     telemetry: bool = False,
-) -> AsyncIterator[EngineStreamEvent]:
+) -> AsyncGenerator[EngineStreamEvent, None]:
     """Run the HALO engine and stream events as they happen.
 
     Yields ``AgentOutputItem`` (assistant messages, tool calls, tool results)
@@ -146,7 +149,7 @@ async def stream_engine_output_async(
     *,
     runner: RunnerProtocol | None = None,
     telemetry: bool = False,
-) -> AsyncIterator[AgentOutputItem]:
+) -> AsyncGenerator[AgentOutputItem, None]:
     """Stream durable ``AgentOutputItem``s only — no text deltas.
 
     Same lifecycle and arguments as ``stream_engine_async``, but
@@ -160,6 +163,30 @@ async def stream_engine_output_async(
     ):
         if isinstance(event, AgentOutputItem):
             yield event
+
+
+def _drive_sync(agen: AsyncGenerator[_T, None]) -> Iterator[_T]:
+    """Drive an async iterator on a private event loop, yielding each item.
+
+    Always calls ``agen.aclose()`` before closing the loop so that the
+    underlying async generator's ``finally`` blocks run — even when the
+    caller breaks out of the sync generator early (which raises
+    ``GeneratorExit`` into this function's ``yield``). Without this,
+    background tasks and telemetry handles started inside
+    ``stream_engine_async`` would leak.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        try:
+            loop.run_until_complete(agen.aclose())
+        finally:
+            loop.close()
 
 
 def stream_engine_output(
@@ -178,18 +205,11 @@ def stream_engine_output(
     time. If you want everything in a list, call ``run_engine`` (sync,
     collects to list) instead.
     """
-    loop = asyncio.new_event_loop()
-    try:
-        agen = stream_engine_output_async(
+    yield from _drive_sync(
+        stream_engine_output_async(
             messages, engine_config, trace_path, runner=runner, telemetry=telemetry
-        ).__aiter__()
-        while True:
-            try:
-                yield loop.run_until_complete(agen.__anext__())
-            except StopAsyncIteration:
-                return
-    finally:
-        loop.close()
+        )
+    )
 
 
 async def run_engine_async(
@@ -230,18 +250,9 @@ def stream_engine(
     one step at a time. If you want everything in a list, call
     ``run_engine`` (sync, collects to list) instead.
     """
-    loop = asyncio.new_event_loop()
-    try:
-        agen = stream_engine_async(
-            messages, engine_config, trace_path, runner=runner, telemetry=telemetry
-        ).__aiter__()
-        while True:
-            try:
-                yield loop.run_until_complete(agen.__anext__())
-            except StopAsyncIteration:
-                return
-    finally:
-        loop.close()
+    yield from _drive_sync(
+        stream_engine_async(messages, engine_config, trace_path, runner=runner, telemetry=telemetry)
+    )
 
 
 def run_engine(
