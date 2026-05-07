@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 from engine.agents.agent_context import AgentContext
@@ -139,6 +139,59 @@ async def stream_engine_async(
             telemetry_handle.shutdown()
 
 
+async def stream_engine_output_async(
+    messages: list[AgentMessage],
+    engine_config: EngineConfig,
+    trace_path: Path,
+    *,
+    runner: RunnerProtocol | None = None,
+    telemetry: bool = False,
+) -> AsyncIterator[AgentOutputItem]:
+    """Stream durable ``AgentOutputItem``s only — no text deltas.
+
+    Same lifecycle and arguments as ``stream_engine_async``, but
+    pre-filters incremental ``AgentTextDelta`` events. Use this when
+    you want to log or persist each completed step (assistant
+    message, tool call, tool result) as it lands without dealing
+    with the streaming-token noise.
+    """
+    async for event in stream_engine_async(
+        messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+    ):
+        if isinstance(event, AgentOutputItem):
+            yield event
+
+
+def stream_engine_output(
+    messages: list[AgentMessage],
+    engine_config: EngineConfig,
+    trace_path: Path,
+    *,
+    runner: RunnerProtocol | None = None,
+    telemetry: bool = False,
+) -> Iterator[AgentOutputItem]:
+    """Synchronous generator around ``stream_engine_output_async``.
+
+    Yields each ``AgentOutputItem`` as it lands so sync callers can
+    log / persist per-step without writing async code. Drives the
+    underlying async iterator on a private event loop one step at a
+    time. If you want everything in a list, call ``run_engine`` (sync,
+    collects to list) instead.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        agen = stream_engine_output_async(
+            messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+        ).__aiter__()
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        loop.close()
+
+
 async def run_engine_async(
     messages: list[AgentMessage],
     engine_config: EngineConfig,
@@ -154,13 +207,12 @@ async def run_engine_async(
     ``stream_engine_async`` for the streaming variant and the meaning of
     the ``runner`` and ``telemetry`` test seams.
     """
-    out: list[AgentOutputItem] = []
-    async for event in stream_engine_async(
-        messages, engine_config, trace_path, runner=runner, telemetry=telemetry
-    ):
-        if isinstance(event, AgentOutputItem):
-            out.append(event)
-    return out
+    return [
+        item
+        async for item in stream_engine_output_async(
+            messages, engine_config, trace_path, runner=runner, telemetry=telemetry
+        )
+    ]
 
 
 def stream_engine(
@@ -170,20 +222,26 @@ def stream_engine(
     *,
     runner: RunnerProtocol | None = None,
     telemetry: bool = False,
-) -> list[EngineStreamEvent]:
-    """Synchronous wrapper around ``stream_engine_async``. Collects every
-    streamed event into a list and returns it. Use the async variant if you
-    want incremental results."""
+) -> Iterator[EngineStreamEvent]:
+    """Synchronous generator around ``stream_engine_async``.
 
-    async def _collect() -> list[EngineStreamEvent]:
-        out: list[EngineStreamEvent] = []
-        async for ev in stream_engine_async(
+    Yields each ``EngineStreamEvent`` (durable items + text deltas)
+    as it lands. Drives the async iterator on a private event loop
+    one step at a time. If you want everything in a list, call
+    ``run_engine`` (sync, collects to list) instead.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        agen = stream_engine_async(
             messages, engine_config, trace_path, runner=runner, telemetry=telemetry
-        ):
-            out.append(ev)
-        return out
-
-    return asyncio.run(_collect())
+        ).__aiter__()
+        while True:
+            try:
+                yield loop.run_until_complete(agen.__anext__())
+            except StopAsyncIteration:
+                return
+    finally:
+        loop.close()
 
 
 def run_engine(
