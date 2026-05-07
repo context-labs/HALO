@@ -96,7 +96,9 @@ We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld
 
 The engine exposes four entry points from `engine.main`. Use whichever
 matches the trade-off you want between observability and code
-simplicity:
+simplicity. The yielded types ([`AgentOutputItem`](engine/models/engine_output.py)
+and [`AgentTextDelta`](engine/models/engine_output.py)) are defined in
+[`engine/models/engine_output.py`](engine/models/engine_output.py):
 
 | Function                     | Sync / async | Returns                                            | When to use                                                                                              |
 | ---------------------------- | ------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
