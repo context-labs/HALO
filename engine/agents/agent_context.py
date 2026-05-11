@@ -62,7 +62,6 @@ class AgentContext:
             body = messages[1:]
         else:
             rendered = render_root_system_prompt(
-                instructions=engine_config.root_agent.instructions,
                 maximum_depth=engine_config.maximum_depth,
                 maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
             )

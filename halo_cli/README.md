@@ -45,7 +45,6 @@ halo TRACE_PATH --prompt "your question"
 | `--max-depth`        | `1`                | Max subagent recursion depth                                                                                                                                                                                                     |
 | `--max-turns`        | `8`                | Max turns per agent                                                                                                                                                                                                              |
 | `--max-parallel`     | `2`                | Max concurrent subagents                                                                                                                                                                                                         |
-| `--instructions`     | _(engine default)_ | Override default trace-tool agent instructions                                                                                                                                                                                   |
 | `--reasoning-effort` | _(model default)_  | Reasoning effort for root, subagent, and synthesis calls. One of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Compaction never uses reasoning. Omit to use the model family's documented max for known reasoning models. |
 
 ## Example

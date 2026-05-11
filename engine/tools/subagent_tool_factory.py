@@ -164,7 +164,6 @@ def _build_subagent_as_tool(
     """
     engine_config = run_state.config
     subagent_system_prompt = render_subagent_system_prompt(
-        instructions=engine_config.subagent.instructions,
         depth=child_depth,
         maximum_depth=engine_config.maximum_depth,
         maximum_parallel_subagents=engine_config.maximum_parallel_subagents,

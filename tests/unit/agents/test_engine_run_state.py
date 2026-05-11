@@ -18,7 +18,6 @@ from engine.traces.trace_store import TraceStore
 def _cfg() -> EngineConfig:
     ac = AgentConfig(
         name="root",
-        instructions="",
         model=ModelConfig(name="claude-sonnet-4-5"),
         maximum_turns=10,
     )

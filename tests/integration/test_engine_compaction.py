@@ -39,7 +39,6 @@ def _assistant_text(text: str):
 def _config() -> EngineConfig:
     agent = AgentConfig(
         name="root",
-        instructions="Answer briefly.",
         model=ModelConfig(name="gpt-5.4-mini"),
         maximum_turns=4,
     )

@@ -9,7 +9,6 @@ from engine.model_provider_config import ModelProviderConfig
 def _agent(name: str) -> AgentConfig:
     return AgentConfig(
         name=name,
-        instructions="",
         model=ModelConfig(name="claude-sonnet-4-5"),
         maximum_turns=10,
     )

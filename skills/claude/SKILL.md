@@ -134,7 +134,6 @@ Important parameters:
 - **`--max-turns`** (default `8`): how many reasoning turns the root agent gets. 12-25 is reasonable for deep analyses; lower numbers force tighter answers.
 - **`--max-depth`** (default `1`): subagent recursion depth. Default is fine in most cases.
 - **`--max-parallel`** (default `2`): concurrent subagent cap. Default is fine.
-- **`--instructions`**: override the default tool-discipline instructions. Don't override unless you're sure — the defaults already steer toward `get_dataset_overview` → `query_traces` → `search_trace` → `view_spans` rather than fabricating trace_ids or dumping huge `view_trace` results.
 
 ### Step 3 — Verify the engine's claims against the actual repo
 

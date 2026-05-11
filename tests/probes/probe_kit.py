@@ -206,7 +206,6 @@ def make_default_config(
     (no real LLM call happens), so any string works."""
     agent = AgentConfig(
         name="root",
-        instructions="Answer briefly.",
         model=ModelConfig(name=model),
         maximum_turns=4,
     )

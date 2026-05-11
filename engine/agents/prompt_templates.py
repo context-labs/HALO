@@ -2,7 +2,7 @@ from __future__ import annotations
 
 FINAL_SENTINEL = "<final/>"
 
-DEFAULT_SYSTEM_PROMPT = (
+SYSTEM_PROMPT = (
     "You answer questions about an OTLP-shaped JSONL trace dataset using the provided "
     "trace tools.\n\n"
     "Tool usage rules — follow these exactly:\n"
@@ -73,7 +73,7 @@ Output rules:
 - Do not emit <final/> in intermediate messages.
 
 Instructions:
-{instructions}
+{system_prompt}
 """
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
@@ -88,7 +88,7 @@ When finished, return a concise answer. Do not emit <final/> — that
 sentinel is reserved for the root agent.
 
 Instructions:
-{instructions}
+{system_prompt}
 """
 
 COMPACTION_SYSTEM_PROMPT = """\
@@ -106,17 +106,12 @@ patterns, model names, and token counts when available.
 
 def render_root_system_prompt(
     *,
-    instructions: str | None,
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
-
-    ``instructions=None`` selects ``DEFAULT_SYSTEM_PROMPT`` (the engine's built-in
-    trace-tool usage manual).
-    """
+    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract."""
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
-        instructions=instructions if instructions is not None else DEFAULT_SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
     )
@@ -124,18 +119,13 @@ def render_root_system_prompt(
 
 def render_subagent_system_prompt(
     *,
-    instructions: str | None,
     depth: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
 ) -> str:
-    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
-
-    ``instructions=None`` selects ``DEFAULT_SYSTEM_PROMPT`` (the engine's built-in
-    trace-tool usage manual).
-    """
+    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root."""
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
-        instructions=instructions if instructions is not None else DEFAULT_SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,

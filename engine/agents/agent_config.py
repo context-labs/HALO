@@ -6,17 +6,15 @@ from engine.model_config import ModelConfig
 
 
 class AgentConfig(BaseModel):
-    """Identity, system prompt, model binding, and turn cap for one Engine agent (root or subagent).
+    """Identity, model binding, and turn cap for one Engine agent (root or subagent).
 
-    ``instructions`` is optional. When ``None``, the engine auto-injects
-    ``DEFAULT_SYSTEM_PROMPT`` (see ``engine/agents/prompt_templates.py``) at
-    prompt-render time, which is a usage manual for the engine's built-in trace
-    tools. Pass an explicit string to override.
+    The system prompt is fixed by the engine (see ``SYSTEM_PROMPT`` in
+    ``engine/agents/prompt_templates.py``) — it's the usage manual for the
+    built-in trace tools.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    instructions: str | None = None
     model: ModelConfig
     maximum_turns: int = Field(gt=0)

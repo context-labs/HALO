@@ -27,7 +27,6 @@ def _engine_config(*, maximum_depth: int = 0, maximum_turns: int = 6) -> EngineC
     """
     agent = AgentConfig(
         name="root",
-        instructions="Answer briefly.",
         model=ModelConfig(name=E2E_MODEL),
         maximum_turns=maximum_turns,
     )

@@ -43,7 +43,6 @@ def engine_config(*, maximum_depth: int = 1) -> EngineConfig:
     """
     agent = AgentConfig(
         name="root",
-        instructions="Answer briefly.",
         model=ModelConfig(name=LIVE_MODEL),
         maximum_turns=4,
     )

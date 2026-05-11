@@ -7,7 +7,6 @@ from engine.model_config import ModelConfig
 def test_agent_config_constructs() -> None:
     cfg = AgentConfig(
         name="root",
-        instructions="You are root.",
         model=ModelConfig(name="claude-opus-4-7"),
         maximum_turns=20,
     )

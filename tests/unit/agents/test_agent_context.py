@@ -162,10 +162,9 @@ from engine.engine_config import EngineConfig
 from engine.models.messages import AgentMessage
 
 
-def _engine_config(instructions: str = "Be brief.") -> EngineConfig:
+def _engine_config() -> EngineConfig:
     agent = AgentConfig(
         name="root",
-        instructions=instructions,
         model=ModelConfig(name="gpt-5.4-mini"),
         maximum_turns=4,
     )
@@ -179,7 +178,6 @@ def _engine_config(instructions: str = "Be brief.") -> EngineConfig:
 
 def _expected_system(cfg: EngineConfig) -> str:
     return render_root_system_prompt(
-        instructions=cfg.root_agent.instructions,
         maximum_depth=cfg.maximum_depth,
         maximum_parallel_subagents=cfg.maximum_parallel_subagents,
     )

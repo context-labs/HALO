@@ -28,7 +28,6 @@ from tests._sdk_events import assistant_message_event, tool_call_event
 def _engine_config(max_depth: int) -> EngineConfig:
     agent = AgentConfig(
         name="a",
-        instructions="",
         model=ModelConfig(name="claude-sonnet-4-5"),
         maximum_turns=10,
     )
@@ -164,12 +163,8 @@ async def test_get_context_item_resolves_through_wired_agent_context() -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_returns_failure_on_exception() -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(
-            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
-        subagent=AgentConfig(
-            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
+        root_agent=AgentConfig(name="r", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,
@@ -205,12 +200,8 @@ async def test_guarded_invoke_returns_failure_on_exception() -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(
-            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
-        subagent=AgentConfig(
-            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
+        root_agent=AgentConfig(name="r", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,
@@ -262,12 +253,8 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
 async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
     """The subagent's first user message must be ``params["input"]``, not the JSON wrapper."""
     cfg = EngineConfig(
-        root_agent=AgentConfig(
-            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
-        subagent=AgentConfig(
-            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
+        root_agent=AgentConfig(name="r", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,
@@ -324,12 +311,8 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json() -> None:
 @pytest.mark.asyncio
 async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -> None:
     cfg = EngineConfig(
-        root_agent=AgentConfig(
-            name="r", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
-        subagent=AgentConfig(
-            name="s", instructions="", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3
-        ),
+        root_agent=AgentConfig(name="r", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
         synthesis_model=ModelConfig(name="gpt-5.4-mini"),
         compaction_model=ModelConfig(name="gpt-5.4-mini"),
         maximum_depth=1,

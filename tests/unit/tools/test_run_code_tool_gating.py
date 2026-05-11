@@ -18,7 +18,6 @@ from engine.tools.subagent_tool_factory import _child_tools_for_depth
 def _engine_config() -> EngineConfig:
     agent = AgentConfig(
         name="root",
-        instructions="",
         model=ModelConfig(name="claude-sonnet-4-5"),
         maximum_turns=10,
     )

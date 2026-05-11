@@ -43,7 +43,6 @@ def _make_config(
     max_depth: int,
     max_turns: int,
     max_parallel: int,
-    instructions: str | None,
     reasoning_effort: ReasoningEffort | None,
 ) -> EngineConfig:
     # One ModelConfig per role so each is independently tunable. Compaction
@@ -55,13 +54,11 @@ def _make_config(
 
     root_agent = AgentConfig(
         name="root",
-        instructions=instructions,
         model=root_model,
         maximum_turns=max_turns,
     )
     subagent = AgentConfig(
         name="sub",
-        instructions=instructions,
         model=subagent_model,
         maximum_turns=max_turns,
     )
@@ -104,11 +101,6 @@ def _run(
     max_depth: int = typer.Option(2, "--max-depth", min=0),
     max_turns: int = typer.Option(20, "--max-turns", min=1),
     max_parallel: int = typer.Option(2, "--max-parallel", min=1),
-    instructions: str | None = typer.Option(
-        None,
-        "--instructions",
-        help="Override the engine's default trace-tool agent instructions.",
-    ),
     reasoning_effort: str | None = typer.Option(
         None,
         "--reasoning-effort",
@@ -139,7 +131,6 @@ def _run(
         max_depth,
         max_turns,
         max_parallel,
-        instructions,
         _parse_reasoning_effort(reasoning_effort),
     )
     asyncio.run(_stream(trace_path, prompt, cfg, telemetry=telemetry))
