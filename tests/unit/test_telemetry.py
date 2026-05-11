@@ -246,10 +246,31 @@ def test_setup_picks_catalyst_when_token_set(monkeypatch) -> None:
 
     backends = _install_stub_catalyst(monkeypatch)
 
+    # Mirror attach_local_processor's keyword-only signature so any future
+    # signature change (or accidental positional call from _setup_local)
+    # surfaces here as a TypeError instead of being silently absorbed by
+    # **kwargs. Same contract as the catalyst stub above.
     local_calls: list = []
+
+    def _stub_attach_local(
+        *,
+        path: str,
+        service_name: str,
+        project_id: str,
+        extra_resource_attributes=None,
+    ):
+        local_calls.append(
+            {
+                "path": path,
+                "service_name": service_name,
+                "project_id": project_id,
+                "extra_resource_attributes": extra_resource_attributes,
+            }
+        )
+
     monkeypatch.setattr(
         "engine.telemetry.setup.attach_local_processor",
-        lambda **kwargs: local_calls.append(kwargs),
+        _stub_attach_local,
     )
 
     handle = setup_telemetry(enable=True, run_id="run-cat")
@@ -642,4 +663,130 @@ def test_catalyst_passthrough_emits_deterministic_order(monkeypatch) -> None:
     idx_mike = raw.index("halo.mike=")
     idx_zulu = raw.index("halo.zulu=")
     assert idx_alpha < idx_mike < idx_zulu
+    handle.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Security: validate environment-injected inputs that flow into a file
+# path or into OTEL_RESOURCE_ATTRIBUTES.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        "../../../etc/passwd",
+        "..\\..\\windows",
+        "id/with/slashes",
+        "id with spaces",
+        "id;with;semicolons",
+        "id\nwith\nnewlines",
+        "a" * 200,  # exceeds 128-char cap
+    ],
+)
+def test_resolve_run_id_rejects_unsafe_values_and_falls_back_to_uuid(
+    monkeypatch, capsys, bad_value
+) -> None:
+    """Unsafe CATALYST_TRACING_RUN_ID values (path traversal, control
+    chars, oversized) must fall back to a fresh uuid so the value
+    can't escape its intended use as a filename / attribute fragment.
+    A warning is written to stderr so the rejection isn't silent."""
+    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", bad_value)
+    rid = resolve_run_id()
+    assert rid != bad_value
+    assert len(rid) == 32
+    assert all(c in "0123456789abcdef" for c in rid)
+    captured = capsys.readouterr()
+    assert "CATALYST_TRACING_RUN_ID rejected" in captured.err
+
+
+@pytest.mark.parametrize(
+    "good_value",
+    [
+        "abc123",
+        "uuid-like-1234-5678",
+        "with.dots",
+        "with_underscores",
+        "Mixed-Case_42.0",
+        "a" * 128,  # exactly at the cap is allowed
+    ],
+)
+def test_resolve_run_id_accepts_safe_values(monkeypatch, good_value) -> None:
+    """Values within the safe charset (alphanumerics, ``-_.``) and length
+    cap pass through untouched. This is the contract for any caller
+    (Catalyst, CI, manual smoke tests) injecting a run id."""
+    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", good_value)
+    assert resolve_run_id() == good_value
+
+
+def test_resolve_run_id_strips_whitespace_before_validating(monkeypatch) -> None:
+    """Surrounding whitespace is treated as a leading/trailing accident
+    rather than as part of the id; the trimmed value is what's
+    validated. Matches how blank values are handled."""
+    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "  run-42  ")
+    assert resolve_run_id() == "run-42"
+
+
+def test_catalyst_passthrough_value_with_comma_does_not_inject_attributes(
+    monkeypatch,
+) -> None:
+    """A passthrough value containing ``,`` or ``=`` must NOT inject a
+    sibling attribute into OTEL_RESOURCE_ATTRIBUTES. The value is
+    percent-encoded on emit; the OTel resource detector decodes it
+    losslessly so the attribute value carries the original literal."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "legit,injected.key=evil")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="r")
+    assert handle is not None
+    raw = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    # The injection attempt must not surface as a sibling attribute key.
+    assert "injected.key=" not in raw
+    # The original literal value must be recoverable from the encoded form.
+    from urllib.parse import unquote
+
+    user_tokens = [t for t in raw.split(",") if t.startswith("halo.user.id=")]
+    assert len(user_tokens) == 1
+    decoded = unquote(user_tokens[0].removeprefix("halo.user.id="))
+    assert decoded == "legit,injected.key=evil"
+    handle.shutdown()
+
+
+def test_catalyst_passthrough_value_with_equals_only_does_not_inject(
+    monkeypatch,
+) -> None:
+    """``=`` alone (no preceding ``,``) must also be encoded — without
+    that, the OTel parser would still see only one token but treat
+    the second ``=`` as part of an oversized value, which is the
+    contract for OTel but worth pinning."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "k=v")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="r")
+    assert handle is not None
+    raw = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+    # The encoded form has %3D in place of the second '='.
+    assert "halo.user.id=k%3Dv" in raw
+    handle.shutdown()
+
+
+def test_safe_run_id_value_is_not_over_encoded_in_resource_attrs(
+    monkeypatch,
+) -> None:
+    """Regression: a normal safe run id (alphanumeric + ``-``) must
+    appear verbatim in halo.run.id — encoding kicks in only for
+    reserved characters. Catches accidentally-aggressive encoding
+    that would force operators to decode every value."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "run-abc-123")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-abc-123")
+    assert handle is not None
+    assert _attr_tokens("halo.run.id") == ["halo.run.id=run-abc-123"]
     handle.shutdown()

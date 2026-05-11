@@ -41,10 +41,13 @@ win over the defaults below.
 from __future__ import annotations
 
 import os
+import re
+import sys
 import uuid
 from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from typing import Protocol
+from urllib.parse import quote
 
 from agents import set_trace_processors
 from inference_catalyst_tracing import setup as catalyst_setup
@@ -52,6 +55,15 @@ from inference_catalyst_tracing import setup as catalyst_setup
 from engine.telemetry.local_processor import attach_local_processor
 
 _CATALYST_TRACING_PREFIX = "CATALYST_TRACING_"
+
+# A run id is interpolated into a local file path
+# (``halo-telemetry-{run_id}.jsonl``) and into otel resource attributes,
+# so the charset has to be safe for both. Allow alphanumerics + the
+# punctuation that Catalyst is likely to use (uuids with hyphens, dotted
+# segments, underscores). Anything else — including path separators —
+# is rejected and ``resolve_run_id`` falls back to a fresh uuid.
+_SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_MAX_RUN_ID_LEN = 128
 
 
 class _Shutdownable(Protocol):
@@ -89,8 +101,26 @@ def resolve_run_id() -> str:
     ``CATALYST_TRACING_RUN_ID`` so its own bookkeeping and HALO's
     telemetry agree on the run identifier. Standalone runs get a fresh
     ``uuid4().hex``.
+
+    Validates the env value against ``_SAFE_RUN_ID_RE`` because the
+    run id is interpolated into the local telemetry file path
+    (``halo-telemetry-{run_id}.jsonl``); without validation, a value
+    like ``../../../etc/passwd`` would write outside the working
+    directory. Rejected values fall back to a fresh uuid and the
+    rejection is announced on stderr (we don't have a configured
+    logger here).
     """
-    return os.environ.get("CATALYST_TRACING_RUN_ID") or uuid.uuid4().hex
+    raw = os.environ.get("CATALYST_TRACING_RUN_ID", "").strip()
+    if not raw:
+        return uuid.uuid4().hex
+    if len(raw) <= _MAX_RUN_ID_LEN and _SAFE_RUN_ID_RE.match(raw):
+        return raw
+    sys.stderr.write(
+        "[halo.telemetry] CATALYST_TRACING_RUN_ID rejected "
+        f"(length<={_MAX_RUN_ID_LEN} and charset {_SAFE_RUN_ID_RE.pattern} "
+        "required); falling back to a generated uuid.\n"
+    )
+    return uuid.uuid4().hex
 
 
 def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
@@ -124,6 +154,21 @@ def _halo_engine_version() -> str:
         return version("halo-engine")
     except PackageNotFoundError:
         return "unknown"
+
+
+def _format_attr_token(key: str, value: str) -> str:
+    """Render a single ``OTEL_RESOURCE_ATTRIBUTES`` token, percent-encoding
+    the value so embedded ``,`` / ``=`` can't inject sibling attributes.
+
+    ``OTEL_RESOURCE_ATTRIBUTES`` is comma-delimited ``key=value`` pairs
+    with values percent-decoded by the OTel resource detector (per the
+    spec, values are W3C Baggage-encoded). Without encoding, a value
+    like ``team-7,injected.key=evil`` would parse as TWO attributes
+    (``halo.team.id=team-7`` and ``injected.key=evil``). Using
+    ``quote(value, safe='')`` encodes everything outside the unreserved
+    URL set, which the OTel detector decodes back losslessly.
+    """
+    return f"{key}={quote(value, safe='')}"
 
 
 def _env_suffix_to_attr_name(suffix: str) -> str:
@@ -163,7 +208,7 @@ def _collect_dynamic_halo_attrs(env: Mapping[str, str]) -> list[str]:
         value = env[key].strip()
         if not value:
             continue
-        out.append(f"halo.{_env_suffix_to_attr_name(suffix)}={value}")
+        out.append(_format_attr_token(f"halo.{_env_suffix_to_attr_name(suffix)}", value))
     return out
 
 
@@ -185,8 +230,8 @@ def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
     # unset between calls.
     kept = [t for t in existing.split(",") if t and not t.strip().startswith("halo.")]
     halo_attrs = [
-        f"halo.run.id={run_id}",
-        f"halo.engine.version={_halo_engine_version()}",
+        _format_attr_token("halo.run.id", run_id),
+        _format_attr_token("halo.engine.version", _halo_engine_version()),
         *_collect_dynamic_halo_attrs(os.environ),
     ]
     os.environ["OTEL_RESOURCE_ATTRIBUTES"] = ",".join([*kept, *halo_attrs])
