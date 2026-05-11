@@ -20,7 +20,7 @@ from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
-from engine.telemetry import setup_telemetry
+from engine.telemetry import resolve_run_id, setup_telemetry
 from engine.telemetry.tracing import halo_agent_span
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.trace_index_builder import TraceIndexBuilder
@@ -55,10 +55,10 @@ async def stream_engine_async(
     ``./halo-telemetry-{run_id}.jsonl``). Off by default — no overhead, no
     file writes, no env var reads when ``telemetry=False``.
     """
-    run_id = uuid.uuid4().hex
+    run_id = resolve_run_id()
     telemetry_handle = setup_telemetry(enable=telemetry, run_id=run_id)
     try:
-        with halo_agent_span(name="halo-engine", system="openai"):
+        with halo_agent_span(name="halo", system="openai"):
             configure_default_sdk_client(engine_config.model_provider)
             sandbox = Sandbox.get()
 
