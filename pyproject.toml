@@ -18,6 +18,12 @@ dependencies = [
     "deno==2.7.14",
     "typer==0.25.0",
     "rich==15.0.0",
+    # Catalyst tracing is mandatory: the engine always imports it for
+    # ``halo_agent_span`` and the optional Catalyst-OTLP backend selected
+    # by ``CATALYST_OTLP_TOKEN``. When the token is unset and the local
+    # JSONL backend is in use, OTel's proxy tracer makes the wrapper a
+    # no-op without any extra branching in engine code.
+    "inference-catalyst-tracing[openai-agents]==0.0.12",
 ]
 
 [project.scripts]

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from engine.telemetry.setup import TelemetryHandle, setup_telemetry
+from engine.telemetry.setup import TelemetryHandle, resolve_run_id, setup_telemetry
 
-__all__ = ["TelemetryHandle", "setup_telemetry"]
+__all__ = ["TelemetryHandle", "resolve_run_id", "setup_telemetry"]
