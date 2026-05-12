@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
@@ -685,19 +686,19 @@ def test_catalyst_passthrough_emits_deterministic_order(monkeypatch) -> None:
     ],
 )
 def test_resolve_run_id_rejects_unsafe_values_and_falls_back_to_uuid(
-    monkeypatch, capsys, bad_value
+    monkeypatch, caplog, bad_value
 ) -> None:
     """Unsafe CATALYST_TRACING_RUN_ID values (path traversal, control
     chars, oversized) must fall back to a fresh uuid so the value
     can't escape its intended use as a filename / attribute fragment.
-    A warning is written to stderr so the rejection isn't silent."""
+    A WARNING is logged so the rejection isn't silent."""
     monkeypatch.setenv("CATALYST_TRACING_RUN_ID", bad_value)
-    rid = resolve_run_id()
+    with caplog.at_level(logging.WARNING, logger="engine.telemetry.setup"):
+        rid = resolve_run_id()
     assert rid != bad_value
     assert len(rid) == 32
     assert all(c in "0123456789abcdef" for c in rid)
-    captured = capsys.readouterr()
-    assert "CATALYST_TRACING_RUN_ID rejected" in captured.err
+    assert "CATALYST_TRACING_RUN_ID rejected" in caplog.text
 
 
 @pytest.mark.parametrize(
