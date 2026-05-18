@@ -47,6 +47,8 @@ HALO (Hierarchical Agent Loop Optimization) is a methodology for building recurs
 - A demo project that shows how to build HALO loops for your agents using the Python package. [View demo](/demo/openai-agents-sdk-demo/)
 - Benchmarking examples applying HALO to popular agent benchmarks. (View [AppWorld](#appworld)).
 
+Note: If you're looking a hosted, plug-n-play version of HALO, please sign up for [inference.net](https://inference.net).
+
 ## HALO Loop
 
 The core HALO loop is suprisingly simple:
