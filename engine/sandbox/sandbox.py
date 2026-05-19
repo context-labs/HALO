@@ -86,6 +86,21 @@ _READY_TIMEOUT_SECONDS = 30.0
 # only matters if the runner is already wedged.
 _SHUTDOWN_GRACE_SECONDS = 5.0
 
+# StreamReader buffer cap for the runner's stdout. The default asyncio
+# StreamReader limit is 64 KiB, which is below the worst-case size of one
+# JSON-RPC response line — ``halo_execute`` packs both stdout and stderr
+# (each receive-side-capped at 64 KB by ``_MAX_STDOUT_BYTES`` /
+# ``_MAX_STDERR_BYTES``) into a single line, and JSON escaping (``\n``,
+# ``\u00xx`` for control bytes) can multiply the on-wire size several
+# fold. With the default limit, a single oversize response line surfaced
+# as ``ValueError: Separator is found, but chunk is longer than limit``
+# out of ``readline()`` and SIGTERM-killed the host run. 16 MiB gives
+# multi-order-of-magnitude headroom while still bounding the buffer.
+# Pair this with the recoverable ``ValueError`` catch in
+# ``_read_line_safely`` so a pathological line larger than even this
+# limit gets skipped (with a warning) instead of killing the session.
+_STDIO_BUFFER_LIMIT = 16 * 1024 * 1024
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -396,12 +411,16 @@ class _RunnerSession:
 
     async def start(self) -> None:
         """Spawn the deno subprocess and block until it signals ready."""
+        # ``limit`` raises the StreamReader buffer for stdout/stderr above the
+        # 64 KiB default, which is too small for a worst-case ``execute``
+        # response. See ``_STDIO_BUFFER_LIMIT`` for the full rationale.
         self._proc = await asyncio.create_subprocess_exec(
             *self._argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            limit=_STDIO_BUFFER_LIMIT,
         )
         self._stderr_task = asyncio.create_task(_drain_capped(self._proc.stderr, _MAX_STDERR_BYTES))
         await self._await_ready()
@@ -537,6 +556,39 @@ class _RunnerSession:
         self._proc.stdin.write(data)
         await self._proc.stdin.drain()
 
+    async def _readline_safe(self) -> bytes | None:
+        """Read one stdout line, returning ``None`` for "skip this line".
+
+        ``asyncio.StreamReader.readline`` raises ``ValueError`` when a
+        single line exceeds the StreamReader's buffer limit (see the
+        ``LimitOverrunError`` → ``ValueError`` translation in
+        ``readline``). We bump the limit at subprocess spawn time
+        (``_STDIO_BUFFER_LIMIT``), but a pathological line (a multi-MB
+        diagnostic from Pyodide's loader, an unbounded chatty
+        ``print``) could still trip it. asyncio's ``readline`` clears
+        the offending bytes from the buffer before raising, so the next
+        ``readline`` call resumes cleanly on the next line — recovering
+        by treating the oversize line as "skipped noise" is strictly
+        better than letting the ``ValueError`` propagate and kill the
+        Modal sandbox via SIGTERM, which is what production was seeing.
+
+        Returns the line bytes on success, ``None`` if the line was
+        dropped due to oversize. EOF is propagated as an empty bytes
+        object (callers already special-case this).
+        """
+        assert self._proc is not None and self._proc.stdout is not None
+        try:
+            return await self._proc.stdout.readline()
+        except ValueError as exc:
+            # Buffer was cleaned up before the raise; subsequent
+            # ``readline`` calls work normally.
+            _logger.warning(
+                "dropping oversize stdout line from runner (limit %d bytes): %s",
+                _STDIO_BUFFER_LIMIT,
+                exc,
+            )
+            return None
+
     async def _read_until_id(self, expected_id: int, method: str) -> _RpcResult:
         """Read JSON-RPC lines from stdout until the matching id arrives.
 
@@ -547,7 +599,10 @@ class _RunnerSession:
         assert self._proc is not None and self._proc.stdout is not None
         max_skip = 200
         for _ in range(max_skip):
-            line = await self._proc.stdout.readline()
+            line = await self._readline_safe()
+            if line is None:
+                # Oversize line — already logged, skip and keep going.
+                continue
             if not line:
                 raise SandboxError(f"runner closed stdout before responding to {method!r}")
             text = line.decode("utf-8", errors="replace").strip()
@@ -582,9 +637,12 @@ class _RunnerSession:
             if remaining <= 0:
                 raise SandboxError("Pyodide runner did not become ready in time")
             try:
-                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=remaining)
+                line = await asyncio.wait_for(self._readline_safe(), timeout=remaining)
             except asyncio.TimeoutError as exc:
                 raise SandboxError("Pyodide runner did not become ready in time") from exc
+            if line is None:
+                # Oversize boot-time line — already logged, skip and keep waiting.
+                continue
             if not line:
                 raise SandboxError("Pyodide runner exited before signalling ready")
             text = line.decode("utf-8", errors="replace").strip()

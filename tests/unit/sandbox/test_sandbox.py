@@ -881,6 +881,99 @@ async def test_await_ready_raises_on_premature_eof() -> None:
         await session._await_ready()
 
 
+# -- _RunnerSession: recover from oversize stdout lines ------------------------
+
+
+class _FakeStdoutWithValueError:
+    """Async-readline shim that raises ``ValueError`` on the first call.
+
+    Mirrors ``asyncio.StreamReader.readline`` behavior when a single
+    line exceeds the StreamReader's buffer limit: the buffer is cleaned
+    up before ``ValueError`` is raised, so the next call returns the
+    *next* line normally.
+    """
+
+    def __init__(self, lines_after_error: list[bytes]) -> None:
+        self._raised = False
+        self._lines = list(lines_after_error)
+        self._idx = 0
+
+    async def readline(self) -> bytes:
+        if not self._raised:
+            self._raised = True
+            raise ValueError("Separator is found, but chunk is longer than limit")
+        if self._idx >= len(self._lines):
+            return b""
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
+
+def _session_with_fake_stdout_obj(stdout: object) -> sandbox_module._RunnerSession:
+    """Variant of ``_session_with_fake_stdout`` that takes a pre-built stdout shim."""
+    session = sandbox_module._RunnerSession(argv=["fake"])
+
+    class _StubProc:
+        def __init__(self) -> None:
+            self.stdout = stdout
+            self.stdin = None
+            self.stderr = None
+            self.pid = 2**31 - 1
+            self.returncode = 0
+
+        async def wait(self) -> int:
+            return 0
+
+    session._proc = _StubProc()  # type: ignore[assignment]
+    return session
+
+
+@pytest.mark.asyncio
+async def test_read_until_id_recovers_from_oversize_line() -> None:
+    """``ValueError`` from ``readline`` on an oversize line must be a skip, not a kill.
+
+    Regression: Modal runs were SIGTERM'd because Pyodide emitted a
+    JSON-RPC response line larger than ``asyncio.StreamReader``'s
+    default 64 KiB buffer, ``readline`` raised
+    ``ValueError: Separator is found, but chunk is longer than limit``,
+    and that propagated out of ``run_python`` and killed the run.
+    The fix bumps the limit substantially AND catches ``ValueError`` as
+    a recoverable skip so even a line that exceeds the bumped limit
+    drops cleanly with a warning instead of taking down the sandbox.
+    """
+    session = _session_with_fake_stdout_obj(
+        _FakeStdoutWithValueError(
+            [
+                b'{"jsonrpc":"2.0","id":1,"result":{"exit_code":0,"stdout":"ok","stderr":""}}\n',
+            ]
+        )
+    )
+    rpc = await session._read_until_id(expected_id=1, method="execute")
+    assert rpc.error is None
+    assert rpc.result == {"exit_code": 0, "stdout": "ok", "stderr": ""}
+
+
+@pytest.mark.asyncio
+async def test_await_ready_recovers_from_oversize_line() -> None:
+    """An oversize boot-time line must not prevent the ready sentinel from being seen.
+
+    Pyodide's package loader can emit large diagnostics during cold
+    boot; if one exceeds the StreamReader buffer the readline raises
+    ``ValueError`` and (pre-fix) tore down the run before ready was
+    ever observed. The fix routes both ``_read_until_id`` and
+    ``_await_ready`` through ``_readline_safe`` so the next line in
+    the stream — including the ready sentinel — is still consumed.
+    """
+    session = _session_with_fake_stdout_obj(
+        _FakeStdoutWithValueError(
+            [
+                b'{"jsonrpc":"2.0","id":0,"result":{"ready":true}}\n',
+            ]
+        )
+    )
+    await session._await_ready()
+
+
 # -- _resolve_required_wheels: lockfile-driven wheel discovery -----------------
 
 
