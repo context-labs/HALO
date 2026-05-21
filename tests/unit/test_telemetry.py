@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
@@ -52,9 +53,19 @@ def test_halo_agent_span_passes_conversation_id_as_session_id(monkeypatch) -> No
         pass
 
     @contextmanager
-    def _fake_agent_span(tracer: object, **kwargs: object):
+    def _fake_agent_span(
+        tracer: object,
+        *,
+        span_name: str,
+        system: str,
+        agent_id: str | None,
+        session_id: str | None,
+    ) -> Iterator[_FakeSpan]:
         captured["tracer"] = tracer
-        captured.update(kwargs)
+        captured["span_name"] = span_name
+        captured["system"] = system
+        captured["agent_id"] = agent_id
+        captured["session_id"] = session_id
         yield _FakeSpan()
 
     monkeypatch.setenv("CATALYST_TRACING_CONVERSATION_ID", "  conv-123  ")
