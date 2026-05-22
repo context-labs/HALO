@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from openai import AsyncOpenAI
+
 import engine.agents.agent_context as agent_context_module
 import engine.main as engine_main
 from engine.agents.agent_config import AgentConfig
+from engine.agents.agent_context_items import AgentContextItem
 from engine.engine_config import EngineConfig
 from engine.main import _drive_sync
 from engine.model_config import ModelConfig
@@ -17,7 +20,13 @@ from tests._sdk_events import assistant_message_event
 from tests.probes.probe_kit import FakeRunner
 
 
-async def _noop_compact(**_kwargs: object) -> str:
+async def _noop_compact(
+    *,
+    client: AsyncOpenAI,
+    compaction_model: ModelConfig,
+    item: AgentContextItem,
+) -> str:
+    del client, compaction_model, item
     return ""
 
 
