@@ -180,3 +180,50 @@ async def test_engine_installs_sdk_default_with_tracing_disabled(
     client_arg, kwargs = set_default_calls[0]
     assert client_arg is stub_client_instance
     assert kwargs == {"use_for_tracing": False}
+
+
+@pytest.mark.asyncio
+async def test_engine_pins_sdk_to_chat_completions_api(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fixtures_dir: Path,
+) -> None:
+    """Engine must pin the SDK to the chat-completions API so OpenAI-compatible
+    providers without a Responses endpoint (Inference.net, OpenRouter, vLLM, …)
+    keep working. Regression guard for the integration-test failure that
+    surfaced as ``APIConnectionError`` against ``/v1/responses``."""
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
+
+    api_calls: list[str] = []
+
+    class _StubAsyncOpenAI:
+        def __init__(
+            self,
+            *,
+            base_url: str | None = None,
+            api_key: str | None = None,
+            default_headers: dict[str, str] | None = None,
+        ) -> None:
+            del base_url, api_key, default_headers
+            self.close = AsyncMock()
+
+    def _noop_set_default_client(client: object, *, use_for_tracing: bool) -> None:
+        del client, use_for_tracing
+
+    def _record_set_default_api(api: str) -> None:
+        api_calls.append(api)
+
+    monkeypatch.setattr(engine_main, "AsyncOpenAI", _StubAsyncOpenAI)
+    monkeypatch.setattr(engine_main, "set_default_openai_client", _noop_set_default_client)
+    monkeypatch.setattr(engine_main, "set_default_openai_api", _record_set_default_api)
+    monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
+
+    runner = FakeRunner([_assistant_text("Final.\n<final/>")])
+    monkeypatch.setattr("agents.Runner.run_streamed", runner.run_streamed)
+
+    await engine_main.run_engine_async(
+        [AgentMessage(role="user", content="hi")], _config(), trace_path
+    )
+
+    assert api_calls == ["chat_completions"]

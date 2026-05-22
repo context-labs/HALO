@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
 from typing import TypeVar
 
-from agents import RunConfig, Runner, set_default_openai_client
+from agents import RunConfig, Runner, set_default_openai_api, set_default_openai_client
 from openai import AsyncOpenAI
 
 from engine.agents.agent_context import AgentContext
@@ -64,6 +64,13 @@ async def stream_engine_async(
             # name still distinguishes root vs subagent work in the trace tree.
             with halo_agent_span(span_name="halo-root.run", agent_id="halo", system="openai"):
                 set_default_openai_client(client, use_for_tracing=False)
+                # The OpenAI Agents SDK defaults to the Responses API
+                # (``/v1/responses``), which many OpenAI-compatible providers
+                # (Inference.net, OpenRouter, vLLM, …) do not implement. Pin
+                # to chat-completions so HALO works against the entire
+                # OpenAI-compatible ecosystem out of the box; real OpenAI
+                # supports both, so this is a strict superset.
+                set_default_openai_api("chat_completions")
                 sandbox = Sandbox.get()
 
                 index_path = await TraceIndexBuilder.ensure_index_exists(
