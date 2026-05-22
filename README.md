@@ -83,6 +83,9 @@ halo --help
 ### Usage
 
 1. [Integrate Tracing](docs/integrations/openai-agents-sdk.md)
+   - Care AI users can convert existing Langfuse exports and run Care
+     AI-specific diagnostic prompts with
+     [`halo-careai`](docs/integrations/care-ai-langfuse.md).
 2. Collect traces by running your agent
 3. Run the HALO engine, see the [CLI](/halo_cli/README.md) docs for more info
 

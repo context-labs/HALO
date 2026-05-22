@@ -27,3 +27,5 @@ class EngineConfig(BaseModel):
     tool_call_compaction_keep_last_turns: int = Field(default=3, ge=0)
     maximum_depth: int = Field(default=2, ge=0)
     maximum_parallel_subagents: int = Field(default=4, gt=0)
+    trace_detail_tools_enabled: bool = True
+    run_code_enabled: bool = True

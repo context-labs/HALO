@@ -105,6 +105,29 @@ def test_child_tools_below_max_depth_includes_subagent_tool() -> None:
     assert "call_subagent" in names
 
 
+def test_child_tools_can_disable_detail_and_run_code_tools() -> None:
+    run_state = _mock_run_state(max_depth=0)
+    run_state.config.trace_detail_tools_enabled = False
+    run_state.config.run_code_enabled = False
+    run_state.sandbox = object()
+    sem: dict[int, asyncio.Semaphore] = {}
+    tools = _child_tools_for_depth(
+        depth=0,
+        run_state=run_state,
+        semaphores_by_depth=sem,
+        parent_execution=_fake_parent(),
+        parent_context=_fake_parent_context(),
+    )
+
+    names = {tool.name for tool in tools}
+    assert {"get_dataset_overview", "query_traces", "count_traces"}.issubset(names)
+    assert "view_trace" not in names
+    assert "view_spans" not in names
+    assert "search_trace" not in names
+    assert "search_span" not in names
+    assert "run_code" not in names
+
+
 @pytest.mark.asyncio
 async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
     """Defense-in-depth: structural guard in ``_child_tools_for_depth`` keeps this

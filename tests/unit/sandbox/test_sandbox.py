@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -212,6 +213,25 @@ async def test_run_python_includes_trace_and_index_in_allow_read(
     allow = allow_read_arg.split("=", 1)[1].split(",")
     assert str(trace.resolve()) in allow
     assert str(index.resolve()) in allow
+
+
+@pytest.mark.asyncio
+async def test_run_python_enables_deno_npm_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deno 2.7 needs explicit npm import mode for Pyodide."""
+    sandbox = _fake_sandbox(tmp_path)
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("")
+    index = tmp_path / "i.jsonl"
+    index.write_text("")
+
+    captured: dict[str, list[str]] = {}
+    _install_session_stub(monkeypatch, captured_argv=captured)
+
+    await sandbox.run_python(code="x=1", trace_path=trace, index_path=index)
+
+    assert sandbox_module._DENO_NODE_MODULES_FLAG in captured["argv"]
 
 
 @pytest.mark.asyncio
@@ -1068,3 +1088,45 @@ def test_resolve_required_wheels_raises_when_required_package_missing(
         sandbox_module._ResolutionError, match="no entry for required package 'missingpkg'"
     ):
         sandbox_module._resolve_required_wheels(pyodide_dir)
+
+
+# -- _ensure_npm_cache: Deno npm cache discovery ------------------------------
+
+
+def test_ensure_npm_cache_handles_non_default_npm_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enterprise npm registry config changes Deno's cache path shape."""
+    deno = tmp_path / "deno"
+    deno.write_text("")
+    deno_dir = tmp_path / "deno-cache"
+    pyodide_dir = (
+        deno_dir
+        / "npm"
+        / "artifactory.example.test"
+        / "artifactory"
+        / "api"
+        / "npm"
+        / "node-virt"
+        / "pyodide"
+        / sandbox_module._PYODIDE_VERSION
+    )
+    calls: list[list[str]] = []
+
+    def _run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(args))
+        pyodide_dir.mkdir(parents=True)
+        (pyodide_dir / "pyodide.asm.wasm").write_text("")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(sandbox_module.subprocess, "run", _run)
+
+    assert sandbox_module._ensure_npm_cache(deno, deno_dir) == pyodide_dir
+    assert calls == [
+        [
+            str(deno),
+            "cache",
+            sandbox_module._DENO_NODE_MODULES_FLAG,
+            str((Path(sandbox_module.__file__).parent / "runner.js").resolve()),
+        ]
+    ]

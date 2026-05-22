@@ -75,9 +75,12 @@ const pyodide = await pyodideModule.loadPyodide();
 // Resolve sibling files via ``import.meta.url``. ``Deno.readTextFileSync``
 // and ``Deno.readDirSync`` are gated by ``--allow-read``, which the parent
 // process scopes to exactly these paths (see ``Sandbox._build_argv``).
-const runtimePath = new URL("./pyodide_runtime.py", import.meta.url).pathname;
-const engineInitPath = new URL("../__init__.py", import.meta.url).pathname;
-const tracesPkgPath = new URL("../traces", import.meta.url).pathname;
+const fileUrlPath = (specifier) =>
+  decodeURIComponent(new URL(specifier, import.meta.url).pathname);
+
+const runtimePath = fileUrlPath("./pyodide_runtime.py");
+const engineInitPath = fileUrlPath("../__init__.py");
+const tracesPkgPath = fileUrlPath("../traces");
 
 // Stage the host's ``engine`` package into Pyodide's WASM filesystem at
 // ``/halo/engine/`` so the in-Pyodide bootstrap can simply

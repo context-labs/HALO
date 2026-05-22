@@ -120,10 +120,6 @@ def _child_tools_for_depth(
         to_sdk_function_tool(GetDatasetOverviewTool(), context_factory=make_ctx),
         to_sdk_function_tool(QueryTracesTool(), context_factory=make_ctx),
         to_sdk_function_tool(CountTracesTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewSpansTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchSpanTool(), context_factory=make_ctx),
         to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
         to_sdk_function_tool(
             SynthesisTool(
@@ -134,7 +130,17 @@ def _child_tools_for_depth(
         ),
     ]
 
-    if run_state.sandbox is not None:
+    if engine_config.trace_detail_tools_enabled:
+        leaf_tools.extend(
+            [
+                to_sdk_function_tool(ViewTraceTool(), context_factory=make_ctx),
+                to_sdk_function_tool(ViewSpansTool(), context_factory=make_ctx),
+                to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
+                to_sdk_function_tool(SearchSpanTool(), context_factory=make_ctx),
+            ]
+        )
+
+    if engine_config.run_code_enabled and run_state.sandbox is not None:
         leaf_tools.append(to_sdk_function_tool(RunCodeTool(), context_factory=make_ctx))
 
     if depth >= engine_config.maximum_depth:

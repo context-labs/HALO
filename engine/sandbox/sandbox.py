@@ -41,10 +41,12 @@ _RUNTIME_FILENAME = "pyodide_runtime.py"
 
 # ``_PYODIDE_VERSION`` is the npm version this sandbox expects; the matching
 # pin lives in ``runner.js`` (``npm:pyodide@<version>/pyodide.js``). Both
-# must move together — Deno caches the npm package by version under
-# ``<deno_dir>/npm/registry.npmjs.org/pyodide/<version>/`` and the wheel
-# filenames are ABI-tied to that release.
+# must move together. Deno caches the npm package under ``<deno_dir>/npm/``,
+# but the registry host/path is machine-configurable (public npm, Artifactory,
+# etc.), so discovery searches for the versioned package directory instead of
+# hardcoding a registry path.
 _PYODIDE_VERSION = "0.29.3"
+_DENO_NODE_MODULES_FLAG = "--node-modules-dir=none"
 
 # Top-level Pyodide packages we need at boot. The transitive closure (numpy
 # pulls nothing extra; pandas pulls dateutil/pytz/six; pydantic pulls
@@ -318,6 +320,7 @@ class Sandbox:
             str(self.deno_executable),
             "run",
             "--no-prompt",
+            _DENO_NODE_MODULES_FLAG,
             f"--allow-read={allow_read}",
             str(self.runner_path),
         ]
@@ -757,14 +760,14 @@ def _query_deno_dir(deno_path: Path) -> Path:
 
 def _ensure_npm_cache(deno_path: Path, deno_dir: Path) -> Path:
     """Return the Deno-cached ``pyodide@<version>`` directory; warm it via ``deno cache``."""
-    target = deno_dir / "npm" / "registry.npmjs.org" / "pyodide" / _PYODIDE_VERSION
-    if (target / "pyodide.asm.wasm").is_file():
-        return target
+    cached = _find_cached_pyodide_dir(deno_dir)
+    if cached is not None:
+        return cached
 
     runner_path = (Path(__file__).parent / _RUNNER_FILENAME).resolve()
     try:
         result = subprocess.run(
-            [str(deno_path), "cache", str(runner_path)],
+            [str(deno_path), "cache", _DENO_NODE_MODULES_FLAG, str(runner_path)],
             capture_output=True,
             text=True,
             check=False,
@@ -779,9 +782,41 @@ def _ensure_npm_cache(deno_path: Path, deno_dir: Path) -> Path:
             f"{result.returncode}: {result.stderr.strip() or result.stdout.strip()}"
         )
 
-    if not (target / "pyodide.asm.wasm").is_file():
-        raise _ResolutionError(f"deno cache did not populate Pyodide assets at {target}")
-    return target
+    cached = _find_cached_pyodide_dir(deno_dir)
+    if cached is None:
+        raise _ResolutionError(
+            f"deno cache did not populate pyodide@{_PYODIDE_VERSION} assets under "
+            f"{deno_dir / 'npm'}"
+        )
+    return cached
+
+
+def _find_cached_pyodide_dir(deno_dir: Path) -> Path | None:
+    """Find Deno's cached ``pyodide@<version>`` package directory.
+
+    The registry segment is not stable. Deno may cache under
+    ``registry.npmjs.org`` on a public setup or under an enterprise npm proxy
+    path when npm registry configuration is present.
+    """
+    npm_root = deno_dir / "npm"
+    default_candidate = npm_root / "registry.npmjs.org" / "pyodide" / _PYODIDE_VERSION
+    candidates = [default_candidate]
+    if npm_root.is_dir():
+        candidates.extend(
+            sorted(
+                wasm.parent
+                for wasm in npm_root.glob(f"**/pyodide/{_PYODIDE_VERSION}/pyodide.asm.wasm")
+            )
+        )
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if (candidate / "pyodide.asm.wasm").is_file():
+            return candidate
+    return None
 
 
 def _normalize_pkg_name(name: str) -> str:

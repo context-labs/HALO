@@ -2,91 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
 from pathlib import Path
-from typing import get_args
 
 import typer
-from pydantic import TypeAdapter, ValidationError
-from rich.console import Console
-from rich.rule import Rule
 
-from engine.agents.agent_config import AgentConfig
-from engine.engine_config import EngineConfig
-from engine.main import stream_engine_async
-from engine.model_config import ModelConfig, ReasoningEffort
-from engine.models.engine_output import AgentOutputItem, AgentTextDelta
-from engine.models.messages import AgentMessage
+from halo_cli import engine_runner
 
-console = Console()
-
-REASONING_EFFORT_CHOICES: tuple[str, ...] = get_args(ReasoningEffort)
-_REASONING_EFFORT_ADAPTER: TypeAdapter[ReasoningEffort | None] = TypeAdapter(ReasoningEffort | None)
-
-
-def _parse_reasoning_effort(value: str | None) -> ReasoningEffort | None:
-    """Validate the CLI string against the canonical ``ReasoningEffort`` literal.
-
-    Pydantic owns the list of valid values; this just routes its error
-    through typer's CLI surface so users see ``Invalid value for
-    '--reasoning-effort'`` instead of a stack trace.
-    """
-    try:
-        return _REASONING_EFFORT_ADAPTER.validate_python(value)
-    except ValidationError as exc:
-        raise typer.BadParameter(str(exc), param_hint="--reasoning-effort") from exc
-
-
-def _make_config(
-    model: str,
-    max_depth: int,
-    max_turns: int,
-    max_parallel: int,
-    reasoning_effort: ReasoningEffort | None,
-    refusal_retries: int,
-) -> EngineConfig:
-    # One ModelConfig per role so each is independently tunable. Compaction
-    # intentionally skips reasoning_effort — it's a deterministic summarizer.
-    root_model = ModelConfig(name=model, reasoning_effort=reasoning_effort)
-    subagent_model = ModelConfig(name=model, reasoning_effort=reasoning_effort)
-    synthesis_model = ModelConfig(name=model, reasoning_effort=reasoning_effort)
-    compaction_model = ModelConfig(name=model)
-
-    root_agent = AgentConfig(
-        name="root",
-        model=root_model,
-        maximum_turns=max_turns,
-        refusal_retries=refusal_retries,
-    )
-    subagent = AgentConfig(
-        name="sub",
-        model=subagent_model,
-        maximum_turns=max_turns,
-        refusal_retries=refusal_retries,
-    )
-
-    return EngineConfig(
-        root_agent=root_agent,
-        subagent=subagent,
-        synthesis_model=synthesis_model,
-        compaction_model=compaction_model,
-        maximum_depth=max_depth,
-        maximum_parallel_subagents=max_parallel,
-    )
-
-
-async def _stream(
-    trace_path: Path, prompt: str, cfg: EngineConfig, *, telemetry: bool = False
-) -> None:
-    msgs = [AgentMessage(role="user", content=prompt)]
-    async for ev in stream_engine_async(msgs, cfg, trace_path, telemetry=telemetry):
-        if isinstance(ev, AgentTextDelta):
-            console.print(ev.text_delta, end="", soft_wrap=True)
-        elif isinstance(ev, AgentOutputItem):
-            console.print()
-            console.print(Rule(f"{ev.agent_name} (depth={ev.depth}, final={ev.final})"))
-            console.print(ev.item)
+REASONING_EFFORT_CHOICES = engine_runner.REASONING_EFFORT_CHOICES
+_make_config = engine_runner.make_config
+_parse_reasoning_effort = engine_runner.parse_reasoning_effort
+_stream = engine_runner.stream_to_console
 
 
 def _run(
@@ -131,20 +56,43 @@ def _run(
             "$HALO_TELEMETRY_PATH (default: ./halo-telemetry-{run_id}.jsonl)."
         ),
     ),
+    timeout_seconds: int | None = typer.Option(
+        None,
+        "--timeout-seconds",
+        min=1,
+        help="Abort the run after this many seconds.",
+    ),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        dir_okay=False,
+        writable=True,
+        help="Write the final root answer to this file.",
+    ),
+    events_path: Path | None = typer.Option(
+        None,
+        "--events-jsonl",
+        dir_okay=False,
+        writable=True,
+        help="Write durable HALO agent events to this JSONL file.",
+    ),
 ) -> None:
     """Run the HALO engine against TRACE_PATH and stream output to stdout."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        typer.echo("OPENAI_API_KEY not set; the engine needs real LLM access.", err=True)
-        raise typer.Exit(1)
-    cfg = _make_config(
-        model,
-        max_depth,
-        max_turns,
-        max_parallel,
-        _parse_reasoning_effort(reasoning_effort),
-        refusal_retries,
+    engine_runner.run_trace(
+        trace_path=trace_path,
+        prompt=prompt,
+        model=model,
+        max_depth=max_depth,
+        max_turns=max_turns,
+        max_parallel=max_parallel,
+        refusal_retries=refusal_retries,
+        reasoning_effort=reasoning_effort,
+        telemetry=telemetry,
+        timeout_seconds=timeout_seconds,
+        output_path=output_path,
+        events_path=events_path,
     )
-    asyncio.run(_stream(trace_path, prompt, cfg, telemetry=telemetry))
 
 
 def app() -> None:
