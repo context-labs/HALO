@@ -16,7 +16,6 @@ from engine.agents.openai_sdk_client import (
     Agent,
     FunctionTool,
     RunConfig,
-    RunContextWrapper,
     Runner,
     SdkToolContext,
     Tool,
@@ -29,7 +28,7 @@ from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.synthesis_tool import SynthesisTool
-from engine.tools.tool_protocol import ToolContext, to_sdk_function_tool
+from engine.tools.tool_protocol import to_sdk_function_tool
 from engine.tools.trace_tools import (
     CountTracesTool,
     GetDatasetOverviewTool,
@@ -113,35 +112,33 @@ def _child_tools_for_depth(
     """
     engine_config = run_state.config
 
-    def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
-        return ToolContext.model_construct(
-            run_state=run_state,
-            trace_store=run_state.trace_store,
-            output_bus=run_state.output_bus,
-            agent_context=parent_context,
-            sandbox=run_state.sandbox,
-        )
-
     leaf_tools: list[Tool] = [
-        to_sdk_function_tool(GetDatasetOverviewTool(), context_factory=make_ctx),
-        to_sdk_function_tool(QueryTracesTool(), context_factory=make_ctx),
-        to_sdk_function_tool(CountTracesTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewSpansTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchSpanTool(), context_factory=make_ctx),
-        to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
+        to_sdk_function_tool(
+            GetDatasetOverviewTool(), run_state=run_state, parent_context=parent_context
+        ),
+        to_sdk_function_tool(QueryTracesTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(CountTracesTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(ViewTraceTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(ViewSpansTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(SearchTraceTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(SearchSpanTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(
+            GetContextItemTool(), run_state=run_state, parent_context=parent_context
+        ),
         to_sdk_function_tool(
             SynthesisTool(
                 model=engine_config.synthesis_model,
                 client=run_state.openai_client,
             ),
-            context_factory=make_ctx,
+            run_state=run_state,
+            parent_context=parent_context,
         ),
     ]
 
     if run_state.sandbox is not None:
-        leaf_tools.append(to_sdk_function_tool(RunCodeTool(), context_factory=make_ctx))
+        leaf_tools.append(
+            to_sdk_function_tool(RunCodeTool(), run_state=run_state, parent_context=parent_context)
+        )
 
     if depth >= engine_config.maximum_depth:
         return leaf_tools
