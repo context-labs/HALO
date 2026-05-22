@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from openai import AsyncOpenAI, omit
 from pydantic import BaseModel, ConfigDict
 
+from engine.agents.openai_sdk_client import AsyncOpenAI, omit
 from engine.agents.prompt_templates import SYNTHESIS_SYSTEM_PROMPT
 from engine.model_config import ModelConfig
 from engine.tools.tool_protocol import ToolContext
