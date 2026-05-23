@@ -126,16 +126,24 @@ def _config() -> EngineConfig:
 
 
 @pytest.mark.asyncio
-async def test_engine_installs_sdk_default_with_tracing_disabled(
+async def test_engine_wires_configured_client_via_run_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     fixtures_dir: Path,
 ) -> None:
-    """Engine must bind the SDK's process-global client with use_for_tracing=False."""
+    """Regression for the wired_tools-vs-stream_engine_async asymmetry.
+
+    The engine must pass its ``AsyncOpenAI`` to the SDK via
+    ``RunConfig.model_provider`` for every ``Runner.run_streamed`` call.
+    Process-global ``set_default_openai_client`` is fragile: subagent
+    tool factories invoked outside ``stream_engine_async`` (e.g. via
+    ``tests/integration/tool_isolation_kit.wired_tools``) never see
+    the default, and the SDK silently falls back to an ``AsyncOpenAI``
+    built from env vars — losing ``default_headers`` and the
+    deterministic close path. Wire it per-call instead.
+    """
     trace_path = tmp_path / "traces.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-
-    set_default_calls: list[tuple[object, dict[str, object]]] = []
 
     class _StubAsyncOpenAI:
         def __init__(
@@ -162,11 +170,7 @@ async def test_engine_installs_sdk_default_with_tracing_disabled(
         )
         return stub_client_instance
 
-    def _record_set_default(client: object, *, use_for_tracing: bool) -> None:
-        set_default_calls.append((client, {"use_for_tracing": use_for_tracing}))
-
     monkeypatch.setattr(engine_main, "AsyncOpenAI", _capture_client)
-    monkeypatch.setattr(engine_main, "set_default_openai_client", _record_set_default)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
     runner = FakeRunner([_assistant_text("Final.\n<final/>")])
@@ -176,7 +180,12 @@ async def test_engine_installs_sdk_default_with_tracing_disabled(
         [AgentMessage(role="user", content="hi")], _config(), trace_path
     )
 
-    assert len(set_default_calls) == 1
-    client_arg, kwargs = set_default_calls[0]
-    assert client_arg is stub_client_instance
-    assert kwargs == {"use_for_tracing": False}
+    assert stub_client_instance is not None
+    assert len(runner.calls) >= 1
+    run_config = runner.calls[0]["run_config"]
+    model_provider = run_config.model_provider
+    assert isinstance(model_provider, engine_main.OpenAIProvider)
+    # ``OpenAIProvider`` stores the passed client on ``_client`` and short-
+    # circuits lazy construction; verify the engine's client is what the
+    # SDK will use rather than an env-var-built fallback.
+    assert model_provider._get_client() is stub_client_instance

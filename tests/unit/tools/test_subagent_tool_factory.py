@@ -379,6 +379,83 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
     assert result.answer == "child says 42"
 
 
+@pytest.mark.asyncio
+async def test_guarded_invoke_wires_run_state_client_via_run_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the SDK-default-client asymmetry between production and tests.
+
+    ``stream_engine_async`` previously called ``set_default_openai_client``
+    so the SDK's ``OpenAIProvider`` picked up HALO's client. Tests that
+    invoke ``call_subagent.on_invoke_tool`` directly via the
+    ``tool_isolation_kit.wired_tools`` path never enter
+    ``stream_engine_async``, so the default was never set and the SDK
+    silently fell back to ``AsyncOpenAI(base_url=os.getenv("OPENAI_BASE_URL"), ...)``
+    — losing ``default_headers`` and any deterministic close path.
+    Per-call ``RunConfig.model_provider`` makes prod and tests symmetric.
+    """
+    from agents.models.openai_provider import OpenAIProvider
+
+    cfg = EngineConfig(
+        root_agent=AgentConfig(name="r", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        subagent=AgentConfig(name="s", model=ModelConfig(name="gpt-5.4-mini"), maximum_turns=3),
+        synthesis_model=ModelConfig(name="gpt-5.4-mini"),
+        compaction_model=ModelConfig(name="gpt-5.4-mini"),
+        maximum_depth=1,
+    )
+    fake_store = MagicMock(spec=TraceStore)
+    configured_client = AsyncOpenAI(api_key="test")
+    run_state = EngineRunState(
+        trace_store=fake_store,
+        output_bus=EngineOutputBus(),
+        config=cfg,
+        sandbox=None,
+        openai_client=configured_client,
+    )
+
+    captured_run_configs: list[RunConfig] = []
+
+    class _EmptyStream:
+        async def stream_events(self):
+            return
+            yield  # pragma: no cover - makes this an async generator
+
+        async def wait_for_final_output(self):
+            return self
+
+    def _capturing_run_streamed(
+        *,
+        starting_agent: Agent,
+        input: list[dict[str, object]],
+        context: EngineRunState,
+        max_turns: int,
+        run_config: RunConfig,
+    ) -> _EmptyStream:
+        del starting_agent, input, context, max_turns
+        captured_run_configs.append(run_config)
+        return _EmptyStream()
+
+    monkeypatch.setattr("agents.Runner.run_streamed", _capturing_run_streamed)
+
+    sem = {d: asyncio.Semaphore(1) for d in range(1, 3)}
+    tool = _build_subagent_as_tool(
+        run_state=run_state,
+        child_depth=1,
+        semaphores_by_depth=sem,
+        parent_execution=_fake_parent(),
+    )
+
+    await tool.on_invoke_tool(_fake_tool_ctx(), '{"input": "ask child"}')
+
+    assert len(captured_run_configs) == 1
+    provider = captured_run_configs[0].model_provider
+    assert isinstance(provider, OpenAIProvider)
+    # ``OpenAIProvider`` stores the explicit client on ``_client`` and
+    # short-circuits lazy construction. Verify the SDK will hit HALO's
+    # configured client rather than an env-var-built fallback.
+    assert provider._get_client() is configured_client
+
+
 def test_build_subagent_semaphores_returns_independent_pool_per_depth() -> None:
     """Sharing one semaphore across depths is the deadlock bug. Each spawnable
     depth must get its own ``Semaphore`` instance."""

@@ -7,6 +7,7 @@ from typing import Any
 
 from agents import Agent, FunctionTool, RunConfig, RunContextWrapper, Runner, Tool
 from agents.agent_tool_input import AgentAsToolInput
+from agents.models.openai_provider import OpenAIProvider
 from agents.tool_context import ToolContext as SdkToolContext
 
 from engine.agents.agent_context import AgentContext
@@ -249,11 +250,22 @@ def _build_subagent_as_tool(
                 # OpenAiAgentRunner retries reset the counter alongside
                 # the SDK's own max_turns counter. See engine/main.py for
                 # the same pattern on the root agent.
+                #
+                # ``model_provider`` pins the SDK to the run's configured
+                # ``AsyncOpenAI`` for this subagent invocation. Without
+                # this, ``OpenAIProvider`` lazy-constructs its own client
+                # from env vars and drops ``default_headers`` — and worse,
+                # test paths that invoke ``call_subagent.on_invoke_tool``
+                # directly (via ``tests/integration/tool_isolation_kit.py``)
+                # never enter ``stream_engine_async`` and so never had
+                # a chance to set a process-global default in the first
+                # place. Per-call wiring keeps prod and tests symmetric.
                 run_config = RunConfig(
+                    model_provider=OpenAIProvider(openai_client=run_state.openai_client),
                     call_model_input_filter=TurnCounterInputFilter(
                         max_turns=engine_config.subagent.maximum_turns,
                         is_root=False,
-                    )
+                    ),
                 )
                 return Runner.run_streamed(
                     starting_agent=agent,
