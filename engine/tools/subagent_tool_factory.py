@@ -15,6 +15,7 @@ from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.openai_sdk_client import (
     Agent,
     FunctionTool,
+    OpenAIProvider,
     RunConfig,
     Runner,
     SdkToolContext,
@@ -308,11 +309,18 @@ async def _run_subagent_invocation(
         )
 
         async def _run_streamed(*, agent, input, context):
+            # ``model_provider`` pins the SDK to the run's configured
+            # ``AsyncOpenAI`` for this subagent invocation instead of letting
+            # ``OpenAIProvider`` lazy-construct its own client from env vars
+            # (which drops ``default_headers``). Per-call wiring keeps prod and
+            # test paths symmetric — tests that invoke ``call_subagent`` directly
+            # never enter ``stream_engine_async`` to set a process global.
             run_config = RunConfig(
+                model_provider=OpenAIProvider(openai_client=run_state.openai_client),
                 call_model_input_filter=TurnCounterInputFilter(
                     max_turns=engine_config.subagent.maximum_turns,
                     is_root=False,
-                )
+                ),
             )
             return Runner.run_streamed(
                 starting_agent=agent,

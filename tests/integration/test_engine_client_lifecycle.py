@@ -58,20 +58,15 @@ class _StubAsyncOpenAI:
 
 
 def _install_stub_client(monkeypatch: pytest.MonkeyPatch) -> _StubAsyncOpenAI:
-    """Patch ``engine.main.build_async_openai_client`` to return a fresh stub and
-    short-circuit ``install_default_sdk_client``. Returns the stub so the test
-    can assert on ``close`` lifecycle."""
+    """Patch ``engine.main.build_async_openai_client`` to return a fresh stub.
+    Returns the stub so the test can assert on ``close`` lifecycle."""
     stub_client = _StubAsyncOpenAI()
 
     def _build_stub(provider_config: ModelProviderConfig) -> _StubAsyncOpenAI:
         del provider_config
         return stub_client
 
-    def _noop_install_default(client: object) -> None:
-        del client
-
     monkeypatch.setattr(engine_main, "build_async_openai_client", _build_stub)
-    monkeypatch.setattr(engine_main, "install_default_sdk_client", _noop_install_default)
     return stub_client
 
 

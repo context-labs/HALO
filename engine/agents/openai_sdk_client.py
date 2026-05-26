@@ -14,8 +14,8 @@ from agents import (
     RunContextWrapper,
     Runner,
     Tool,
-    set_default_openai_client,
 )
+from agents.models.openai_provider import OpenAIProvider
 from agents.tool_context import ToolContext as SdkToolContext
 from openai import (
     APIConnectionError,
@@ -32,13 +32,13 @@ __all__ = [
     "Agent",
     "AsyncOpenAI",
     "FunctionTool",
+    "OpenAIProvider",
     "RunConfig",
     "RunContextWrapper",
     "Runner",
     "SdkToolContext",
     "Tool",
     "build_async_openai_client",
-    "install_default_sdk_client",
     "is_retriable_llm_error",
     "omit",
 ]
@@ -55,16 +55,6 @@ def build_async_openai_client(provider_config: ModelProviderConfig) -> AsyncOpen
         api_key=provider_config.api_key,
         default_headers=provider_config.default_headers,
     )
-
-
-def install_default_sdk_client(client: AsyncOpenAI) -> None:
-    """Install ``client`` as the Agents SDK default for the current process.
-
-    ``use_for_tracing=False`` is deliberate — HALO owns its own tracing setup
-    via ``halo_agent_span`` and the inference-catalyst exporter; letting the
-    SDK install its own tracing client would duplicate exports.
-    """
-    set_default_openai_client(client, use_for_tracing=False)
 
 
 def is_retriable_llm_error(exc: BaseException) -> bool:

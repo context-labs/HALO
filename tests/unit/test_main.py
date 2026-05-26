@@ -127,18 +127,24 @@ def _config() -> EngineConfig:
 
 
 @pytest.mark.asyncio
-async def test_engine_installs_sdk_default_via_boundary(
+async def test_engine_wires_configured_client_via_run_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     fixtures_dir: Path,
 ) -> None:
-    """Engine must route the SDK default-client install through the boundary
-    helper ``install_default_sdk_client`` (which pins ``use_for_tracing=False``;
-    verified in ``test_openai_sdk_client.py``)."""
+    """Regression for the wired_tools-vs-stream_engine_async asymmetry.
+
+    The engine must pass its ``AsyncOpenAI`` to the SDK via
+    ``RunConfig.model_provider`` for every ``Runner.run_streamed`` call.
+    Process-global ``set_default_openai_client`` is fragile: subagent
+    tool factories invoked outside ``stream_engine_async`` (e.g. via
+    ``tests/integration/tool_isolation_kit.wired_tools``) never see
+    the default, and the SDK silently falls back to an ``AsyncOpenAI``
+    built from env vars — losing ``default_headers`` and the
+    deterministic close path. Wire it per-call instead.
+    """
     trace_path = tmp_path / "traces.jsonl"
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
-
-    install_calls: list[object] = []
 
     class _StubAsyncOpenAI:
         def __init__(self) -> None:
@@ -152,11 +158,7 @@ async def test_engine_installs_sdk_default_via_boundary(
         stub_client_instance = _StubAsyncOpenAI()
         return stub_client_instance
 
-    def _record_install_default(client: object) -> None:
-        install_calls.append(client)
-
     monkeypatch.setattr(engine_main, "build_async_openai_client", _capture_client)
-    monkeypatch.setattr(engine_main, "install_default_sdk_client", _record_install_default)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
     runner = FakeRunner([_assistant_text("Final.\n<final/>")])
@@ -166,5 +168,12 @@ async def test_engine_installs_sdk_default_via_boundary(
         [AgentMessage(role="user", content="hi")], _config(), trace_path
     )
 
-    assert len(install_calls) == 1
-    assert install_calls[0] is stub_client_instance
+    assert stub_client_instance is not None
+    assert len(runner.calls) >= 1
+    run_config = runner.calls[0]["run_config"]
+    model_provider = run_config.model_provider
+    assert isinstance(model_provider, engine_main.OpenAIProvider)
+    # ``OpenAIProvider`` stores the passed client on ``_client`` and short-
+    # circuits lazy construction; verify the engine's client is what the
+    # SDK will use rather than an env-var-built fallback.
+    assert model_provider._get_client() is stub_client_instance

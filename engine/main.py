@@ -13,10 +13,10 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.openai_sdk_client import (
+    OpenAIProvider,
     RunConfig,
     Runner,
     build_async_openai_client,
-    install_default_sdk_client,
 )
 from engine.agents.turn_counter import TurnCounterInputFilter
 from engine.engine_config import EngineConfig
@@ -62,7 +62,6 @@ async def stream_engine_async(
             # view collapses every HALO run into one identity row; the span
             # name still distinguishes root vs subagent work in the trace tree.
             with halo_agent_span(span_name="halo-root.run", agent_id="halo", system="openai"):
-                install_default_sdk_client(client)
                 sandbox = Sandbox.get()
 
                 index_path = await TraceIndexBuilder.ensure_index_exists(
@@ -107,11 +106,23 @@ async def stream_engine_async(
                     # failure on the first turn would leave _current=1 and the
                     # next attempt would render "[HALO: turn 2 of M]" while the
                     # SDK is internally on turn 1.
+                    #
+                    # ``model_provider`` pins the SDK to HALO's configured
+                    # ``AsyncOpenAI`` for this run instead of having
+                    # ``OpenAIProvider`` lazy-construct its own from env vars
+                    # (which loses ``default_headers`` and the deterministic
+                    # close in ``finally`` below). Per-call wiring also keeps
+                    # SDK state out of process globals — subagents inherit the
+                    # same client via the matching pass in
+                    # ``subagent_tool_factory``, so test paths that invoke
+                    # ``call_subagent.on_invoke_tool`` directly (bypassing
+                    # ``stream_engine_async``) stay symmetric with production.
                     run_config = RunConfig(
+                        model_provider=OpenAIProvider(openai_client=client),
                         call_model_input_filter=TurnCounterInputFilter(
                             max_turns=engine_config.root_agent.maximum_turns,
                             is_root=True,
-                        )
+                        ),
                     )
                     return Runner.run_streamed(
                         starting_agent=agent,
