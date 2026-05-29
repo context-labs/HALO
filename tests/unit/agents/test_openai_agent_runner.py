@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from openai import APIConnectionError, AsyncOpenAI, BadRequestError
+from openai import APIConnectionError, APIError, AsyncOpenAI, BadRequestError
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
@@ -442,6 +442,51 @@ async def test_runner_retries_on_connection_error_then_fails() -> None:
             is_root=True,
         )
     assert call_count == 10
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_plain_api_error_from_backend() -> None:
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    call_count = 0
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def fail_then_recover(*, agent, input, context):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise APIError(
+                message=(
+                    "Backend returned unexpected response. Please contact Microsoft for help."
+                ),
+                request=fake_request,
+                body=None,
+            )
+        return _FakeStream([_assistant_event("answer\n<final/>")])
+
+    runner = OpenAiAgentRunner(
+        run_streamed=fail_then_recover,
+        client=_DUMMY_CLIENT,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert call_count == 2
+    assert execution.consecutive_llm_failures == 0
 
 
 class _RaisingStream:

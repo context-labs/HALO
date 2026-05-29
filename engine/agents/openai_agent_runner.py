@@ -6,6 +6,7 @@ from typing import Any
 
 from openai import (
     APIConnectionError,
+    APIError,
     APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
@@ -25,6 +26,8 @@ def _is_retriable_llm_error(exc: BaseException) -> bool:
         return True
     if isinstance(exc, APIStatusError):
         return exc.status_code >= 500
+    if isinstance(exc, APIError):
+        return True
     return False
 
 
