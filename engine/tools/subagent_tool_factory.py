@@ -5,16 +5,22 @@ import logging
 import uuid
 from typing import Any
 
-from agents import Agent, FunctionTool, RunConfig, RunContextWrapper, Runner, Tool
-from agents.agent_tool_input import AgentAsToolInput
-from agents.models.openai_provider import OpenAIProvider
-from agents.tool_context import ToolContext as SdkToolContext
+from pydantic import BaseModel
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
+from engine.agents.openai_sdk_client import (
+    Agent,
+    FunctionTool,
+    OpenAIProvider,
+    RunConfig,
+    Runner,
+    SdkToolContext,
+    Tool,
+)
 from engine.agents.prompt_templates import render_subagent_system_prompt
 from engine.agents.turn_counter import TurnCounterInputFilter
 from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
@@ -23,7 +29,7 @@ from engine.tools.agent_context_tools import GetContextItemTool
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.synthesis_tool import SynthesisTool
-from engine.tools.tool_protocol import ToolContext, to_sdk_function_tool
+from engine.tools.tool_protocol import to_sdk_function_tool
 from engine.tools.trace_tools import (
     CountTracesTool,
     GetDatasetOverviewTool,
@@ -33,6 +39,18 @@ from engine.tools.trace_tools import (
     ViewSpansTool,
     ViewTraceTool,
 )
+
+
+class CallSubagentArgs(BaseModel):
+    """Argument model for the ``call_subagent`` SDK tool.
+
+    Mirrors the shape ``Agent.as_tool()`` generates (``{"input": "..."}``) but
+    keeps the dependency on the SDK's internal ``AgentAsToolInput`` type out of
+    HALO's call site.
+    """
+
+    input: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -107,35 +125,33 @@ def _child_tools_for_depth(
     """
     engine_config = run_state.config
 
-    def make_ctx(wrapper: RunContextWrapper[Any]) -> ToolContext:
-        return ToolContext.model_construct(
-            run_state=run_state,
-            trace_store=run_state.trace_store,
-            output_bus=run_state.output_bus,
-            agent_context=parent_context,
-            sandbox=run_state.sandbox,
-        )
-
     leaf_tools: list[Tool] = [
-        to_sdk_function_tool(GetDatasetOverviewTool(), context_factory=make_ctx),
-        to_sdk_function_tool(QueryTracesTool(), context_factory=make_ctx),
-        to_sdk_function_tool(CountTracesTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(ViewSpansTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchTraceTool(), context_factory=make_ctx),
-        to_sdk_function_tool(SearchSpanTool(), context_factory=make_ctx),
-        to_sdk_function_tool(GetContextItemTool(), context_factory=make_ctx),
+        to_sdk_function_tool(
+            GetDatasetOverviewTool(), run_state=run_state, parent_context=parent_context
+        ),
+        to_sdk_function_tool(QueryTracesTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(CountTracesTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(ViewTraceTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(ViewSpansTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(SearchTraceTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(SearchSpanTool(), run_state=run_state, parent_context=parent_context),
+        to_sdk_function_tool(
+            GetContextItemTool(), run_state=run_state, parent_context=parent_context
+        ),
         to_sdk_function_tool(
             SynthesisTool(
                 model=engine_config.synthesis_model,
                 client=run_state.openai_client,
             ),
-            context_factory=make_ctx,
+            run_state=run_state,
+            parent_context=parent_context,
         ),
     ]
 
     if run_state.sandbox is not None:
-        leaf_tools.append(to_sdk_function_tool(RunCodeTool(), context_factory=make_ctx))
+        leaf_tools.append(
+            to_sdk_function_tool(RunCodeTool(), run_state=run_state, parent_context=parent_context)
+        )
 
     if depth >= engine_config.maximum_depth:
         return leaf_tools
@@ -187,145 +203,22 @@ def _build_subagent_as_tool(
         tool_description="Delegate a focused question to a subagent. Returns the subagent's answer.",
     )
 
-    # Annotating ``ctx`` as ``SdkToolContext`` (rather than the SDK's narrower
-    # ``RunContextWrapper``) is load-bearing: the SDK's tool dispatcher inspects
-    # this annotation in ``agents/tool.py:_get_function_tool_invoke_context``
-    # and only passes the rich context (with ``tool_call_id``) when it sees
-    # ``ToolContext``. With ``RunContextWrapper`` the SDK forks down to a bare
-    # wrapper and ``tool_call_id`` is lost.
+    # Annotating ``ctx`` as ``SdkToolContext`` (rather than ``RunContextWrapper``)
+    # is load-bearing: the SDK's tool dispatcher inspects this annotation in
+    # ``agents/tool.py:_get_function_tool_invoke_context`` and only passes the
+    # rich context (with ``tool_call_id``) when it sees ``ToolContext``. With
+    # ``RunContextWrapper`` the SDK forks down to a bare wrapper and
+    # ``tool_call_id`` is lost.
     async def guarded_invoke(ctx: SdkToolContext[Any], raw_arguments: str) -> str:
-        """SDK-side tool entrypoint for ``call_subagent``: gate, semaphore-acquire, run, return result."""
-        # Defense-in-depth: ``_child_tools_for_depth`` already gates this structurally;
-        # keep the runtime check so a future refactor can't silently re-enable recursion.
-        if child_depth > engine_config.maximum_depth:
-            raise EngineMaxDepthExceededError(
-                f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
-            )
-
-        # ``as_tool()`` builds a tool whose ``raw_arguments`` is JSON-encoded
-        # ``AgentAsToolInput`` (i.e. ``{"input": "..."}``); the SDK's own
-        # ``_run_agent_impl`` extracts ``params["input"]`` before calling the
-        # nested agent, so we mirror that here. Without this, the subagent
-        # would see the raw JSON wrapper instead of the delegated question.
-        delegated_input = AgentAsToolInput.model_validate_json(raw_arguments).input
-
-        async with semaphores_by_depth[child_depth]:
-            child_execution = AgentExecution(
-                agent_id=f"sub-{uuid.uuid4().hex[:8]}",
-                agent_name=engine_config.subagent.name,
-                depth=child_depth,
-                parent_agent_id=parent_execution.agent_id,
-                parent_tool_call_id=ctx.tool_call_id,
-            )
-            run_state.register(child_execution)
-
-            child_context = AgentContext(
-                items=[
-                    AgentContextItem(
-                        item_id="sys-0", role="system", content=subagent_system_prompt
-                    ),
-                    AgentContextItem(item_id="in-0", role="user", content=delegated_input),
-                ],
-                compaction_model=engine_config.compaction_model,
-                text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
-                tool_call_compaction_keep_last_turns=engine_config.tool_call_compaction_keep_last_turns,
-            )
-
-            child_agent = Agent[EngineRunState](
-                name=engine_config.subagent.name,
-                instructions="",
-                model=engine_config.subagent.model.name,
-                model_settings=engine_config.subagent.model.to_sdk_model_settings(),
-                tools=_child_tools_for_depth(
-                    depth=child_depth,
-                    run_state=run_state,
-                    semaphores_by_depth=semaphores_by_depth,
-                    parent_execution=child_execution,
-                    parent_context=child_context,
-                ),
-            )
-
-            async def _run_streamed(*, agent, input, context):
-                # Fresh filter per SDK Runner.run_streamed invocation so
-                # OpenAiAgentRunner retries reset the counter alongside
-                # the SDK's own max_turns counter. See engine/main.py for
-                # the same pattern on the root agent.
-                #
-                # ``model_provider`` pins the SDK to the run's configured
-                # ``AsyncOpenAI`` for this subagent invocation. Without
-                # this, ``OpenAIProvider`` lazy-constructs its own client
-                # from env vars and drops ``default_headers`` — and worse,
-                # test paths that invoke ``call_subagent.on_invoke_tool``
-                # directly (via ``tests/integration/tool_isolation_kit.py``)
-                # never enter ``stream_engine_async`` and so never had
-                # a chance to set a process-global default in the first
-                # place. Per-call wiring keeps prod and tests symmetric.
-                run_config = RunConfig(
-                    model_provider=OpenAIProvider(openai_client=run_state.openai_client),
-                    call_model_input_filter=TurnCounterInputFilter(
-                        max_turns=engine_config.subagent.maximum_turns,
-                        is_root=False,
-                    ),
-                )
-                return Runner.run_streamed(
-                    starting_agent=agent,
-                    input=input,
-                    context=context,
-                    max_turns=engine_config.subagent.maximum_turns,
-                    run_config=run_config,
-                )
-
-            runner = OpenAiAgentRunner(
-                run_streamed=_run_streamed,
-                client=run_state.openai_client,
-                refusal_retries=engine_config.subagent.refusal_retries,
-            )
-
-            # ``agent_id="halo"`` matches the root span (see
-            # ``engine/main.py``) so Catalyst groups root + every
-            # subagent invocation under one Agents-tab identity.
-            # ``engine_config.subagent.name`` ("sub") still drives the
-            # HALO run page UI via ``child_execution.agent_name``.
-            with halo_agent_span(span_name="halo-sub.run", agent_id="halo", system="openai"):
-                try:
-                    await runner.run(
-                        sdk_agent=child_agent,
-                        agent_context=child_context,
-                        agent_execution=child_execution,
-                        output_bus=run_state.output_bus,
-                        is_root=False,
-                        run_context=run_state,
-                    )
-                except EngineAgentExhaustedError as exc:
-                    logger.warning(
-                        "subagent %s exhausted retries at depth=%s: %s",
-                        child_execution.agent_id,
-                        child_depth,
-                        exc,
-                    )
-                    return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
-                except Exception as exc:
-                    logger.warning(
-                        "subagent %s failed at depth=%s: %s: %s",
-                        child_execution.agent_id,
-                        child_depth,
-                        type(exc).__name__,
-                        exc,
-                    )
-                    return _failure_result(
-                        child_execution, f"Subagent failed: {type(exc).__name__}: {exc}"
-                    )
-
-                answer = _extract_final_answer(child_context)
-                result = SubagentToolResult(
-                    child_agent_id=child_execution.agent_id,
-                    answer=answer,
-                    output_start_sequence=child_execution.output_start_sequence or 0,
-                    output_end_sequence=child_execution.output_end_sequence or 0,
-                    turns_used=child_execution.turns_used,
-                    tool_calls_made=child_execution.tool_calls_made,
-                )
-                return result.model_dump_json()
+        return await _run_subagent_invocation(
+            ctx,
+            raw_arguments,
+            run_state=run_state,
+            child_depth=child_depth,
+            semaphores_by_depth=semaphores_by_depth,
+            parent_execution=parent_execution,
+            subagent_system_prompt=subagent_system_prompt,
+        )
 
     sdk_tool.on_invoke_tool = guarded_invoke
     return sdk_tool
@@ -351,3 +244,135 @@ def _failure_result(execution: AgentExecution, message: str) -> str:
         turns_used=execution.turns_used,
         tool_calls_made=execution.tool_calls_made,
     ).model_dump_json()
+
+
+async def _run_subagent_invocation(
+    ctx: SdkToolContext[Any],
+    raw_arguments: str,
+    *,
+    run_state: EngineRunState,
+    child_depth: int,
+    semaphores_by_depth: dict[int, asyncio.Semaphore],
+    parent_execution: AgentExecution,
+    subagent_system_prompt: str,
+) -> str:
+    """SDK-side entrypoint for ``call_subagent``: gate, semaphore-acquire, run, return result.
+
+    Lives at module scope (instead of as a closure inside ``_build_subagent_as_tool``)
+    so it's readable and testable. The per-invocation child Agent, AgentContext, and
+    AgentExecution are still built here — they must be fresh per call so each invocation
+    can flow its own ``child_execution`` into the grandchildren's tools.
+    """
+    engine_config = run_state.config
+
+    # Defense-in-depth: ``_child_tools_for_depth`` already gates this structurally;
+    # keep the runtime check so a future refactor can't silently re-enable recursion.
+    if child_depth > engine_config.maximum_depth:
+        raise EngineMaxDepthExceededError(
+            f"subagent invoked at depth={child_depth} > maximum_depth={engine_config.maximum_depth}"
+        )
+
+    delegated_input = CallSubagentArgs.model_validate_json(raw_arguments).input
+
+    async with semaphores_by_depth[child_depth]:
+        child_execution = AgentExecution(
+            agent_id=f"sub-{uuid.uuid4().hex[:8]}",
+            agent_name=engine_config.subagent.name,
+            depth=child_depth,
+            parent_agent_id=parent_execution.agent_id,
+            parent_tool_call_id=ctx.tool_call_id,
+        )
+        run_state.register(child_execution)
+
+        child_context = AgentContext(
+            items=[
+                AgentContextItem(item_id="sys-0", role="system", content=subagent_system_prompt),
+                AgentContextItem(item_id="in-0", role="user", content=delegated_input),
+            ],
+            compaction_model=engine_config.compaction_model,
+            text_message_compaction_keep_last_messages=engine_config.text_message_compaction_keep_last_messages,
+            tool_call_compaction_keep_last_turns=engine_config.tool_call_compaction_keep_last_turns,
+        )
+
+        child_agent = Agent[EngineRunState](
+            name=engine_config.subagent.name,
+            instructions="",
+            model=engine_config.subagent.model.name,
+            model_settings=engine_config.subagent.model.to_sdk_model_settings(),
+            tools=_child_tools_for_depth(
+                depth=child_depth,
+                run_state=run_state,
+                semaphores_by_depth=semaphores_by_depth,
+                parent_execution=child_execution,
+                parent_context=child_context,
+            ),
+        )
+
+        async def _run_streamed(*, agent, input, context):
+            # ``model_provider`` pins the SDK to the run's configured
+            # ``AsyncOpenAI`` for this subagent invocation instead of letting
+            # ``OpenAIProvider`` lazy-construct its own client from env vars
+            # (which drops ``default_headers``). Per-call wiring keeps prod and
+            # test paths symmetric — tests that invoke ``call_subagent`` directly
+            # never enter ``stream_engine_async`` to set a process global.
+            run_config = RunConfig(
+                model_provider=OpenAIProvider(openai_client=run_state.openai_client),
+                call_model_input_filter=TurnCounterInputFilter(
+                    max_turns=engine_config.subagent.maximum_turns,
+                    is_root=False,
+                ),
+            )
+            return Runner.run_streamed(
+                starting_agent=agent,
+                input=input,
+                context=context,
+                max_turns=engine_config.subagent.maximum_turns,
+                run_config=run_config,
+            )
+
+        runner = OpenAiAgentRunner(
+            run_streamed=_run_streamed,
+            client=run_state.openai_client,
+            refusal_retries=engine_config.subagent.refusal_retries,
+        )
+
+        with halo_agent_span(span_name="halo-sub.run", agent_id="halo", system="openai"):
+            try:
+                await runner.run(
+                    sdk_agent=child_agent,
+                    agent_context=child_context,
+                    agent_execution=child_execution,
+                    output_bus=run_state.output_bus,
+                    is_root=False,
+                    run_context=run_state,
+                )
+            except EngineAgentExhaustedError as exc:
+                logger.warning(
+                    "subagent %s exhausted retries at depth=%s: %s",
+                    child_execution.agent_id,
+                    child_depth,
+                    exc,
+                )
+                return _failure_result(child_execution, f"Subagent exhausted retries: {exc}")
+            except Exception as exc:
+                logger.warning(
+                    "subagent %s failed at depth=%s: %s: %s",
+                    child_execution.agent_id,
+                    child_depth,
+                    type(exc).__name__,
+                    exc,
+                )
+                return _failure_result(
+                    child_execution, f"Subagent failed: {type(exc).__name__}: {exc}"
+                )
+
+            answer = _extract_final_answer(child_context)
+            result = SubagentToolResult(
+                child_agent_id=child_execution.agent_id,
+                answer=answer,
+                output_start_sequence=child_execution.output_start_sequence or 0,
+                output_end_sequence=child_execution.output_end_sequence or 0,
+                turns_used=child_execution.turns_used,
+                tool_calls_made=child_execution.tool_calls_made,
+            )
+            return result.model_dump_json()

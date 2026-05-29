@@ -4,29 +4,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
-    AsyncOpenAI,
-    RateLimitError,
-)
-
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.openai_event_mapper import OpenAiEventMapper
+from engine.agents.openai_sdk_client import AsyncOpenAI, is_retriable_llm_error
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
-
-
-def _is_retriable_llm_error(exc: BaseException) -> bool:
-    """Classify an exception as a transient LLM failure worth retrying."""
-    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
-        return True
-    if isinstance(exc, APIStatusError):
-        return exc.status_code >= 500
-    return False
-
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
@@ -130,7 +113,7 @@ class OpenAiAgentRunner:
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
             except Exception as exc:
-                if events_seen > 0 or not _is_retriable_llm_error(exc):
+                if events_seen > 0 or not is_retriable_llm_error(exc):
                     raise
                 last_exc = exc
                 agent_execution.record_llm_failure()

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from agents import FunctionTool, RunContextWrapper
 from pydantic import BaseModel, ConfigDict
+
+from engine.agents.openai_sdk_client import FunctionTool, RunContextWrapper
 
 if TYPE_CHECKING:
     from engine.agents.agent_context import AgentContext
@@ -78,20 +78,27 @@ class EngineTool(Protocol):
 def to_sdk_function_tool(
     tool: EngineTool,
     *,
-    context_factory: Callable[[RunContextWrapper[Any]], ToolContext],
+    run_state: "EngineRunState",
+    parent_context: "AgentContext",
 ) -> FunctionTool:
     """Adapt an EngineTool into an OpenAI Agents SDK ``FunctionTool``.
 
     Pulls the JSON schema from the tool's ``arguments_model``, parses raw arguments
-    into the typed model on the way in, and serializes the typed result on the way
-    out. ``context_factory`` builds a per-invocation ToolContext from the SDK's
-    RunContextWrapper.
+    into the typed model on the way in, builds a per-invocation ``ToolContext``
+    from the engine's ``run_state`` and the calling agent's ``parent_context``,
+    and serializes the typed result on the way out.
     """
     arguments_model = tool.arguments_model
 
     async def _invoke(ctx: RunContextWrapper[Any], raw_arguments: str) -> str:
         parsed = arguments_model.model_validate_json(raw_arguments or "{}")
-        tool_context = context_factory(ctx)
+        tool_context = ToolContext.model_construct(
+            run_state=run_state,
+            trace_store=run_state.trace_store,
+            output_bus=run_state.output_bus,
+            agent_context=parent_context,
+            sandbox=run_state.sandbox,
+        )
         result = await tool.run(tool_context, parsed)
         return result.model_dump_json()
 

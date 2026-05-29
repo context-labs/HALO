@@ -14,6 +14,7 @@ from engine.agents.agent_context_items import AgentContextItem
 from engine.engine_config import EngineConfig
 from engine.main import _drive_sync
 from engine.model_config import ModelConfig
+from engine.model_provider_config import ModelProviderConfig
 from engine.models.messages import AgentMessage
 from tests._sdk_events import assistant_message_event
 from tests.probes.probe_kit import FakeRunner
@@ -146,31 +147,18 @@ async def test_engine_wires_configured_client_via_run_config(
     trace_path.write_bytes((fixtures_dir / "tiny_traces.jsonl").read_bytes())
 
     class _StubAsyncOpenAI:
-        def __init__(
-            self,
-            *,
-            base_url: str | None = None,
-            api_key: str | None = None,
-            default_headers: dict[str, str] | None = None,
-        ) -> None:
-            del base_url, api_key, default_headers
+        def __init__(self) -> None:
             self.close = AsyncMock()
 
     stub_client_instance: _StubAsyncOpenAI | None = None
 
-    def _capture_client(
-        *,
-        base_url: str | None = None,
-        api_key: str | None = None,
-        default_headers: dict[str, str] | None = None,
-    ) -> _StubAsyncOpenAI:
+    def _capture_client(provider_config: ModelProviderConfig) -> _StubAsyncOpenAI:
+        del provider_config
         nonlocal stub_client_instance
-        stub_client_instance = _StubAsyncOpenAI(
-            base_url=base_url, api_key=api_key, default_headers=default_headers
-        )
+        stub_client_instance = _StubAsyncOpenAI()
         return stub_client_instance
 
-    monkeypatch.setattr(engine_main, "AsyncOpenAI", _capture_client)
+    monkeypatch.setattr(engine_main, "build_async_openai_client", _capture_client)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
     runner = FakeRunner([_assistant_text("Final.\n<final/>")])

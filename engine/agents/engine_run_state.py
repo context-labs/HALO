@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from openai import AsyncOpenAI
-
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
+from engine.agents.openai_sdk_client import AsyncOpenAI
 from engine.engine_config import EngineConfig
 from engine.sandbox.sandbox import Sandbox
 from engine.traces.trace_store import TraceStore

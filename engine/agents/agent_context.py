@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from openai import AsyncOpenAI
-
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.compactor import compact
+from engine.agents.openai_sdk_client import AsyncOpenAI
 from engine.agents.prompt_templates import render_root_system_prompt
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
