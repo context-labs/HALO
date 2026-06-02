@@ -56,6 +56,10 @@ import {
 } from "~/lib/ui";
 import { trpc } from "~/trpc";
 import { WorkspaceNav } from "~/workspace/WorkspaceNav";
+import {
+  TRACE_PAGE_COMMAND_EVENT,
+  showDesktopRowContextMenu,
+} from "~/desktop/desktopBridge";
 import { LangfuseImportDialog } from "./LangfuseImportDialog";
 import type {
   FacetOption,
@@ -319,19 +323,49 @@ export function TraceMonitorPage({
   const visibleMetrics = useMemo(() => summarizeVisibleTraces(traces), [traces]);
   const ingestUrl = infoQuery.data?.ingestUrl ?? DEFAULT_INGEST_URL;
 
-  const copyIngestUrl = async () => {
+  const copyIngestUrl = useCallback(async () => {
     await navigator.clipboard.writeText(ingestUrl);
     toast.success({
       title: "Ingest URL copied",
       description: "Paste it into your local agent telemetry config.",
     });
-  };
+  }, [ingestUrl]);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     void infoQuery.refetch();
     void facetsQuery.refetch();
     void (activeSearch ? searchQuery.refetch() : listQuery.refetch());
-  };
+  }, [activeSearch, facetsQuery, infoQuery, listQuery, searchQuery]);
+
+  useEffect(() => {
+    const onPageCommand = (
+      event: WindowEventMap[typeof TRACE_PAGE_COMMAND_EVENT],
+    ) => {
+      switch (event.detail.type) {
+        case "copy-ingest-url":
+          void copyIngestUrl();
+          break;
+        case "open-clear-data":
+          setClearDialogOpen(true);
+          break;
+        case "open-import":
+          setImportDialogOpen(true);
+          break;
+        case "refresh":
+          refresh();
+          break;
+        case "toggle-follow-latest":
+          onFollowLatestChange(!followLatestRef.current);
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener(TRACE_PAGE_COMMAND_EVENT, onPageCommand);
+    return () =>
+      window.removeEventListener(TRACE_PAGE_COMMAND_EVENT, onPageCommand);
+  }, [copyIngestUrl, onFollowLatestChange, refresh]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -682,19 +716,46 @@ export function SessionsPage({
   const visibleMetrics = useMemo(() => summarizeVisibleSessions(sessions), [sessions]);
   const ingestUrl = infoQuery.data?.ingestUrl ?? DEFAULT_INGEST_URL;
 
-  const copyIngestUrl = async () => {
+  const copyIngestUrl = useCallback(async () => {
     await navigator.clipboard.writeText(ingestUrl);
     toast.success({
       title: "Ingest URL copied",
       description: "Paste it into your local agent telemetry config.",
     });
-  };
+  }, [ingestUrl]);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     void infoQuery.refetch();
     void facetsQuery.refetch();
     void (activeSearch ? searchQuery.refetch() : listQuery.refetch());
-  };
+  }, [activeSearch, facetsQuery, infoQuery, listQuery, searchQuery]);
+
+  useEffect(() => {
+    const onPageCommand = (
+      event: WindowEventMap[typeof TRACE_PAGE_COMMAND_EVENT],
+    ) => {
+      switch (event.detail.type) {
+        case "copy-ingest-url":
+          void copyIngestUrl();
+          break;
+        case "open-clear-data":
+          setClearDialogOpen(true);
+          break;
+        case "open-import":
+          setImportDialogOpen(true);
+          break;
+        case "refresh":
+          refresh();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener(TRACE_PAGE_COMMAND_EVENT, onPageCommand);
+    return () =>
+      window.removeEventListener(TRACE_PAGE_COMMAND_EVENT, onPageCommand);
+  }, [copyIngestUrl, refresh]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -1378,6 +1439,14 @@ function TraceList({
               recentTraceIds.has(trace.traceId) && "live-trace-flash",
             )}
             key={trace.traceId}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              void showDesktopRowContextMenu({
+                id: trace.traceId,
+                kind: "trace",
+                sourceUrl: trace.sourceUrl,
+              });
+            }}
             onClick={() => onSelectTrace(trace.traceId)}
             type="button"
           >
@@ -1487,6 +1556,13 @@ function SessionList({
               recentSessionIds.has(session.sessionId) && "live-trace-flash",
             )}
             key={session.sessionId}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              void showDesktopRowContextMenu({
+                id: session.sessionId,
+                kind: "session",
+              });
+            }}
             onClick={() => onSelectSession(session.sessionId)}
             type="button"
           >

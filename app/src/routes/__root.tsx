@@ -17,6 +17,7 @@ import {
 
 import { InferenceIcon, ThemeProvider, Toaster } from "~/lib/ui";
 import { trpc } from "~/trpc";
+import { DesktopCommandCenter } from "~/desktop/DesktopCommandCenter";
 
 import appCss from "../mainview/styles.css?url";
 
@@ -105,6 +106,7 @@ function RootComponent() {
             <StartupTransition>
               <Outlet />
             </StartupTransition>
+            <DesktopCommandCenter />
             <Toaster />
           </ThemeProvider>
         </QueryClientProvider>
