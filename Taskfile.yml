@@ -9,6 +9,25 @@ vars:
   VENV: "{{.TASKFILE_DIR}}/.venv"
 
 tasks:
+  app:dev:
+    desc: Run the HALO desktop app development loop
+    dir: app
+    cmds:
+      - bun run dev
+
+  app:test:
+    desc: Run HALO desktop app typecheck and tests
+    dir: app
+    cmds:
+      - bun run typecheck
+      - bun test
+
+  app:build:web:
+    desc: Build the HALO desktop app web assets
+    dir: app
+    cmds:
+      - bun run build:web
+
   env:setup:
     desc: "Install engine dependencies and git hooks (pass -- -y to skip confirmations)"
     cmds:

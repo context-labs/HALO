@@ -18,3 +18,23 @@ __pycache__/
 test-results/
 *.engine-index.jsonl
 *.engine-index.meta.json
+
+# Desktop app
+app/node_modules/
+app/out/
+app/dist/
+app/build/
+app/artifacts/
+app/downloaded-artifacts/
+app/data/
+app/logs/
+app/.wrangler/
+app/.env
+app/.env.*
+app/langfuse/.env
+app/langfuse/postgres/
+app/langfuse/minio/
+app/*.sqlite
+app/*.sqlite-shm
+app/*.sqlite-wal
+app/*.tsbuildinfo

@@ -1,0 +1,69 @@
+/* Theme-aware color tokens using @theme inline
+ * These reference CSS variables defined in @layer base (:root, .dark, etc.)
+ * The 'inline' option tells Tailwind to use the var() reference directly
+ * in generated utilities, allowing dynamic theme switching at runtime.
+ * See: https://tailwindcss.com/docs/theme#referencing-other-variables
+ */
+@theme inline {
+  --color-background: var(--color-background);
+  --color-background-muted: var(--color-background-muted);
+  --color-foreground: var(--color-foreground);
+  --color-sidebar: var(--color-sidebar);
+  --color-border: var(--color-border);
+  --color-input: var(--color-input);
+  --color-switch: var(--color-switch);
+  --color-ring: var(--color-ring);
+  --color-skeleton: var(--color-skeleton);
+  --color-code: var(--color-code);
+
+  --color-primary-cta: var(--color-primary-cta);
+  --color-primary-cta-foreground: var(--color-primary-cta-foreground);
+  --color-primary-cta-border: var(--color-primary-cta-border);
+  --color-primary-cta-hover: var(--color-primary-cta-hover);
+
+  --color-primary: var(--color-primary);
+  --color-primary-foreground: var(--color-primary-foreground);
+  --color-primary-border: var(--color-primary-border);
+  --color-primary-hover: var(--color-primary-hover);
+
+  --color-secondary: var(--color-secondary);
+  --color-secondary-foreground: var(--color-secondary-foreground);
+  --color-secondary-border: var(--color-secondary-border);
+  --color-secondary-hover: var(--color-secondary-hover);
+
+  --color-destructive: var(--color-destructive);
+  --color-destructive-foreground: var(--color-destructive-foreground);
+  --color-destructive-border: var(--color-destructive-border);
+  --color-destructive-hover: var(--color-destructive-hover);
+
+  --color-muted: var(--color-muted);
+  --color-muted-foreground: var(--color-muted-foreground);
+  --color-muted-border: var(--color-muted-border);
+
+  --color-accent: var(--color-accent);
+  --color-accent-foreground: var(--color-accent-foreground);
+
+  --color-popover: var(--color-popover);
+  --color-popover-foreground: var(--color-popover-foreground);
+
+  --color-card: var(--color-card);
+  --color-card-foreground: var(--color-card-foreground);
+  --color-card-hover: var(--color-card-hover);
+
+  --color-link: var(--color-link);
+  --color-link-hover: var(--color-link-hover);
+
+  --color-detail-success: var(--color-detail-success);
+  --color-detail-success-foreground: var(--color-detail-success-foreground);
+  --color-detail-failure: var(--color-detail-failure);
+  --color-detail-failure-foreground: var(--color-detail-failure-foreground);
+  --color-detail-warning: var(--color-detail-warning);
+  --color-detail-warning-foreground: var(--color-detail-warning-foreground);
+  --color-detail-neutral: var(--color-detail-neutral);
+  --color-detail-brand: var(--color-detail-brand);
+
+  --color-tertiary: var(--color-tertiary);
+  --color-tertiary-foreground: var(--color-tertiary-foreground);
+  --color-tertiary-border: var(--color-tertiary-border);
+  --color-tertiary-hover: var(--color-tertiary-hover);
+}

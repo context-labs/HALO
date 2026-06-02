@@ -1,0 +1,165 @@
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  /* App styles (default) - for dashboard */
+  h1 {
+    @apply text-5xl max-sm:text-3xl font-inter font-normal leading-none tracking-tight;
+  }
+
+  h2 {
+    @apply text-2xl max-sm:text-xl font-inter font-normal leading-none tracking-tight;
+  }
+
+  h3 {
+    @apply text-lg max-sm:text-base font-inter font-normal leading-none tracking-tight;
+  }
+
+  h4 {
+    @apply text-base max-sm:text-sm font-inter font-normal leading-none tracking-normal;
+  }
+
+  p {
+    @apply text-sm font-inter font-normal leading-normal tracking-normal;
+  }
+
+  /* Marketing styles - :where() has 0 specificity, allowing easy overrides */
+  :where([data-layout="marketing"]) h1 {
+    @apply text-6xl max-sm:text-4xl font-newsreader font-normal leading-none tracking-tight;
+  }
+
+  :where([data-layout="marketing"]) h2 {
+    @apply text-5xl max-sm:text-3xl font-newsreader font-normal leading-none tracking-tight;
+  }
+
+  :where([data-layout="marketing"]) h3 {
+    @apply text-xl max-sm:text-lg font-inter font-normal leading-none tracking-tight;
+  }
+
+  :where([data-layout="marketing"]) h4 {
+    @apply text-lg max-sm:text-base font-inter font-normal leading-none tracking-normal;
+  }
+
+  :where([data-layout="marketing"]) p {
+    @apply text-base max-sm:text-sm font-inter font-normal leading-normal tracking-normal;
+  }
+
+  /* CMS/Sanity content styles */
+  .cms.h2,
+  h2.cms {
+    @apply font-newsreader font-normal leading-[120%] tracking-tight;
+    font-size: 36px;
+    margin-bottom: 1rem;
+    margin-top: 5rem;
+  }
+
+  .cms.h3,
+  h3.cms {
+    @apply font-inter font-normal leading-[120%] tracking-tight;
+    font-size: 24px;
+    margin-bottom: 1rem;
+    margin-top: 2.5rem;
+  }
+
+  .cms,
+  p.cms {
+    @apply font-inter font-normal tracking-normal text-foreground;
+    font-size: 16px;
+    line-height: 175%;
+    margin-bottom: 1rem;
+  }
+
+  blockquote.cms {
+    @apply font-inter font-normal italic tracking-normal;
+    font-size: 20px;
+    line-height: 150%;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    padding-left: 1rem;
+    border-left: 4px solid rgb(var(--muted-foreground) / 0.3);
+    color: rgb(var(--muted-foreground));
+  }
+
+  /* Mobile styles for CMS content */
+  @media (max-width: 640px) {
+    .cms.h2,
+    h2.cms {
+      font-size: 28px;
+    }
+
+    .cms.h3,
+    h3.cms {
+      font-size: 20px;
+    }
+
+    .cms,
+    ul,
+    li,
+    ol,
+    p.cms {
+      font-size: 14px;
+    }
+
+    blockquote.cms {
+      font-size: 18px;
+    }
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  input[type="button"]:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="reset"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  input[type="button"]:disabled,
+  input[type="submit"]:disabled,
+  input[type="reset"]:disabled {
+    cursor: not-allowed;
+  }
+
+  input,
+  textarea,
+  select {
+    @apply focus-visible:outline-hidden focus-visible:ring-0;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,84 @@
+/**
+ * Metric-matched fallback fonts for zero CLS (Cumulative Layout Shift)
+ *
+ * These fallback fonts use CSS Font Loading API properties to match
+ * the exact metrics of our custom fonts. When the browser initially
+ * renders with system fonts (before custom fonts load), the text will
+ * take up the same space as it will after the custom fonts load.
+ *
+ * Key properties:
+ * - size-adjust: Scales the fallback to match the custom font's character width
+ * - ascent-override: Matches the space above the baseline
+ * - descent-override: Matches the space below the baseline
+ * - line-gap-override: Matches additional line spacing
+ *
+ * Values calculated using: https://screenspan.net/fallback
+ * Reference: https://web.dev/css-size-adjust/
+ */
+
+/* Inter fallback - matches Arial metrics to Inter */
+@font-face {
+  font-family: "Inter Fallback";
+  src:
+    local("Arial"), local("Helvetica Neue"), local("Helvetica"),
+    local("sans-serif");
+  size-adjust: 107.64%;
+  ascent-override: 90%;
+  descent-override: 22.43%;
+  line-gap-override: 0%;
+}
+
+/* JetBrains Mono fallback - matches Courier New/monospace to JetBrains Mono */
+@font-face {
+  font-family: "JetBrains Mono Fallback";
+  src: local("Courier New"), local("Courier"), local("monospace");
+  size-adjust: 95%;
+  ascent-override: 99%;
+  descent-override: 26%;
+  line-gap-override: 0%;
+}
+
+/* Berkeley Mono fallback - matches Courier New/monospace to Berkeley Mono */
+@font-face {
+  font-family: "Berkeley Mono Fallback";
+  src: local("Courier New"), local("Courier"), local("monospace");
+  size-adjust: 95%;
+  ascent-override: 99%;
+  descent-override: 26%;
+  line-gap-override: 0%;
+}
+
+/* Newsreader fallback - matches Georgia/Times to Newsreader */
+@font-face {
+  font-family: "Newsreader Fallback";
+  src:
+    local("Georgia"), local("Times New Roman"), local("Times"), local("serif");
+  size-adjust: 104%;
+  ascent-override: 95%;
+  descent-override: 25%;
+  line-gap-override: 0%;
+}
+
+/* Geist fallback - matches system-ui/sans-serif to Geist */
+@font-face {
+  font-family: "Geist Fallback";
+  src:
+    local("system-ui"), local("-apple-system"), local("BlinkMacSystemFont"),
+    local("Segoe UI"), local("sans-serif");
+  size-adjust: 107%;
+  ascent-override: 91%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+}
+
+/* Geist Mono fallback - matches system monospace to Geist Mono */
+@font-face {
+  font-family: "Geist Mono Fallback";
+  src:
+    local("ui-monospace"), local("SFMono-Regular"), local("Menlo"),
+    local("Monaco"), local("Consolas"), local("monospace");
+  size-adjust: 100%;
+  ascent-override: 95%;
+  descent-override: 25%;
+  line-gap-override: 0%;
+}

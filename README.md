@@ -47,7 +47,20 @@ HALO (Hierarchical Agent Loop Optimization) is a methodology for building recurs
 - Information on HALO methodology.
 - A Python package that implements the core HALO-RLM engine. [View on PyPI](https://pypi.org/project/halo-engine/)
 - A demo project that shows how to build HALO loops for your agents using the Python package. [View demo](/demo/openai-agents-sdk-demo/)
+- A local desktop app for collecting traces and running local HALO analysis. [View app](app/)
 - Benchmarking examples applying HALO to popular agent benchmarks. (View [AppWorld](#appworld)).
+
+## Desktop App
+
+The HALO desktop app lives in [`app/`](app). It is an ElectroBun/Bun/React app for collecting local OpenTelemetry traces, importing Langfuse history, grouping traces into sessions, and running local HALO analysis over trace/session groups.
+
+```bash
+cd app
+bun install
+bun run dev
+```
+
+Release and installer details are documented in [`app/docs/distribution.md`](app/docs/distribution.md).
 
 ## HALO Loop
 

@@ -1,0 +1,204 @@
+@import "./styles/fonts/font-fallbacks.css";
+@import "./styles/fonts/inter.css";
+@import "./styles/fonts/geist.css";
+@import "./styles/fonts/newsreader.css";
+@import "./styles/fonts/jetbrains.css";
+@import "./styles/fonts/berkeley-mono.css";
+@import "./lib/ui/styles/global.css";
+
+@source "../routes";
+@source "./gallery";
+@source "./tracing";
+
+:root {
+  --halo-splash-background: #0a0b0d;
+  --halo-splash-background-soft: #111418;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--halo-splash-background);
+    color: var(--color-foreground);
+    font-family: var(--font-inter);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@utility writing-mode-vertical {
+  writing-mode: vertical-rl;
+}
+
+@utility font-geist {
+  font-family: var(--font-geist-sans);
+}
+
+@utility font-geist-mono {
+  font-family: var(--font-geist-mono);
+}
+
+@utility fake-h1 {
+  font-size: 32px;
+
+  @media (min-width: 640px) {
+    font-size: 54px;
+  }
+}
+
+@utility live-trace-flash {
+  animation: live-trace-flash 1.8s ease-out;
+}
+
+@utility live-span-flash {
+  animation: live-span-flash 1.4s ease-out;
+}
+
+@utility live-timeline-pulse {
+  animation: live-timeline-pulse 1.4s ease-out;
+}
+
+.halo-startup-shell {
+  position: relative;
+  min-height: 100vh;
+  background: var(--halo-splash-background);
+}
+
+.halo-startup-content {
+  min-height: 100vh;
+}
+
+.halo-startup-content-pending {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  user-select: none;
+}
+
+.halo-startup-content-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.halo-startup-content-entering {
+  animation: halo-dashboard-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.halo-react-splash {
+  position: fixed;
+  z-index: 2147483000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--halo-splash-background) 82%, var(--halo-splash-background-soft) 18%),
+      var(--halo-splash-background)
+    );
+  opacity: 0;
+  animation: halo-react-splash-in 220ms ease-out forwards;
+}
+
+.halo-react-splash-exiting {
+  opacity: 1;
+  animation: halo-react-splash-out 220ms ease-in forwards;
+}
+
+.halo-react-splash-logo {
+  width: min(52vw, 420px);
+  min-width: 260px;
+  filter: drop-shadow(0 24px 54px rgba(0, 0, 0, 0.42));
+  transform: translateY(8px) scale(0.985);
+  animation: halo-react-splash-logo-in 420ms cubic-bezier(0.16, 1, 0.3, 1) 80ms forwards;
+}
+
+@keyframes halo-react-splash-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes halo-react-splash-out {
+  to {
+    opacity: 0;
+    transform: scale(0.992);
+  }
+}
+
+@keyframes halo-react-splash-logo-in {
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes halo-dashboard-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes live-trace-flash {
+  0% {
+    background: color-mix(in srgb, var(--color-detail-brand) 22%, transparent);
+    box-shadow: inset 3px 0 0 var(--color-detail-brand);
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 transparent;
+  }
+}
+
+@keyframes live-span-flash {
+  0% {
+    background: color-mix(in srgb, var(--color-detail-brand) 18%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-detail-brand) 42%, transparent);
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 1px transparent;
+  }
+}
+
+@keyframes live-timeline-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-detail-brand) 60%, transparent);
+    filter: brightness(1.4);
+  }
+
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halo-startup-content,
+  .halo-startup-content-entering,
+  .halo-startup-content-visible,
+  .halo-react-splash,
+  .halo-react-splash-logo {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

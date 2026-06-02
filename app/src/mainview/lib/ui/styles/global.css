@@ -1,0 +1,34 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@import "./theme/variants.css";
+@import "./theme/palette.css";
+@import "./theme/semantic-inline.css";
+@import "./theme/tokens.css";
+
+@import "./theme/overrides.css";
+@import "./theme/base.css";
+
+/*
+ * Design system border utility.
+ * Use `border-subtle` instead of `border border-border/50` for the standard
+ * card/container border. This enforces the 50% opacity convention at the
+ * utility level so developers don't need to remember the `/50` suffix.
+ *
+ * For hover states, use `hover:border-border` (full opacity) directly.
+ * For custom opacities, use `border-border/30`, `border-border/70`, etc.
+ */
+@utility border-subtle {
+  border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+  @media (width >= --theme(--breakpoint-sm)) {
+    max-width: none;
+  }
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}

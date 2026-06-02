@@ -1,0 +1,13 @@
+name = "halo-release-assets"
+main = "workers/halo-release-worker.ts"
+compatibility_date = "2026-05-29"
+account_id = "b0c6d69f10b59b4d5b3a1a6d882d95ba"
+
+routes = [
+  { pattern = "inference.net/halo/install.sh*", zone_name = "inference.net" },
+  { pattern = "inference.net/halo/releases/*", zone_name = "inference.net" },
+]
+
+[[r2_buckets]]
+binding = "HALO_RELEASES"
+bucket_name = "halo-releases"

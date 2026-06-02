@@ -1,0 +1,221 @@
+@theme {
+  --color-gray-0: rgb(255, 255, 255);
+  --color-gray-25: rgb(252, 252, 253);
+  --color-gray-50: rgb(248, 250, 252);
+  --color-gray-100: rgb(238, 242, 246);
+  --color-gray-200: rgb(227, 232, 239);
+  --color-gray-300: rgb(205, 213, 223);
+  --color-gray-400: rgb(154, 164, 178);
+  --color-gray-500: rgb(105, 117, 134);
+  --color-gray-600: rgb(75, 85, 101);
+  --color-gray-700: rgb(54, 65, 82);
+  --color-gray-800: rgb(32, 41, 57);
+  --color-gray-900: rgb(18, 25, 38);
+  --color-gray-950: rgb(13, 18, 28);
+  --color-gray-1000: rgb(5, 5, 6);
+
+  --color-yellow-25: rgb(255, 252, 245);
+  --color-yellow-50: rgb(255, 250, 235);
+  --color-yellow-100: rgb(254, 240, 199);
+  --color-yellow-200: rgb(254, 223, 137);
+  --color-yellow-300: rgb(254, 200, 75);
+  --color-yellow-400: rgb(253, 176, 34);
+  --color-yellow-500: rgb(247, 144, 9);
+  --color-yellow-600: rgb(220, 104, 3);
+  --color-yellow-700: rgb(181, 71, 8);
+  --color-yellow-800: rgb(147, 55, 13);
+  --color-yellow-900: rgb(122, 46, 14);
+  --color-yellow-950: rgb(78, 29, 9);
+
+  --color-red-25: rgb(255, 251, 250);
+  --color-red-50: rgb(254, 243, 242);
+  --color-red-100: rgb(254, 228, 226);
+  --color-red-200: rgb(254, 205, 202);
+  --color-red-300: rgb(253, 162, 155);
+  --color-red-400: rgb(249, 112, 102);
+  --color-red-500: rgb(240, 68, 56);
+  --color-red-600: rgb(217, 45, 32);
+  --color-red-700: rgb(180, 35, 24);
+  --color-red-800: rgb(145, 32, 24);
+  --color-red-900: rgb(122, 39, 26);
+  --color-red-950: rgb(85, 22, 12);
+
+  --color-green-25: rgb(246, 254, 249);
+  --color-green-50: rgb(236, 253, 243);
+  --color-green-100: rgb(220, 250, 230);
+  --color-green-200: rgb(171, 239, 198);
+  --color-green-300: rgb(117, 224, 167);
+  --color-green-400: rgb(71, 205, 137);
+  --color-green-500: rgb(23, 178, 106);
+  --color-green-600: rgb(7, 148, 85);
+  --color-green-700: rgb(6, 118, 71);
+  --color-green-800: rgb(8, 93, 58);
+  --color-green-900: rgb(7, 77, 49);
+  --color-green-950: rgb(5, 51, 33);
+
+  --color-blue-25: rgb(245, 250, 255);
+  --color-blue-50: rgb(239, 248, 255);
+  --color-blue-100: rgb(209, 233, 255);
+  --color-blue-200: rgb(178, 221, 255);
+  --color-blue-300: rgb(132, 202, 255);
+  --color-blue-400: rgb(83, 177, 253);
+  --color-blue-500: rgb(46, 144, 250);
+  --color-blue-600: rgb(21, 112, 239);
+  --color-blue-700: rgb(23, 92, 211);
+  --color-blue-800: rgb(24, 73, 169);
+  --color-blue-900: rgb(25, 65, 133);
+  --color-blue-950: rgb(16, 42, 86);
+
+  --color-chart-1: rgb(21, 112, 239);
+  --color-chart-2: rgb(46, 144, 250);
+  --color-chart-3: rgb(83, 177, 253);
+  --color-chart-4: rgb(132, 202, 255);
+  --color-chart-5: rgb(23, 92, 211);
+  --color-chart-6: rgb(24, 73, 169);
+  --color-chart-7: rgb(25, 65, 133);
+  --color-chart-8: rgb(16, 42, 86);
+
+  --color-marketing-green: rgb(22, 211, 107);
+  --color-marketing-pink: rgb(191, 12, 166);
+  --color-marketing-blue: rgb(46, 144, 250);
+  --color-marketing-orange: rgb(248, 159, 39);
+
+  --color-rgb-gray-0: 255 255 255;
+  --color-rgb-gray-25: 252 252 253;
+  --color-rgb-gray-50: 248 250 252;
+  --color-rgb-gray-100: 238 242 246;
+  --color-rgb-gray-200: 227 232 239;
+  --color-rgb-gray-300: 205 213 223;
+  --color-rgb-gray-400: 154 164 178;
+  --color-rgb-gray-500: 105 117 134;
+  --color-rgb-gray-600: 75 85 101;
+  --color-rgb-gray-700: 54 65 82;
+  --color-rgb-gray-800: 32 41 57;
+  --color-rgb-gray-900: 18 25 38;
+  --color-rgb-gray-950: 13 18 28;
+  --color-rgb-gray-1000: 5 5 6;
+
+  --color-rgb-yellow-25: 255 252 245;
+  --color-rgb-yellow-50: 255 250 235;
+  --color-rgb-yellow-100: 254 240 199;
+  --color-rgb-yellow-200: 254 223 137;
+  --color-rgb-yellow-300: 254 200 75;
+  --color-rgb-yellow-400: 253 176 34;
+  --color-rgb-yellow-500: 247 144 9;
+  --color-rgb-yellow-600: 220 104 3;
+  --color-rgb-yellow-700: 181 71 8;
+  --color-rgb-yellow-800: 147 55 13;
+  --color-rgb-yellow-900: 122 46 14;
+  --color-rgb-yellow-950: 78 29 9;
+
+  --color-rgb-red-25: 255 251 250;
+  --color-rgb-red-50: 254 243 242;
+  --color-rgb-red-100: 254 228 226;
+  --color-rgb-red-200: 254 205 202;
+  --color-rgb-red-300: 253 162 155;
+  --color-rgb-red-400: 249 112 102;
+  --color-rgb-red-500: 240 68 56;
+  --color-rgb-red-600: 217 45 32;
+  --color-rgb-red-700: 180 35 24;
+  --color-rgb-red-800: 145 32 24;
+  --color-rgb-red-900: 122 39 26;
+  --color-rgb-red-950: 85 22 12;
+
+  --color-rgb-green-25: 246 254 249;
+  --color-rgb-green-50: 236 253 243;
+  --color-rgb-green-100: 220 250 230;
+  --color-rgb-green-200: 171 239 198;
+  --color-rgb-green-300: 117 224 167;
+  --color-rgb-green-400: 71 205 137;
+  --color-rgb-green-500: 23 178 106;
+  --color-rgb-green-600: 7 148 85;
+  --color-rgb-green-700: 6 118 71;
+  --color-rgb-green-800: 8 93 58;
+  --color-rgb-green-900: 7 77 49;
+  --color-rgb-green-950: 5 51 33;
+
+  --color-rgb-blue-25: 245 250 255;
+  --color-rgb-blue-50: 239 248 255;
+  --color-rgb-blue-100: 209 233 255;
+  --color-rgb-blue-200: 178 221 255;
+  --color-rgb-blue-300: 132 202 255;
+  --color-rgb-blue-400: 83 177 253;
+  --color-rgb-blue-500: 46 144 250;
+  --color-rgb-blue-600: 21 112 239;
+  --color-rgb-blue-700: 23 92 211;
+  --color-rgb-blue-800: 24 73 169;
+  --color-rgb-blue-900: 25 65 133;
+  --color-rgb-blue-950: 16 42 86;
+
+  --color-rgb-chart-1: 21 112 239;
+  --color-rgb-chart-2: 46 144 250;
+  --color-rgb-chart-3: 83 177 253;
+  --color-rgb-chart-4: 132 202 255;
+  --color-rgb-chart-5: 23 92 211;
+  --color-rgb-chart-6: 24 73 169;
+  --color-rgb-chart-7: 25 65 133;
+  --color-rgb-chart-8: 16 42 86;
+
+  --color-rgb-marketing-green: 22 211 107;
+  --color-rgb-marketing-pink: 191 12 166;
+  --color-rgb-marketing-blue: 46 144 250;
+  --color-rgb-marketing-orange: 248 159 39;
+
+  --font-sans:
+    var(--font-sans), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-jet-brains: JetBrains Mono, JetBrains Mono Fallback, monospace;
+  --font-berkeley:
+    Berkeley Mono, Berkeley Mono Fallback, ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-inter: Inter, Inter Fallback, sans-serif;
+  --font-newsreader: Newsreader, Newsreader Fallback, serif;
+  --font-geist:
+    Geist, Geist Fallback, var(--font-geist-sans), system-ui, -apple-system,
+    sans-serif;
+  --font-geist-mono:
+    Geist Mono, Geist Mono Fallback, var(--font-geist-mono), ui-monospace,
+    monospace;
+  --font-mono:
+    Geist Mono, Geist Mono Fallback, ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --text-xs: var(--text-xs, 0.75rem);
+  --text-sm: var(--text-sm, 0.875rem);
+  --text-md: var(--text-sm, 0.875rem);
+  --text-base: var(--text-base, 1rem);
+  --text-lg: var(--text-lg, 1.125rem);
+  --text-xl: var(--text-xl, 1.25rem);
+  --text-2xl: var(--text-2xl, 1.5rem);
+  --text-3xl: var(--text-3xl, 2rem);
+  --text-4xl: var(--text-4xl, 2.25rem);
+  --text-5xl: var(--text-5xl, 2.75rem);
+  --text-6xl: var(--text-6xl, 3.25rem);
+  --text-7xl: var(--text-7xl, 3.75rem);
+
+  --border-opacity-5: 0.05;
+  --border-opacity-8: 0.08;
+  --border-opacity-12: 0.12;
+  --border-opacity-15: 0.15;
+  --border-opacity-18: 0.18;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}

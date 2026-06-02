@@ -1,0 +1,199 @@
+/* Theme and component-specific visual overrides */
+
+@utility dark {
+  /* Glassy card effect for dark mode */
+  & .landing-card {
+    /* Add subtle gradient overlay */
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      transparent 100%
+    );
+    /* Add inset shadow for glass edge effect */
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
+  }
+
+  & .landing-card:hover {
+    /* Enhanced hover state */
+    box-shadow:
+      0 20px 40px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.15),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.08);
+  }
+}
+
+@utility landing-card {
+  /* Glassy card effect for dark mode */
+  .dark & {
+    /* Add subtle gradient overlay */
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      transparent 100%
+    );
+    /* Add inset shadow for glass edge effect */
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .dark &:hover {
+    /* Enhanced hover state */
+    box-shadow:
+      0 20px 40px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.15),
+      inset 0 -1px 0 0 rgba(255, 255, 255, 0.08);
+  }
+}
+
+@utility mermaid-diagram {
+  /* Mermaid diagram styles */
+  /* Container for the diagram */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  width: 100%;
+
+  /* Ensure SVGs scale properly */
+  & svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 80vh;
+    font-family: Inter, sans-serif;
+    overflow: visible;
+  }
+
+  /* Smooth transitions for theme changes */
+  & * {
+    transition:
+      fill 0.2s ease,
+      stroke 0.2s ease,
+      background 0.2s ease;
+  }
+
+  /* Improve text rendering */
+  & text {
+    font-family: Inter, sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Ensure node labels have proper padding and don't clip */
+  & .nodeLabel,
+  & .label {
+    padding: 4px 8px;
+  }
+
+  /* Ensure foreignObject (used for HTML labels) doesn't clip */
+  & foreignObject {
+    overflow: visible;
+  }
+
+  /* Ensure all elements allow overflow */
+  & g,
+  & .cluster,
+  & .node,
+  & .label {
+    overflow: visible !important;
+  }
+
+  /* Style cluster/subgraph titles */
+  & .cluster-label text,
+  & .cluster-label tspan {
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    fill: currentColor;
+  }
+
+  /* Style cluster boxes with rounded corners */
+  & .cluster rect {
+    rx: 8px;
+    ry: 8px;
+  }
+
+  /* Ensure node labels are styled correctly */
+  & .node .label text,
+  & .node .label tspan,
+  & .nodeLabel {
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  /* foreignObject overflow fix */
+  & foreignObject {
+    overflow: visible !important;
+  }
+
+  & foreignObject > div {
+    overflow: visible !important;
+  }
+
+  /* Better node styling */
+  & .node rect,
+  & .node circle,
+  & .node ellipse,
+  & .node polygon,
+  & .node path {
+    stroke-width: 1.5px;
+  }
+
+  /* Improve edge/line visibility - make lines thicker and more visible */
+  & .edgePath path,
+  & .flowchart-link {
+    stroke-width: 2px !important;
+  }
+
+  /* Better arrowhead styling */
+  & marker path {
+    stroke-width: 1.5px;
+  }
+
+  /* Make arrowheads more visible */
+  & .marker,
+  & .arrowheadPath {
+    fill: currentColor;
+  }
+
+  /* Sequence diagram improvements */
+  & .actor {
+    stroke-width: 1.5px;
+  }
+
+  & .messageLine0,
+  & .messageLine1 {
+    stroke-width: 1.5px;
+  }
+
+  /* Gantt chart improvements */
+  & .task {
+    stroke-width: 1px;
+  }
+
+  /* Git graph improvements */
+  & .commit-id,
+  & .commit-msg {
+    font-size: 12px !important;
+  }
+}
+
+@utility mermaid-diagram-fullscreen {
+  /* Fullscreen mermaid diagram */
+  & svg {
+    /* Scale the SVG to fill the available space while maintaining aspect ratio */
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    min-width: 50vw;
+    min-height: 40vh;
+    object-fit: contain;
+  }
+}

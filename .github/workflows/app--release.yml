@@ -1,0 +1,287 @@
+name: Release HALO Desktop App
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - canary
+  push:
+    tags:
+      - "app-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  HALO_RELEASE_BASE_URL: https://inference.net/halo/releases
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  build-macos-arm64:
+    name: Build macOS arm64
+    runs-on: macos-latest
+    env:
+      HALO_RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      HALO_ELECTROBUN_TARGETS: macos-arm64
+      ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+      ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ELECTROBUN_APPLEAPIISSUER }}
+      ELECTROBUN_APPLEAPIKEY: ${{ secrets.ELECTROBUN_APPLEAPIKEY }}
+      ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+      ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+      ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Validate macOS signing inputs
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          missing=0
+          require_secret() {
+            if [ -z "${!1:-}" ]; then
+              echo "::error::$1 is required for signed macOS releases"
+              missing=1
+            fi
+          }
+
+          require_secret APPLE_DEVELOPER_ID_CERTIFICATE_BASE64
+          require_secret APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD
+          require_secret APPLE_KEYCHAIN_PASSWORD
+
+          has_api_key=0
+          if [ -n "${ELECTROBUN_APPLEAPIISSUER:-}" ] && [ -n "${ELECTROBUN_APPLEAPIKEY:-}" ] && [ -n "${APPLE_API_KEY_P8_BASE64:-}" ]; then
+            has_api_key=1
+          fi
+
+          has_apple_id=0
+          if [ -n "${ELECTROBUN_APPLEID:-}" ] && [ -n "${ELECTROBUN_APPLEIDPASS:-}" ] && [ -n "${ELECTROBUN_TEAMID:-}" ]; then
+            has_apple_id=1
+          fi
+
+          if [ "$has_api_key" != "1" ] && [ "$has_apple_id" != "1" ]; then
+            echo "::error::Provide App Store Connect API key secrets (ELECTROBUN_APPLEAPIISSUER, ELECTROBUN_APPLEAPIKEY, APPLE_API_KEY_P8_BASE64) or Apple ID notarization secrets (ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS, ELECTROBUN_TEAMID)."
+            missing=1
+          fi
+
+          if [ "$missing" != "0" ]; then
+            exit 1
+          fi
+
+          echo "HALO_SKIP_CODESIGN=0" >> "$GITHUB_ENV"
+          echo "HALO_SKIP_NOTARIZE=0" >> "$GITHUB_ENV"
+          echo "macOS codesigning and notarization are required for this release."
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64"
+          test -n "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD"
+          test -n "$KEYCHAIN_PASSWORD"
+          keychain_path="$RUNNER_TEMP/halo-release-signing.keychain-db"
+          echo "HALO_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          echo "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain_path" -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path" | tee "$RUNNER_TEMP/codesigning-identities.txt"
+          identity_hash="$(awk '/Developer ID Application/ { print $2; exit }' "$RUNNER_TEMP/codesigning-identities.txt")"
+          if [ -z "$identity_hash" ]; then
+            echo "::error::Imported certificate archive does not contain a valid Developer ID Application signing identity."
+            exit 1
+          fi
+          echo "ELECTROBUN_DEVELOPER_ID=$identity_hash" >> "$GITHUB_ENV"
+          echo "Using imported Developer ID Application signing identity $identity_hash."
+      - name: Write App Store Connect key
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          if [ -n "${APPLE_API_KEY_P8_BASE64:-}" ]; then
+            test -n "$ELECTROBUN_APPLEAPIKEY"
+            key_path="$RUNNER_TEMP/AuthKey_${ELECTROBUN_APPLEAPIKEY}.p8"
+            echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
+            chmod 600 "$key_path"
+            echo "ELECTROBUN_APPLEAPIKEYPATH=$key_path" >> "$GITHUB_ENV"
+          else
+            echo "Using Apple ID app-specific password notarization credentials."
+          fi
+      - name: Check
+        run: |
+          bun run typecheck
+          bun test
+      - name: Build
+        run: |
+          if [ "$HALO_RELEASE_CHANNEL" = "stable" ]; then
+            bun run build:stable
+          else
+            bun run build:canary
+          fi
+      - name: Verify macOS signing and notarization
+        run: |
+          app_name="HALO"
+          if [ "$HALO_RELEASE_CHANNEL" != "stable" ]; then
+            app_name="HALO-$HALO_RELEASE_CHANNEL"
+          fi
+          app_path="build/$HALO_RELEASE_CHANNEL-macos-arm64/$app_name.app"
+          dmg_path="artifacts/$HALO_RELEASE_CHANNEL-macos-arm64-$app_name.dmg"
+
+          test -d "$app_path"
+          test -f "$dmg_path"
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | tee "$RUNNER_TEMP/codesign-details.txt"
+          grep -q "Authority=Developer ID Application" "$RUNNER_TEMP/codesign-details.txt"
+          grep -Eq "TeamIdentifier=[A-Z0-9]+" "$RUNNER_TEMP/codesign-details.txt"
+
+          spctl --assess --type execute --verbose=4 "$app_path"
+          xcrun stapler validate "$app_path"
+
+          codesign --verify --verbose=2 "$dmg_path"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-macos-arm64-artifacts
+          path: app/artifacts/*
+          if-no-files-found: error
+      - name: Delete temporary signing keychain
+        if: always() && env.HALO_KEYCHAIN_PATH != ''
+        run: |
+          security delete-keychain "$HALO_KEYCHAIN_PATH" || true
+
+  build-linux-x64:
+    name: Build Linux x64
+    runs-on: ubuntu-latest
+    env:
+      HALO_RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      HALO_ELECTROBUN_TARGETS: linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Confirm x64 runner
+        run: |
+          test "$(uname -m)" = "x86_64"
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libayatana-appindicator3-1
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check
+        run: |
+          bun run typecheck
+          bun test
+      - name: Build
+        run: |
+          if [ "$HALO_RELEASE_CHANNEL" = "stable" ]; then
+            bun run build:stable
+          else
+            bun run build:canary
+          fi
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-linux-x64-artifacts
+          path: app/artifacts/*
+          if-no-files-found: error
+
+  package-release:
+    name: Manifest, checksums, signature, publish
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos-arm64
+      - build-linux-x64
+    env:
+      HALO_RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+      HALO_RELEASE_BUCKET: ${{ secrets.HALO_RELEASE_BUCKET }}
+      HALO_RELEASE_ENDPOINT_URL: ${{ secrets.HALO_RELEASE_ENDPOINT_URL }}
+      HALO_RELEASE_ACCESS_KEY_ID: ${{ secrets.HALO_RELEASE_ACCESS_KEY_ID }}
+      HALO_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.HALO_RELEASE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/download-artifact@v4
+        with:
+          path: app/downloaded-artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p artifacts
+          find downloaded-artifacts -maxdepth 3 -type f -print -exec cp {} artifacts/ \;
+      - name: Generate manifest and checksums
+        run: |
+          bun scripts/release-manifest.ts \
+            --channel "$HALO_RELEASE_CHANNEL" \
+            --base-url "https://inference.net/halo/releases/$HALO_RELEASE_CHANNEL" \
+            --artifacts-dir artifacts
+          bun scripts/release-verify.ts \
+            --channel "$HALO_RELEASE_CHANNEL" \
+            --artifacts-dir artifacts
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign checksums
+        run: |
+          cosign sign-blob --yes \
+            --bundle artifacts/SHA256SUMS.sigstore.json \
+            artifacts/SHA256SUMS
+      - name: Upload combined release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-release-${{ env.HALO_RELEASE_CHANNEL }}
+          path: app/artifacts/*
+          if-no-files-found: error
+      - name: Publish to inference.net release storage
+        if: env.HALO_RELEASE_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.HALO_RELEASE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.HALO_RELEASE_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          test -n "$HALO_RELEASE_ENDPOINT_URL"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          python3 -m pip install --user awscli
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3 sync artifacts "s3://$HALO_RELEASE_BUCKET/halo/releases/$HALO_RELEASE_CHANNEL/" \
+            --endpoint-url "$HALO_RELEASE_ENDPOINT_URL" \
+            --delete
+      - name: Publish installer script
+        if: env.HALO_RELEASE_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.HALO_RELEASE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.HALO_RELEASE_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3 cp scripts/install.sh "s3://$HALO_RELEASE_BUCKET/halo/install.sh" \
+            --endpoint-url "$HALO_RELEASE_ENDPOINT_URL" \
+            --content-type "text/x-shellscript" \
+            --cache-control "public, max-age=300"
+          aws s3 rm "s3://$HALO_RELEASE_BUCKET/halo/install" \
+            --endpoint-url "$HALO_RELEASE_ENDPOINT_URL" || true
