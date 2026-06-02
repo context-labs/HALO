@@ -13,6 +13,10 @@ class TraceFilters(BaseModel):
     scan-heavy filter: when set, candidate traces are scanned span-by-span and
     only kept if at least one of their spans matches. It can be expensive on
     large unfiltered datasets — prefer narrowing with the indexed fields first.
+    ``has_errors`` is strict OTel status semantics: true means at least one span
+    has ``status.code == STATUS_CODE_ERROR``. It does not imply semantic success
+    when false; application-level failures may still be present in attributes or
+    payload text and require ``regex_pattern`` or per-trace inspection.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -28,7 +32,11 @@ class TraceFilters(BaseModel):
 
 
 class TraceSummary(BaseModel):
-    """Slim per-trace projection used in query results — purely from the index, no JSONL reads."""
+    """Slim per-trace projection used in query results — purely from the index, no JSONL reads.
+
+    ``has_errors`` means the trace contains at least one OTel ERROR-status span,
+    not that the trace was semantically successful when false.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -161,6 +169,8 @@ class DatasetOverview(BaseModel):
 
     ``sample_trace_ids`` provides up to 20 real trace ids the agent can hand to
     ``view_trace``/``search_trace`` without fabricating.
+    ``error_trace_count`` counts traces with at least one OTel ERROR-status span;
+    semantic failures encoded only in attributes or payloads are not included.
     """
 
     model_config = ConfigDict(extra="forbid")

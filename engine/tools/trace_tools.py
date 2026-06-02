@@ -25,8 +25,9 @@ class GetDatasetOverviewTool:
     description = (
         "Dataset rollup: counts, services, models, totals, `raw_jsonl_bytes`, and "
         "`sample_trace_ids` (real ids to pass to view/search tools). Call this first "
-        "to size the dataset. `filters.regex_pattern` is opt-in raw-span scanning; "
-        "narrow with indexed filter fields first."
+        "to size the dataset. `error_trace_count`/`filters.has_errors` only reflect "
+        "OTel ERROR-status spans. `filters.regex_pattern` is opt-in raw-span "
+        "scanning; narrow with indexed filter fields first."
     )
     arguments_model = DatasetOverviewArguments
     result_model = DatasetOverviewResult
@@ -45,9 +46,10 @@ class QueryTracesTool:
     name = "query_traces"
     description = (
         "Paginated trace summaries; each carries `raw_jsonl_bytes` so you can size "
-        "traces before calling `view_trace`. Before adding `filters.regex_pattern` "
-        "(opt-in raw-span scanning), narrow with indexed filter fields and confirm "
-        "the candidate count via `get_dataset_overview`/`count_traces`."
+        "traces before calling `view_trace`. `has_errors` only means at least one "
+        "OTel ERROR-status span. Before adding `filters.regex_pattern` (opt-in "
+        "raw-span scanning), narrow with indexed filter fields and confirm the "
+        "candidate count via `get_dataset_overview`/`count_traces`."
     )
     arguments_model = QueryTracesArguments
     result_model = QueryTracesResult
@@ -71,9 +73,9 @@ class CountTracesTool:
 
     name = "count_traces"
     description = (
-        "Count traces matching `filters`. Use to size a candidate set (e.g. via "
-        "indexed filters) before adding `filters.regex_pattern` (opt-in raw-span "
-        "scanning)."
+        "Count traces matching `filters`. `filters.has_errors` only matches traces "
+        "with at least one OTel ERROR-status span. Use to size a candidate set "
+        "before adding `filters.regex_pattern` (opt-in raw-span scanning)."
     )
     arguments_model = CountTracesArguments
     result_model = CountTracesResult
