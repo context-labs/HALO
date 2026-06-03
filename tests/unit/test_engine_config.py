@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from engine.agents.agent_config import AgentConfig
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
@@ -31,6 +34,19 @@ def test_engine_config_defaults() -> None:
     assert cfg.model_provider.base_url is None
     assert cfg.model_provider.api_key is None
     assert cfg.model_provider.default_headers is None
+
+
+def test_engine_config_requires_synthesis_and_compaction_models() -> None:
+    """No default model names: a hardcoded default would silently route
+    to the wrong provider when ``model_provider`` targets a non-OpenAI
+    endpoint. Callers must choose explicitly."""
+    with pytest.raises(ValidationError):
+        EngineConfig.model_validate(
+            {
+                "root_agent": _agent("root"),
+                "subagent": _agent("sub"),
+            }
+        )
 
 
 def test_engine_config_accepts_model_provider() -> None:

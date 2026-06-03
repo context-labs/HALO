@@ -22,6 +22,8 @@ def test_help_exposes_provider_and_model_flags_without_no_telemetry() -> None:
     assert "--default-header" not in result.output
     assert "--temperature" in result.output
     assert "--max-output-tokens" in result.output
+    assert "--synthesis-model" in result.output
+    assert "--compaction-model" in result.output
     assert "--parallel-tool-calls / --no-parallel-tool-calls" in result.output
     assert "--telemetry" in result.output
     assert "--no-telemetry" not in result.output
@@ -30,6 +32,8 @@ def test_help_exposes_provider_and_model_flags_without_no_telemetry() -> None:
 def test_make_config_threads_cli_options_into_engine_config() -> None:
     cfg = _make_config(
         model="claude-opus-4-7",
+        synthesis_model=None,
+        compaction_model=None,
         max_depth=3,
         max_turns=12,
         max_parallel=5,
@@ -53,17 +57,51 @@ def test_make_config_threads_cli_options_into_engine_config() -> None:
     assert cfg.model_provider.api_key == "sk-ant-test"
     assert cfg.model_provider.default_headers == {"anthropic-beta": "tools-2025-01-01"}
 
-    for model in (cfg.root_agent.model, cfg.subagent.model, cfg.synthesis_model):
+    for model in (cfg.root_agent.model, cfg.subagent.model):
         assert model.name == "claude-opus-4-7"
         assert model.temperature == 0.2
         assert model.maximum_output_tokens == 1024
         assert model.parallel_tool_calls is False
         assert model.reasoning_effort == "low"
 
-    assert cfg.compaction_model.name == "claude-opus-4-7"
-    assert cfg.compaction_model.temperature == 0.2
-    assert cfg.compaction_model.maximum_output_tokens == 1024
-    assert cfg.compaction_model.parallel_tool_calls is False
+    for model in (cfg.synthesis_model, cfg.compaction_model):
+        assert model.name == "claude-opus-4-7"
+        assert model.temperature == 0.2
+        assert model.maximum_output_tokens == 1024
+        assert model.parallel_tool_calls is False
+        assert model.reasoning_effort is None
+
+
+def test_make_config_overrides_synthesis_and_compaction_models() -> None:
+    """Synthesis/compaction never inherit the CLI --reasoning-effort: it
+    targets the agents' model, and a cheap non-reasoning override must
+    not receive an unsupported parameter. ``effective_reasoning_effort``
+    resolves each model's own family default at call time instead."""
+    cfg = _make_config(
+        model="claude-opus-4-7",
+        synthesis_model="gpt-4.1-nano",
+        compaction_model="gpt-4.1-nano",
+        max_depth=3,
+        max_turns=12,
+        max_parallel=5,
+        temperature=None,
+        max_output_tokens=None,
+        parallel_tool_calls=True,
+        reasoning_effort="low",
+        refusal_retries=0,
+        base_url=None,
+        api_key=None,
+        default_headers=None,
+    )
+
+    assert cfg.root_agent.model.name == "claude-opus-4-7"
+    assert cfg.root_agent.model.reasoning_effort == "low"
+    assert cfg.subagent.model.name == "claude-opus-4-7"
+    assert cfg.subagent.model.reasoning_effort == "low"
+    assert cfg.synthesis_model.name == "gpt-4.1-nano"
+    assert cfg.synthesis_model.reasoning_effort is None
+    assert cfg.synthesis_model.effective_reasoning_effort() is None
+    assert cfg.compaction_model.name == "gpt-4.1-nano"
     assert cfg.compaction_model.reasoning_effort is None
 
 

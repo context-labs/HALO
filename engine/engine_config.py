@@ -13,6 +13,13 @@ class EngineConfig(BaseModel):
 
     Composes per-domain configs (agents, model bindings, trace index, sandbox) plus
     the compaction thresholds and depth/parallelism caps that bound a run.
+
+    ``synthesis_model`` and ``compaction_model`` are required and carry no
+    default — a hardcoded default model name would silently route to the
+    wrong provider when ``model_provider`` targets a non-OpenAI endpoint.
+    Both roles are plain summarization, so a small, cheap model the
+    configured provider serves (e.g. ``gpt-4.1-nano`` on OpenAI) is
+    recommended over the agents' analysis model.
     """
 
     model_config = ConfigDict(extra="forbid")
