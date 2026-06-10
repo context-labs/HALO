@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from openai import AsyncOpenAI
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
     from engine.engine_config import EngineConfig
     from engine.git.git_repo import GitRepo
+
+logger = logging.getLogger(__name__)
 
 
 class AgentContext:
@@ -109,6 +112,37 @@ class AgentContext:
         """Render stored items into provider-compatible messages, swapping in summaries for compacted items."""
         return [_render_item(item) for item in self.items]
 
+    def trim_incomplete_tool_turn(self, *, min_items: int = 0) -> list[AgentContextItem]:
+        """Drop a trailing incomplete tool turn so the rendered message array
+        stays valid for the LLM API after a mid-stream failure.
+
+        Scans backwards for the last assistant item carrying ``tool_calls``;
+        if any of its call ids lacks a matching ``role=tool`` result later in
+        the list, that assistant item and everything after it are removed.
+        Earlier turns are complete by construction, so a single check
+        suffices. Never trims below ``min_items`` (items that existed before
+        the failed attempt are consistent already). Returns the removed items
+        in their original order.
+        """
+        trim_from: int | None = None
+        for idx in range(len(self.items) - 1, max(min_items, 0) - 1, -1):
+            item = self.items[idx]
+            if item.role == "assistant" and item.tool_calls and not item.is_compacted:
+                call_ids = {tc.id for tc in item.tool_calls}
+                result_ids = {
+                    later.tool_call_id for later in self.items[idx + 1 :] if later.role == "tool"
+                }
+                if not call_ids <= result_ids:
+                    trim_from = idx
+                break
+        if trim_from is None:
+            return []
+        removed = self.items[trim_from:]
+        del self.items[trim_from:]
+        for item in removed:
+            self._index.pop(item.item_id, None)
+        return removed
+
     async def compact_old_items(self, client: AsyncOpenAI) -> None:
         """Compact eligible older items in place using two independent keep-last thresholds.
 
@@ -136,9 +170,20 @@ class AgentContext:
 
         for idx in sorted(set(eligible)):
             item = self.items[idx]
-            summary = await compact(
-                client=client, compaction_model=self.compaction_model, item=item
-            )
+            try:
+                summary = await compact(
+                    client=client, compaction_model=self.compaction_model, item=item
+                )
+            except Exception:
+                # Compaction is an optimization — a failed summarization call
+                # (after its own retries) must never take down the run. Leave
+                # the item uncompacted; the next turn's pass retries it.
+                logger.warning(
+                    "compaction failed for item %s; leaving uncompacted",
+                    item.item_id,
+                    exc_info=True,
+                )
+                continue
             self.items[idx] = item.model_copy(
                 update={"is_compacted": True, "compaction_summary": summary}
             )
