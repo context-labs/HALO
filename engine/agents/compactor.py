@@ -3,6 +3,7 @@ from __future__ import annotations
 from openai import AsyncOpenAI, omit
 
 from engine.agents.agent_context_items import AgentContextItem
+from engine.agents.llm_retry import call_with_retries
 from engine.agents.prompt_caching import as_cached_system_message
 from engine.agents.prompt_templates import COMPACTION_SYSTEM_PROMPT
 from engine.model_config import ModelConfig
@@ -28,13 +29,16 @@ async def compact(
     # as deprecated; only forward it when explicitly set on the compaction
     # model.
     temperature = compaction_model.temperature if compaction_model.temperature is not None else omit
-    response = await client.chat.completions.create(
-        model=compaction_model.name,
-        messages=[
-            as_cached_system_message(COMPACTION_SYSTEM_PROMPT),
-            {"role": "user", "content": user_text},
-        ],
-        temperature=temperature,
+    response = await call_with_retries(
+        lambda: client.chat.completions.create(
+            model=compaction_model.name,
+            messages=[
+                as_cached_system_message(COMPACTION_SYSTEM_PROMPT),
+                {"role": "user", "content": user_text},
+            ],
+            temperature=temperature,
+        ),
+        description=f"compaction call (model={compaction_model.name}, item={item.item_id})",
     )
     return (response.choices[0].message.content or "").strip()
 

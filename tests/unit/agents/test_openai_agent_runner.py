@@ -160,6 +160,7 @@ async def test_runner_keeps_refusal_retry_prompt_after_transient_retry_call_fail
         run_streamed=fake_run_streamed,
         client=_DUMMY_CLIENT,
         refusal_retries=1,
+        retry_backoff_base=0.0,
     )
 
     await runner.run(
@@ -355,6 +356,7 @@ async def test_runner_circuit_breaker() -> None:
     runner = OpenAiAgentRunner(
         run_streamed=always_fail,
         client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
     )
 
     with pytest.raises(EngineAgentExhaustedError):
@@ -431,6 +433,7 @@ async def test_runner_retries_on_connection_error_then_fails() -> None:
     runner = OpenAiAgentRunner(
         run_streamed=raise_connection,
         client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
     )
 
     with pytest.raises(EngineAgentExhaustedError):
@@ -475,6 +478,7 @@ async def test_runner_retries_plain_api_error_from_backend() -> None:
     runner = OpenAiAgentRunner(
         run_streamed=fail_then_recover,
         client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
     )
 
     await runner.run(
@@ -524,6 +528,7 @@ async def test_runner_retries_when_stream_iteration_raises_retriable() -> None:
     runner = OpenAiAgentRunner(
         run_streamed=stream_that_raises,
         client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
     )
 
     with pytest.raises(EngineAgentExhaustedError):
@@ -598,10 +603,155 @@ class _StreamYieldsThenRaises:
 
 
 @pytest.mark.asyncio
-async def test_runner_propagates_retriable_iteration_error_after_event_seen() -> None:
-    """Once any event has been applied to context/counters/bus, a retriable mid-stream error
-    must propagate rather than retry — replay would duplicate context items, double-count
-    turns, and re-emit bus events. Turn-boundary recovery is the caller's job."""
+async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> None:
+    """A retriable mid-stream failure no longer kills the run (INF-3504): the
+    runner reruns from the local conversation history, preserving completed
+    items from the failed attempt."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_that_partially_succeeds(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [_assistant_event("partial answer")],
+                APIConnectionError(request=fake_request),
+            )
+        return _FakeStream([_assistant_event("answer\n<final/>")])
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_that_partially_succeeds,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    # The retry replays the completed assistant message from local history.
+    assert calls[1] == [{"role": "assistant", "content": "partial answer"}]
+    assert [item.content for item in ctx.items] == ["partial answer", "answer"]
+    assert execution.consecutive_llm_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> None:
+    """When the stream dies after the model emitted tool_calls but before the
+    matching results landed, the orphan tool-call turn is trimmed so the retried
+    message array stays valid for the LLM API."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_dies_mid_tool_turn(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [tool_call_event(call_id="call_1", name="query_traces", arguments='{"q":"x"}')],
+                APIConnectionError(request=fake_request),
+            )
+        return _FakeStream([_assistant_event("answer\n<final/>")])
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_dies_mid_tool_turn,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    # The orphan assistant tool-call item was trimmed before the retry.
+    assert calls[1] == []
+    assert [item.content for item in ctx.items] == ["answer"]
+    assert execution.tool_calls_made == 0
+    assert execution.consecutive_llm_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
+    """Stale ``rs_*`` Responses-state 400s (INF-3308) are retriable: the rerun
+    rebuilds the request from local history and does not replay the stale ids."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
+
+    async def stream_hits_stale_reasoning_item(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [_assistant_event("worked a bit")],
+                BadRequestError(
+                    message="Item with id 'rs_0123abc' not found.",
+                    response=fake_response,
+                    body={"error": {"message": "Item with id 'rs_0123abc' not found."}},
+                ),
+            )
+        return _FakeStream([_assistant_event("answer\n<final/>")])
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_hits_stale_reasoning_item,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    assert [item.content for item in ctx.items] == ["worked a bit", "answer"]
+
+
+@pytest.mark.asyncio
+async def test_runner_propagates_plain_400_mid_stream() -> None:
+    """Plain validation 400s mid-stream stay non-retriable — an identical replay
+    would deterministically fail again."""
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
@@ -614,21 +764,27 @@ async def test_runner_propagates_retriable_iteration_error_after_event_seen() ->
 
     call_count = 0
     fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    fake_response = httpx.Response(400, request=fake_request)
 
-    async def stream_that_partially_succeeds(*, agent, input, context):
+    async def stream_bad_request(*, agent, input, context):
         nonlocal call_count
         call_count += 1
         return _StreamYieldsThenRaises(
-            [_assistant_event("partial answer")],
-            APIConnectionError(request=fake_request),
+            [_assistant_event("partial")],
+            BadRequestError(
+                message="bad field",
+                response=fake_response,
+                body={"error": {"message": "bad field"}},
+            ),
         )
 
     runner = OpenAiAgentRunner(
-        run_streamed=stream_that_partially_succeeds,
+        run_streamed=stream_bad_request,
         client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
     )
 
-    with pytest.raises(APIConnectionError):
+    with pytest.raises(BadRequestError):
         await runner.run(
             sdk_agent=object(),
             agent_context=ctx,
@@ -637,6 +793,3 @@ async def test_runner_propagates_retriable_iteration_error_after_event_seen() ->
             is_root=True,
         )
     assert call_count == 1
-    # The single partial assistant message stays in context exactly once.
-    assistant_items = [i for i in ctx.items if i.role == "assistant"]
-    assert len(assistant_items) == 1

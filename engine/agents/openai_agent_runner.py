@@ -1,35 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from openai import (
-    APIConnectionError,
-    APIError,
-    APIStatusError,
-    APITimeoutError,
-    AsyncOpenAI,
-    RateLimitError,
-)
+from openai import AsyncOpenAI
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
+from engine.agents.llm_retry import (
+    DEFAULT_BACKOFF_BASE_SECONDS,
+    DEFAULT_BACKOFF_CAP_SECONDS,
+    backoff_delay,
+    is_retriable_llm_error,
+)
 from engine.agents.openai_event_mapper import OpenAiEventMapper
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
-
-
-def _is_retriable_llm_error(exc: BaseException) -> bool:
-    """Classify an exception as a transient LLM failure worth retrying."""
-    if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
-        return True
-    if isinstance(exc, APIStatusError):
-        return exc.status_code >= 500
-    if isinstance(exc, APIError):
-        return True
-    return False
-
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
@@ -53,14 +41,20 @@ class OpenAiAgentRunner:
         client: AsyncOpenAI,
         event_mapper: OpenAiEventMapper | None = None,
         refusal_retries: int = 0,
+        retry_backoff_base: float = DEFAULT_BACKOFF_BASE_SECONDS,
+        retry_backoff_cap: float = DEFAULT_BACKOFF_CAP_SECONDS,
     ) -> None:
         """``run_streamed`` is injected so root and subagent paths can supply their own
         max_turns and starting agent. ``client`` is the per-run AsyncOpenAI used for
-        compaction calls."""
+        compaction calls. ``retry_backoff_base``/``retry_backoff_cap`` shape the
+        full-jitter exponential backoff between LLM retries (base <= 0 disables
+        sleeping; used by tests)."""
         self._run_streamed = run_streamed
         self._client = client
         self._mapper = event_mapper or OpenAiEventMapper()
         self._refusal_retries = refusal_retries
+        self._retry_backoff_base = retry_backoff_base
+        self._retry_backoff_cap = retry_backoff_cap
 
     async def run(
         self,
@@ -82,13 +76,18 @@ class OpenAiAgentRunner:
         full iteration — connection errors, timeouts, rate limits, and 5xx surface
         there, not on the ``run_streamed`` call.
 
-        Retry only fires when zero events were processed in the failed attempt.
-        Once any event has been applied to ``agent_context``/``agent_execution``/
-        ``output_bus``, a replay would corrupt state (duplicate context items,
-        double-counted turns, duplicate bus emissions). Mid-stream failures are
-        surfaced to the caller; turn-boundary recovery happens one layer up
-        (parent agents see a ``SubagentToolResult`` failure; root agents see
-        ``output_bus.fail()``).
+        Mid-stream failures (events already processed when the stream dies —
+        dropped connections, incomplete chunked reads, stale ``rs_*`` 400s from
+        the SDK re-sending Responses-API reasoning items) are recovered by
+        rerunning from the LOCAL conversation history (INF-3504 / INF-3308):
+        completed turns stay in ``agent_context``; only a trailing incomplete
+        tool turn is trimmed (see ``AgentContext.trim_incomplete_tool_turn``)
+        so the rendered message array stays valid, then the next attempt
+        resumes from the last consistent point instead of losing the run.
+        Output items already emitted to the bus cannot be retracted — consumers
+        may see a trimmed turn followed by its regenerated equivalent, which is
+        the accepted tradeoff versus failing a long run outright. Each retry
+        sleeps with full-jitter exponential backoff.
         """
         last_exc: BaseException | None = None
         refusal_attempts = 0
@@ -97,6 +96,7 @@ class OpenAiAgentRunner:
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
             events_seen = 0
+            items_before_attempt = len(agent_context.items)
             attempt_refusal_text: str | None = None
             messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
             if pending_refusal_retry:
@@ -133,15 +133,43 @@ class OpenAiAgentRunner:
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
             except Exception as exc:
-                if events_seen > 0 or not _is_retriable_llm_error(exc):
+                if not is_retriable_llm_error(exc):
                     raise
+                if events_seen > 0:
+                    # Mid-stream failure: trim a trailing incomplete tool turn
+                    # so the next attempt reruns from the last consistent point
+                    # of the local conversation history. Completed turns from
+                    # this attempt are preserved.
+                    removed = agent_context.trim_incomplete_tool_turn(
+                        min_items=items_before_attempt
+                    )
+                    for item in removed:
+                        if item.role == "assistant" and item.tool_calls:
+                            agent_execution.tool_calls_made -= len(item.tool_calls)
+                        elif item.role == "assistant":
+                            agent_execution.turns_used -= 1
+                    logger.warning(
+                        "mid-stream llm failure for agent_id=%s after %s events "
+                        "(%s incomplete tail item(s) trimmed); rerunning from local history",
+                        agent_execution.agent_id,
+                        events_seen,
+                        len(removed),
+                    )
                 last_exc = exc
                 agent_execution.record_llm_failure()
                 logger.warning(
-                    "llm call failed for agent_id=%s (failure %s of %s)",
+                    "llm call failed for agent_id=%s with %s (failure %s of %s)",
                     agent_execution.agent_id,
+                    type(exc).__name__,
                     agent_execution.consecutive_llm_failures,
                     MAX_CONSECUTIVE_LLM_FAILURES,
+                )
+                await asyncio.sleep(
+                    backoff_delay(
+                        agent_execution.consecutive_llm_failures,
+                        base=self._retry_backoff_base,
+                        cap=self._retry_backoff_cap,
+                    )
                 )
                 continue
 
