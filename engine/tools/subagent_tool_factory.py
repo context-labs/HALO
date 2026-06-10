@@ -279,6 +279,8 @@ def _build_subagent_as_tool(
                 run_streamed=_run_streamed,
                 client=run_state.openai_client,
                 refusal_retries=engine_config.subagent.refusal_retries,
+                retry_backoff_base=engine_config.llm_retry_backoff_base_seconds,
+                retry_backoff_cap=engine_config.llm_retry_backoff_cap_seconds,
             )
 
             # ``agent_id="halo"`` matches the root span (see

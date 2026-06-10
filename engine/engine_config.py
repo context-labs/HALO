@@ -3,6 +3,10 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from engine.agents.agent_config import AgentConfig
+from engine.agents.llm_retry import (
+    DEFAULT_BACKOFF_BASE_SECONDS,
+    DEFAULT_BACKOFF_CAP_SECONDS,
+)
 from engine.model_config import ModelConfig
 from engine.model_provider_config import ModelProviderConfig
 from engine.traces.models.trace_index_config import TraceIndexConfig
@@ -34,3 +38,8 @@ class EngineConfig(BaseModel):
     tool_call_compaction_keep_last_turns: int = Field(default=3, ge=0)
     maximum_depth: int = Field(default=2, ge=0)
     maximum_parallel_subagents: int = Field(default=4, gt=0)
+    # Full-jitter exponential backoff between LLM retries (root and subagent
+    # runners). ``base <= 0`` disables sleeping — used by fake-runner tests so
+    # retry-exhaustion paths don't sleep through probe timeouts.
+    llm_retry_backoff_base_seconds: float = Field(default=DEFAULT_BACKOFF_BASE_SECONDS, ge=0)
+    llm_retry_backoff_cap_seconds: float = Field(default=DEFAULT_BACKOFF_CAP_SECONDS, ge=0)

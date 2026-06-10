@@ -303,6 +303,58 @@ def test_trim_incomplete_tool_turn_respects_min_items() -> None:
     assert [i.item_id for i in ctx.items] == ["a1"]
 
 
+def test_trim_drops_turn_with_trailing_orphan_tool_rows() -> None:
+    """A complete tool turn followed by a ``role=tool`` row referencing some
+    OTHER call id is still inconsistent — the orphan would render an invalid
+    message array, so the whole trailing turn is rerun."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="result", tool_call_id="call_1"))
+    ctx.append(AgentContextItem(item_id="a2", role="assistant", tool_calls=[_tool_call("call_2")]))
+    ctx.append(AgentContextItem(item_id="t2", role="tool", content="result", tool_call_id="call_2"))
+    ctx.append(
+        AgentContextItem(item_id="t3", role="tool", content="stray", tool_call_id="call_stale")
+    )
+
+    removed = ctx.trim_incomplete_tool_turn()
+
+    assert [i.item_id for i in removed] == ["a2", "t2", "t3"]
+    assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1"]
+    with pytest.raises(KeyError):
+        ctx.get_item("t3")
+
+
+def test_trim_drops_orphan_tool_rows_with_no_tool_turn_in_range() -> None:
+    """A failed attempt that appended only a tool row for a call id from a
+    previously trimmed attempt (no assistant tool-call item this attempt)
+    must still be cleaned up."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="result", tool_call_id="call_1"))
+    ctx.append(
+        AgentContextItem(item_id="t2", role="tool", content="stray", tool_call_id="call_stale")
+    )
+
+    removed = ctx.trim_incomplete_tool_turn(min_items=3)
+
+    assert [i.item_id for i in removed] == ["t2"]
+    assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1"]
+
+
+def test_trim_keeps_tool_rows_completing_protected_prior_turn() -> None:
+    """Tool rows appended during the attempt that resolve the nearest
+    preceding (min_items-protected) tool-call turn are valid, not orphans."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="result", tool_call_id="call_1"))
+
+    assert ctx.trim_incomplete_tool_turn(min_items=2) == []
+    assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1"]
+
+
 @pytest.mark.asyncio
 async def test_compact_old_items_survives_compaction_failure(
     monkeypatch: pytest.MonkeyPatch,

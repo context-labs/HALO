@@ -139,6 +139,8 @@ async def stream_engine_async(
                         run_streamed=_run_streamed,
                         client=run_state.openai_client,
                         refusal_retries=engine_config.root_agent.refusal_retries,
+                        retry_backoff_base=engine_config.llm_retry_backoff_base_seconds,
+                        retry_backoff_cap=engine_config.llm_retry_backoff_cap_seconds,
                     )
                     try:
                         await agent_runner.run(
