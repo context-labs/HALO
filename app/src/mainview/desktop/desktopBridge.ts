@@ -4,11 +4,15 @@ import type {
   DesktopCommand,
   DesktopNativeStatus,
   DesktopRowContextMenuInput,
+  DesktopUpdateFlowStatus,
+  DesktopUpdatePrompt,
   HaloDesktopRPCSchema,
 } from "../../desktop/commands";
 
 export const DESKTOP_COMMAND_EVENT = "halo:desktop-command";
 export const DESKTOP_NATIVE_STATUS_EVENT = "halo:desktop-native-status";
+export const DESKTOP_UPDATE_FLOW_EVENT = "halo:desktop-update-flow";
+export const DESKTOP_UPDATE_PROMPT_EVENT = "halo:desktop-update-prompt";
 export const TRACE_PAGE_COMMAND_EVENT = "halo:trace-page-command";
 
 /**
@@ -25,7 +29,9 @@ export function isDesktopShell(): boolean {
 
 type DesktopRpc = {
   request: {
+    applyUpdate: () => Promise<{ message?: string; ok: boolean }>;
     checkForUpdates: () => Promise<DesktopNativeStatus>;
+    snoozeUpdatePrompt: () => Promise<{ ok: boolean }>;
     detectCodingTools: () => Promise<CodingToolAvailability>;
     getAppMetadata: () => Promise<DesktopAppMetadata>;
     openAppDataFolder: () => Promise<{ ok: boolean }>;
@@ -47,6 +53,8 @@ declare global {
   interface WindowEventMap {
     [DESKTOP_COMMAND_EVENT]: CustomEvent<DesktopCommand>;
     [DESKTOP_NATIVE_STATUS_EVENT]: CustomEvent<DesktopNativeStatus>;
+    [DESKTOP_UPDATE_FLOW_EVENT]: CustomEvent<DesktopUpdateFlowStatus>;
+    [DESKTOP_UPDATE_PROMPT_EVENT]: CustomEvent<DesktopUpdatePrompt>;
     [TRACE_PAGE_COMMAND_EVENT]: CustomEvent<TracePageCommand>;
   }
 }
@@ -83,6 +91,16 @@ export function initializeDesktopBridge() {
           nativeStatus(status) {
             window.dispatchEvent(
               new CustomEvent(DESKTOP_NATIVE_STATUS_EVENT, { detail: status }),
+            );
+          },
+          updateFlowStatus(status) {
+            window.dispatchEvent(
+              new CustomEvent(DESKTOP_UPDATE_FLOW_EVENT, { detail: status }),
+            );
+          },
+          updatePrompt(prompt) {
+            window.dispatchEvent(
+              new CustomEvent(DESKTOP_UPDATE_PROMPT_EVENT, { detail: prompt }),
             );
           },
         },

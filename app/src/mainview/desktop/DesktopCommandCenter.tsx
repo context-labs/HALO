@@ -16,6 +16,7 @@ import {
 import {
   Badge,
   Button,
+  Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -44,10 +45,13 @@ import {
   type DesktopCommand,
   type DesktopCommandName,
   type DesktopNativeStatus,
+  type DesktopUpdatePrompt,
 } from "../../desktop/commands";
 import {
   DESKTOP_COMMAND_EVENT,
   DESKTOP_NATIVE_STATUS_EVENT,
+  DESKTOP_UPDATE_FLOW_EVENT,
+  DESKTOP_UPDATE_PROMPT_EVENT,
   dispatchTracePageCommand,
   getDesktopRpc,
   initializeDesktopBridge,
@@ -65,6 +69,10 @@ export function DesktopCommandCenter() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [metadata, setMetadata] = useState<DesktopAppMetadata | null>(null);
+  const [updatePrompt, setUpdatePrompt] = useState<DesktopUpdatePrompt | null>(
+    null,
+  );
+  const [updateInstalling, setUpdateInstalling] = useState(false);
   const notifiedLiveEvents = useRef(new Set<number>());
 
   const path = routerState.location.pathname;
@@ -282,6 +290,57 @@ export function DesktopCommandCenter() {
     };
   }, [executeCommand]);
 
+  // Automatic update prompts from the bun process: show the dialog when a
+  // release lands; surface install failures and unlock the UI again.
+  useEffect(() => {
+    const onUpdatePrompt = (
+      event: WindowEventMap[typeof DESKTOP_UPDATE_PROMPT_EVENT],
+    ) => {
+      setUpdatePrompt((current) => current ?? event.detail);
+    };
+    const onUpdateFlow = (
+      event: WindowEventMap[typeof DESKTOP_UPDATE_FLOW_EVENT],
+    ) => {
+      if (event.detail.status === "failed") {
+        setUpdateInstalling(false);
+        setUpdatePrompt(null);
+        toast.error({
+          title: "Update failed",
+          description:
+            event.detail.message ??
+            "The update could not be installed. Try again from About HALO.",
+        });
+      }
+    };
+    window.addEventListener(DESKTOP_UPDATE_PROMPT_EVENT, onUpdatePrompt);
+    window.addEventListener(DESKTOP_UPDATE_FLOW_EVENT, onUpdateFlow);
+    return () => {
+      window.removeEventListener(DESKTOP_UPDATE_PROMPT_EVENT, onUpdatePrompt);
+      window.removeEventListener(DESKTOP_UPDATE_FLOW_EVENT, onUpdateFlow);
+    };
+  }, []);
+
+  const confirmUpdate = useCallback(async () => {
+    setUpdateInstalling(true);
+    const rpc = await getDesktopRpc();
+    const result = await rpc?.request.applyUpdate();
+    if (!result?.ok) {
+      setUpdateInstalling(false);
+      setUpdatePrompt(null);
+      toast.error({
+        title: "Update failed",
+        description: result?.message ?? "The updater is unavailable.",
+      });
+    }
+    // On success the app downloads, installs, and relaunches itself; the
+    // dialog stays in its installing state until the window goes away.
+  }, []);
+
+  const dismissUpdate = useCallback(() => {
+    setUpdatePrompt(null);
+    void getDesktopRpc().then((rpc) => rpc?.request.snoozeUpdatePrompt());
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
@@ -347,6 +406,26 @@ export function DesktopCommandCenter() {
         onOpenChange={setAboutOpen}
         onRevealDatabase={() => void executeCommand({ name: "reveal-database" })}
         open={aboutOpen}
+      />
+      <Dialog
+        cancelTitle="Later"
+        className="sm:!max-w-[460px] md:!w-[460px]"
+        confirmTitle={updateInstalling ? "Installing…" : "Update & Restart"}
+        dialogDescription={
+          updateInstalling
+            ? "Downloading and installing the update. HALO restarts on its own when it finishes."
+            : `HALO ${updatePrompt?.version ?? ""} is ready to install. Your local data is untouched — only the app updates.`
+        }
+        dialogTitle="Update available"
+        disabled={updateInstalling}
+        loading={updateInstalling}
+        onConfirm={() => void confirmUpdate()}
+        onOpenChange={(open) => {
+          // Dismissing counts as "not now": snooze for six hours (a restart
+          // also clears it). Ignore while an install is running.
+          if (!open && !updateInstalling) dismissUpdate();
+        }}
+        open={Boolean(updatePrompt)}
       />
     </>
   );

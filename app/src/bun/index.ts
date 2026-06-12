@@ -19,6 +19,8 @@ import {
   type DesktopAppMetadata,
   type DesktopCommand,
   type DesktopNativeStatus,
+  type DesktopUpdateFlowStatus,
+  type DesktopUpdatePrompt,
   type HaloDesktopRPCSchema,
 } from "../desktop/commands";
 import { startTelemetryServer } from "../server/start";
@@ -65,9 +67,14 @@ const desktopRpc = BrowserView.defineRPC<HaloDesktopRPCSchema>({
   maxRequestTime: 60_000,
   handlers: {
     requests: {
+      applyUpdate: () => startUpdateFlow(),
       checkForUpdates,
       detectCodingTools,
       getAppMetadata,
+      snoozeUpdatePrompt: () => {
+        snoozeUpdatePrompt();
+        return { ok: true };
+      },
       openAppDataFolder: () => {
         const ok = Utils.openPath(runtimePaths.appDataDir);
         return { ok };
@@ -200,13 +207,91 @@ ContextMenu.on("context-menu-clicked", (event) => {
   }
 });
 
+// Downloads emit many progress entries — only failures surface as toasts;
+// the update dialog owns the happy-path progress display.
 Updater.onStatusChange((entry) => {
+  if (entry.status !== "error" && entry.status !== "patch-failed") return;
   sendNativeStatus({
-    status: "info",
+    status: "error",
     title: "Updater",
     message: entry.message,
   });
 });
+
+// ── automatic update prompts ──────────────────────────────────────────────
+const UPDATE_CHECK_INITIAL_DELAY_MS = 30_000;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_PROMPT_SNOOZE_MS = 6 * 60 * 60 * 1000;
+
+// In-memory on purpose: declining waits six hours OR an app restart,
+// whichever comes first — a fresh process naturally clears the snooze.
+let updatePromptSnoozedUntil = 0;
+let updateFlowActive = false;
+
+function snoozeUpdatePrompt() {
+  updatePromptSnoozedUntil = Date.now() + UPDATE_PROMPT_SNOOZE_MS;
+}
+
+async function maybePromptForUpdate() {
+  if (updateFlowActive) return;
+  if (Date.now() < updatePromptSnoozedUntil) return;
+  try {
+    const update = await Updater.checkForUpdate();
+    if (!update.updateAvailable) return;
+    sendUpdatePrompt({ version: update.version || "latest" });
+  } catch {
+    // Dev builds and offline checks fail quietly; the next tick retries.
+  }
+}
+
+/**
+ * Kick off download + install. Responds immediately (downloads can outlive
+ * the RPC timeout); progress and failures flow back as updateFlowStatus
+ * messages, and success ends with the app relaunching itself.
+ */
+function startUpdateFlow(): { message?: string; ok: boolean } {
+  if (updateFlowActive) {
+    return { message: "An update is already in progress.", ok: false };
+  }
+  updateFlowActive = true;
+  void (async () => {
+    try {
+      sendUpdateFlowStatus({ status: "downloading" });
+      await Updater.downloadUpdate();
+      sendUpdateFlowStatus({ status: "installing" });
+      await Updater.applyUpdate();
+      // applyUpdate quits and relaunches on success; reaching here without a
+      // restart means the platform path declined to apply.
+    } catch (error) {
+      updateFlowActive = false;
+      sendUpdateFlowStatus({
+        message: error instanceof Error ? error.message : String(error),
+        status: "failed",
+      });
+    }
+  })();
+  return { ok: true };
+}
+
+function sendUpdatePrompt(prompt: DesktopUpdatePrompt) {
+  try {
+    desktopRpc.send.updatePrompt(prompt);
+  } catch {
+    // The renderer may not have finished wiring RPC yet; the next check
+    // interval will prompt again.
+  }
+}
+
+function sendUpdateFlowStatus(status: DesktopUpdateFlowStatus) {
+  try {
+    desktopRpc.send.updateFlowStatus(status);
+  } catch {
+    // Best effort — the dialog also hears terminal failures via toasts.
+  }
+}
+
+setTimeout(() => void maybePromptForUpdate(), UPDATE_CHECK_INITIAL_DELAY_MS);
+setInterval(() => void maybePromptForUpdate(), UPDATE_CHECK_INTERVAL_MS);
 
 Electrobun.events.on("before-quit", () => {
   windowState.stop();

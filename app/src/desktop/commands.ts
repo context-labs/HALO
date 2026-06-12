@@ -44,6 +44,17 @@ export type DesktopNativeStatus =
       version?: string;
     };
 
+/** Bun→view nudge that a newer release is ready to install. */
+export type DesktopUpdatePrompt = {
+  version: string;
+};
+
+/** Progress of an in-flight update install, for the prompt dialog. */
+export type DesktopUpdateFlowStatus = {
+  message?: string;
+  status: "downloading" | "failed" | "installing";
+};
+
 export type DesktopAppMetadata = {
   appDataDir: string;
   bundleId: string;
@@ -101,9 +112,17 @@ export function buildCodingToolDeepLink(tool: CodingTool, reportPath: string) {
 export type HaloDesktopRPCSchema = {
   bun: {
     requests: {
+      applyUpdate: {
+        params: undefined;
+        response: { message?: string; ok: boolean };
+      };
       checkForUpdates: {
         params: undefined;
         response: DesktopNativeStatus;
+      };
+      snoozeUpdatePrompt: {
+        params: undefined;
+        response: { ok: boolean };
       };
       detectCodingTools: {
         params: undefined;
@@ -141,6 +160,8 @@ export type HaloDesktopRPCSchema = {
     messages: {
       desktopCommand: DesktopCommand;
       nativeStatus: DesktopNativeStatus;
+      updateFlowStatus: DesktopUpdateFlowStatus;
+      updatePrompt: DesktopUpdatePrompt;
     };
   };
 };
