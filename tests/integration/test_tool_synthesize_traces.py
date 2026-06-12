@@ -2,8 +2,10 @@
 
 Invokes the registered SDK ``FunctionTool`` against a real ``TraceStore``,
 which forwards the rendered trace text to the synthesis model. Skips when
-``OPENAI_API_KEY`` is not set; in CI, ``task test:integration`` injects it
-via Infisical.
+``OPENAI_API_KEY`` is not set; in CI, only the live workflow
+(``engine--integration-tests-live.yml``) injects it via Infisical — the
+non-live integration workflow deselects ``-m live`` tests and never needs
+the real key.
 """
 
 from __future__ import annotations

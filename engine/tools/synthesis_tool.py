@@ -3,6 +3,7 @@ from __future__ import annotations
 from openai import AsyncOpenAI, omit
 from pydantic import BaseModel, ConfigDict
 
+from engine.agents.llm_retry import call_with_retries
 from engine.agents.prompt_caching import as_cached_system_message
 from engine.agents.prompt_templates import SYNTHESIS_SYSTEM_PROMPT
 from engine.model_config import ModelConfig
@@ -67,13 +68,16 @@ class SynthesisTool:
             rendered = store.render_trace(tid, budget=8_000)
             user_text_parts.append(rendered)
 
-        response = await self._client.chat.completions.create(
-            model=self._model.name,
-            messages=[
-                as_cached_system_message(SYNTHESIS_SYSTEM_PROMPT),
-                {"role": "user", "content": "\n\n".join(user_text_parts)},
-            ],
-            reasoning_effort=self._model.effective_reasoning_effort() or omit,
+        response = await call_with_retries(
+            lambda: self._client.chat.completions.create(
+                model=self._model.name,
+                messages=[
+                    as_cached_system_message(SYNTHESIS_SYSTEM_PROMPT),
+                    {"role": "user", "content": "\n\n".join(user_text_parts)},
+                ],
+                reasoning_effort=self._model.effective_reasoning_effort() or omit,
+            ),
+            description=f"synthesize_traces call (model={self._model.name})",
         )
         summary = (response.choices[0].message.content or "").strip()
         return SynthesizeTracesResult(summary=summary)

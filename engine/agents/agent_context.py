@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from openai import AsyncOpenAI
@@ -12,6 +13,8 @@ from engine.models.messages import AgentMessage
 
 if TYPE_CHECKING:
     from engine.engine_config import EngineConfig
+
+logger = logging.getLogger(__name__)
 
 
 class AgentContext:
@@ -101,6 +104,65 @@ class AgentContext:
         """Render stored items into provider-compatible messages, swapping in summaries for compacted items."""
         return [_render_item(item) for item in self.items]
 
+    def trim_incomplete_tool_turn(self, *, min_items: int = 0) -> list[AgentContextItem]:
+        """Drop a trailing inconsistent tool turn so the rendered message array
+        stays valid for the LLM API after a mid-stream failure.
+
+        Scans backwards for the last non-compacted assistant item carrying
+        ``tool_calls`` and validates the tail after it both ways: every call
+        id needs a matching ``role=tool`` result, AND every trailing ``tool``
+        row must reference one of that turn's call ids. A missing result OR an
+        orphan tool row (referencing a call id from a previously trimmed
+        attempt) removes the whole turn — the next attempt regenerates it.
+        If no assistant tool-call turn exists in the mutable range, trailing
+        ``tool`` rows that don't belong to the nearest preceding tool-call
+        turn are orphans and are trimmed from the first one onward. Earlier
+        turns are complete by construction, so a single check suffices. Never
+        trims below ``min_items`` (items that existed before the failed
+        attempt are consistent already). Returns the removed items in their
+        original order.
+        """
+        floor = max(min_items, 0)
+        trim_from = self._tool_turn_trim_index(floor)
+        if trim_from is None:
+            return []
+        removed = self.items[trim_from:]
+        del self.items[trim_from:]
+        for item in removed:
+            self._index.pop(item.item_id, None)
+        return removed
+
+    def _tool_turn_trim_index(self, floor: int) -> int | None:
+        """Index to trim from so the trailing tool turn is consistent, or ``None``."""
+        for idx in range(len(self.items) - 1, floor - 1, -1):
+            item = self.items[idx]
+            if item.role == "assistant" and item.tool_calls and not item.is_compacted:
+                call_ids = {tc.id for tc in item.tool_calls}
+                result_ids = {
+                    later.tool_call_id for later in self.items[idx + 1 :] if later.role == "tool"
+                }
+                # Incomplete (missing results) or polluted (orphan results
+                # for other call ids): rerun the whole turn.
+                if call_ids != result_ids:
+                    return idx
+                return None
+        # No assistant tool-call turn in the mutable range. Tool rows at or
+        # after ``floor`` are only valid if they belong to the nearest
+        # preceding (protected) tool-call turn; anything else is an orphan.
+        prior_call_ids: set[str] = set()
+        for idx in range(floor - 1, -1, -1):
+            item = self.items[idx]
+            if item.role == "assistant" and item.tool_calls and not item.is_compacted:
+                prior_call_ids = {tc.id for tc in item.tool_calls}
+                break
+            if item.role != "tool":
+                break
+        for idx in range(floor, len(self.items)):
+            item = self.items[idx]
+            if item.role == "tool" and item.tool_call_id not in prior_call_ids:
+                return idx
+        return None
+
     async def compact_old_items(self, client: AsyncOpenAI) -> None:
         """Compact eligible older items in place using two independent keep-last thresholds.
 
@@ -128,9 +190,20 @@ class AgentContext:
 
         for idx in sorted(set(eligible)):
             item = self.items[idx]
-            summary = await compact(
-                client=client, compaction_model=self.compaction_model, item=item
-            )
+            try:
+                summary = await compact(
+                    client=client, compaction_model=self.compaction_model, item=item
+                )
+            except Exception:
+                # Compaction is an optimization — a failed summarization call
+                # (after its own retries) must never take down the run. Leave
+                # the item uncompacted; the next turn's pass retries it.
+                logger.warning(
+                    "compaction failed for item %s; leaving uncompacted",
+                    item.item_id,
+                    exc_info=True,
+                )
+                continue
             self.items[idx] = item.model_copy(
                 update={"is_compacted": True, "compaction_summary": summary}
             )

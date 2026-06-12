@@ -246,7 +246,13 @@ def make_default_config(
 ) -> EngineConfig:
     """Sensible defaults for an EngineConfig used in probes.
     The model name is irrelevant when ``FakeRunner`` is installed via
-    ``install_fake_runner`` (no real LLM call happens), so any string works."""
+    ``install_fake_runner`` (no real LLM call happens), so any string works.
+
+    LLM-retry backoff is disabled (``llm_retry_backoff_base_seconds=0``):
+    probes script failures deterministically, so sleeping between retries
+    only burns the ``run_with_fake`` timeout budget (a 10-failure exhaustion
+    probe would otherwise sleep minutes through full-jitter backoff and
+    surface as a bogus ``TimeoutError``)."""
     agent = AgentConfig(
         name="root",
         model=ModelConfig(name=model),
@@ -261,6 +267,7 @@ def make_default_config(
         maximum_parallel_subagents=maximum_parallel_subagents,
         text_message_compaction_keep_last_messages=text_message_compaction_keep_last_messages,
         tool_call_compaction_keep_last_turns=tool_call_compaction_keep_last_turns,
+        llm_retry_backoff_base_seconds=0.0,
     )
 
 
