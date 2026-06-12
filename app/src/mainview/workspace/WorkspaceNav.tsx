@@ -2,7 +2,8 @@ import { Link } from "@tanstack/react-router";
 import { Activity, BrainCircuit, DownloadCloud, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { cn } from "~/lib/ui";
+import { InferenceIcon, cn } from "~/lib/ui";
+import { isDesktopShell } from "~/desktop/desktopBridge";
 
 export type WorkspaceSection = "traces" | "analysis" | "imports" | "settings";
 
@@ -40,8 +41,22 @@ const navItems: Array<{
 
 export function WorkspaceNav({ active }: { active: WorkspaceSection }) {
   return (
-    <aside className="border-r border-border/50 bg-sidebar">
-      <nav className="relative flex h-full overflow-y-auto py-2">
+    <aside className="flex flex-col border-r border-border/50 bg-sidebar">
+      {/* In the desktop shell the brand sits below the macOS traffic lights
+          (the empty header strip above), aligned with the nav item icons. In
+          a browser the wordmark stays in the AppHeader instead. */}
+      {isDesktopShell() ? (
+        <div className="flex-none px-6 pb-3">
+          <Link
+            className="electrobun-webkit-app-region-no-drag inline-flex"
+            search={{} as never}
+            to="/traces"
+          >
+            <InferenceIcon height={20} width={120} />
+          </Link>
+        </div>
+      ) : null}
+      <nav className="relative flex min-h-0 flex-1 overflow-y-auto pb-2">
         <ul className="w-full">
           {navItems.map((item) => (
             <WorkspaceNavLink

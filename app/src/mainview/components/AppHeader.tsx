@@ -3,14 +3,16 @@ import { Link } from "@tanstack/react-router";
 import { Palette } from "lucide-react";
 
 import { Button, InferenceIcon, ThemeToggle } from "~/lib/ui";
+import { isDesktopShell } from "~/desktop/desktopBridge";
 
 /**
  * The single fixed window header used by every page.
  *
  * The outer div is the ElectroBun window drag region (titleBarStyle
  * hiddenInset); interactive children must live inside the no-drag wrapper.
- * Keep the left cell's width/padding stable — the macOS traffic lights
- * overlay it.
+ * In the desktop shell the left cell stays empty — it's the macOS traffic
+ * lights' zone and the wordmark moves below it into WorkspaceNav. In a plain
+ * browser there are no traffic lights, so the wordmark lives here.
  */
 export function AppHeader({
   actions,
@@ -27,15 +29,19 @@ export function AppHeader({
 }) {
   return (
     <div className="electrobun-webkit-app-region-drag fixed inset-x-0 top-0 z-40 grid h-14 select-none grid-cols-[14rem_minmax(0,1fr)]">
-      <div className="flex h-14 items-center border-r border-border/50 bg-sidebar px-5">
-        <Link
-          className="electrobun-webkit-app-region-no-drag"
-          search={{} as never}
-          to="/traces"
-        >
-          <InferenceIcon height={20} width={120} />
-        </Link>
-      </div>
+      {isDesktopShell() ? (
+        <div className="h-14 border-r border-border/50 bg-sidebar" />
+      ) : (
+        <div className="flex h-14 items-center border-r border-border/50 bg-sidebar px-5">
+          <Link
+            className="electrobun-webkit-app-region-no-drag"
+            search={{} as never}
+            to="/traces"
+          >
+            <InferenceIcon height={20} width={120} />
+          </Link>
+        </div>
+      )}
       <div className="flex min-w-0 items-center justify-between gap-4 border-b border-border/50 bg-sidebar px-6">
         <div className="flex min-w-0 items-center gap-3">
           {icon ? (

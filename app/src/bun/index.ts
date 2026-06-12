@@ -232,9 +232,12 @@ const mainWindow = new BrowserWindow({
   frame: loadWindowFrame(runtimePaths.appDataDir, defaultFrame),
   rpc: desktopRpc,
   titleBarStyle: "hiddenInset",
+  // The dots own the empty 56px header strip above the sidebar brand: x
+  // aligns the first dot with the wordmark's left edge, y centers the ~12px
+  // buttons in the strip. macOS fixes their size — only position is ours.
   trafficLightOffset: {
-    x: 18,
-    y: 16,
+    x: 24,
+    y: 22,
   },
 });
 

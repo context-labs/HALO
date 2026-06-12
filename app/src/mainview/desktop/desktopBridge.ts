@@ -11,6 +11,18 @@ export const DESKTOP_COMMAND_EVENT = "halo:desktop-command";
 export const DESKTOP_NATIVE_STATUS_EVENT = "halo:desktop-native-status";
 export const TRACE_PAGE_COMMAND_EVENT = "halo:trace-page-command";
 
+/**
+ * True inside the ElectroBun shell (its preload sets __electrobun before app
+ * code runs). Used for chrome that only makes sense with a native window,
+ * like reserving the macOS traffic-light zone.
+ */
+export function isDesktopShell(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    Boolean((window as Window & { __electrobun?: unknown }).__electrobun)
+  );
+}
+
 type DesktopRpc = {
   request: {
     checkForUpdates: () => Promise<DesktopNativeStatus>;
