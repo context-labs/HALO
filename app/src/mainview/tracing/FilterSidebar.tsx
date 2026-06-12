@@ -1,7 +1,6 @@
 import {
   Activity,
   Boxes,
-  CalendarClock,
   Code2,
   DownloadCloud,
   Filter,
@@ -12,11 +11,7 @@ import {
 
 import { Button, Tabs, TabsList, TabsTrigger } from "~/lib/ui";
 import { FilterSelect } from "~/components/FilterSelect";
-import {
-  toFacetOptions,
-  sourceLabel,
-  type DateRange,
-} from "~/lib/format";
+import { toFacetOptions, sourceLabel } from "~/lib/format";
 import type { FacetOption } from "../../server/telemetry/types";
 import type {
   ScopeFilter,
@@ -27,12 +22,10 @@ import type {
 
 export function FilterSidebar({
   agentName,
-  dateRange,
   description,
   facets,
   modelName,
   onAgentNameChange,
-  onDateRangeChange,
   onModelNameChange,
   onReset,
   onScopeChange,
@@ -47,12 +40,10 @@ export function FilterSidebar({
   viewMode,
 }: {
   agentName: string;
-  dateRange: DateRange;
   description: string;
   facets: Partial<Record<string, FacetOption[]>>;
   modelName: string;
   onAgentNameChange: (value: string) => void;
-  onDateRangeChange: (value: DateRange) => void;
   onModelNameChange: (value: string) => void;
   onReset: () => void;
   onScopeChange: (value: ScopeFilter) => void;
@@ -113,18 +104,6 @@ export function FilterSidebar({
               </Tabs>
             </div>
           ) : null}
-          <FilterSelect
-            icon={<CalendarClock className="h-4 w-4" />}
-            label="Window"
-            onChange={(value) => onDateRangeChange(value as DateRange)}
-            options={[
-              { label: "Last hour", value: "1h" },
-              { label: "Last 24 hours", value: "24h" },
-              { label: "Last 7 days", value: "7d" },
-              { label: "All time", value: "all" },
-            ]}
-            value={dateRange}
-          />
           <FilterSelect
             icon={<Activity className="h-4 w-4" />}
             label="Status"

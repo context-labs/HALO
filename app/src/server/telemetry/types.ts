@@ -151,6 +151,8 @@ export interface Trace {
   sourceImportedAtMs: number | null;
   sourceUrl: string | null;
   sourceTags: string[];
+  inputPreview: string | null;
+  outputPreview: string | null;
 }
 
 export interface SessionSummary {
@@ -176,6 +178,8 @@ export interface SessionSummary {
   llmModelNames: string[];
   sources: TraceSource[];
   sourceConnectionNames: string[];
+  inputPreview: string | null;
+  outputPreview: string | null;
 }
 
 export interface SpanNode {

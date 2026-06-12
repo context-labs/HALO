@@ -134,6 +134,19 @@
     --color-tertiary-foreground: rgb(64 64 64);
     --color-tertiary-border: rgb(212 212 212);
     --color-tertiary-hover: rgb(245 245 245);
+
+    /* Trace viewer span-kind + cost-heatmap colors */
+    --color-trace-llm: var(--color-blue-600);
+    --color-trace-tool: var(--color-yellow-500);
+    --color-trace-agent: var(--color-green-600);
+    --color-trace-group: var(--color-blue-400);
+    --color-trace-marker: var(--color-yellow-600);
+    --color-trace-other: var(--color-gray-400);
+    --color-trace-heat-dim: var(--color-gray-300);
+    --color-trace-heat-0: var(--color-gray-400);
+    --color-trace-heat-1: var(--color-yellow-500);
+    --color-trace-heat-2: var(--color-yellow-700);
+    --color-trace-heat-3: var(--color-red-600);
   }
 
   .dark {
@@ -250,5 +263,18 @@
     --color-tertiary-foreground: rgb(163 163 163);
     --color-tertiary-border: rgb(64 64 64);
     --color-tertiary-hover: rgb(38 38 38);
+
+    /* Trace viewer span-kind + cost-heatmap colors */
+    --color-trace-llm: var(--color-blue-500);
+    --color-trace-tool: var(--color-yellow-400);
+    --color-trace-agent: var(--color-green-500);
+    --color-trace-group: var(--color-blue-400);
+    --color-trace-marker: var(--color-yellow-400);
+    --color-trace-other: var(--color-gray-600);
+    --color-trace-heat-dim: var(--color-gray-700);
+    --color-trace-heat-0: var(--color-gray-600);
+    --color-trace-heat-1: var(--color-yellow-400);
+    --color-trace-heat-2: var(--color-yellow-500);
+    --color-trace-heat-3: var(--color-red-500);
   }
 }

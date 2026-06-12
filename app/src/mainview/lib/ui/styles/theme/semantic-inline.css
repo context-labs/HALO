@@ -66,4 +66,12 @@
   --color-tertiary-foreground: var(--color-tertiary-foreground);
   --color-tertiary-border: var(--color-tertiary-border);
   --color-tertiary-hover: var(--color-tertiary-hover);
+
+  --color-trace-llm: var(--color-trace-llm);
+  --color-trace-tool: var(--color-trace-tool);
+  --color-trace-agent: var(--color-trace-agent);
+  --color-trace-group: var(--color-trace-group);
+  --color-trace-marker: var(--color-trace-marker);
+  --color-trace-other: var(--color-trace-other);
+  --color-trace-heat-dim: var(--color-trace-heat-dim);
 }

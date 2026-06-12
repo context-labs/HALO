@@ -10,7 +10,12 @@ import {
 } from "lucide-react";
 
 import { Button, cn } from "~/lib/ui";
-import { formatTimestamp } from "~/lib/format";
+import {
+  ChatAgentContent,
+  ChatAvatar,
+  ChatTurn,
+  ChatUserBubble,
+} from "~/components/chat";
 import type {
   HaloRunEvent,
   HaloRunTurn,
@@ -46,7 +51,7 @@ export function RunConversation({
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       {turns.map((turn) =>
         turn.role === "user" ? (
           <UserTurn key={turn.id} turn={turn} />
@@ -70,22 +75,17 @@ export function RunConversation({
 
 function UserTurn({ turn }: { turn: HaloRunTurn }) {
   return (
-    <div className="turn-fade-in">
-      <TurnHeader
-        icon={
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-muted">
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-          </span>
-        }
-        name="You"
-        timestamp={turn.createdAt}
-      />
-      <div className="mt-2 rounded-xl bg-background-muted px-4 py-3">
-        <p className="whitespace-pre-wrap text-[0.9375rem] leading-[1.75] tracking-[-0.011em]">
-          {turn.content}
-        </p>
-      </div>
-    </div>
+    <ChatTurn
+      avatar={
+        <ChatAvatar className="bg-muted">
+          <User className="h-3.5 w-3.5 text-muted-foreground" />
+        </ChatAvatar>
+      }
+      name="You"
+      timestamp={turn.createdAt}
+    >
+      <ChatUserBubble text={turn.content} />
+    </ChatTurn>
   );
 }
 
@@ -114,18 +114,16 @@ function AssistantTurn({
   const answer = turn.content.trim() ? turn.content : streamedText;
 
   return (
-    <div className="turn-fade-in">
-      <TurnHeader
-        icon={
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-detail-brand/10">
-            <BrainCircuit className="h-3.5 w-3.5 text-detail-brand" />
-          </span>
-        }
-        name="HALO"
-        timestamp={turn.finishedAt ?? turn.createdAt}
-      />
-
-      <div className="mt-2 space-y-3">
+    <ChatTurn
+      avatar={
+        <ChatAvatar className="bg-detail-brand/10">
+          <BrainCircuit className="h-3.5 w-3.5 text-detail-brand" />
+        </ChatAvatar>
+      }
+      name="HALO"
+      timestamp={turn.finishedAt ?? turn.createdAt}
+    >
+      <ChatAgentContent>
         {/* The response renders identically while streaming and once final,
             so completion doesn't restyle anything. */}
         {failed ? (
@@ -151,7 +149,13 @@ function AssistantTurn({
             ) : null}
           </div>
         ) : answer ? (
-          <div className={cn("min-w-0", inFlight && "stream-block-fade")}>
+          /* Slightly dimmed body so the sender name carries more contrast. */
+          <div
+            className={cn(
+              "min-w-0 text-foreground/85",
+              inFlight && "stream-block-fade",
+            )}
+          >
             <RunReportView markdown={answer} />
           </div>
         ) : inFlight ? (
@@ -182,28 +186,8 @@ function AssistantTurn({
         {showToolBar && !inFlight ? (
           <OpenInToolBar layout="row" runId={run.id} />
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TurnHeader({
-  icon,
-  name,
-  timestamp,
-}: {
-  icon: React.ReactNode;
-  name: string;
-  timestamp: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      {icon}
-      <span className="text-sm font-semibold">{name}</span>
-      <span className="text-xs text-muted-foreground">
-        {formatTimestamp(timestamp)}
-      </span>
-    </div>
+      </ChatAgentContent>
+    </ChatTurn>
   );
 }
 

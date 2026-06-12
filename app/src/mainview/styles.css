@@ -69,6 +69,21 @@
   animation: live-timeline-pulse 1.4s ease-out;
 }
 
+/* Soft infinite blink for "running" status dots and the LIVE badge. */
+@utility trace-pulse {
+  animation: trace-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes trace-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 /* Streamed markdown materializes: each block fades in as it mounts, so new
    paragraphs/bullets appear softly instead of popping. Reused nodes never
    re-animate. */
@@ -240,6 +255,7 @@
   .halo-react-splash-logo,
   .turn-fade-in,
   .log-row-fade,
+  .trace-pulse,
   .stream-block-fade :is(p, li, h1, h2, h3, h4, pre, table, blockquote) {
     animation: none;
     opacity: 1;

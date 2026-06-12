@@ -118,6 +118,8 @@ export const traceSummaries = sqliteTable(
     sourceImportedAt: integer("source_imported_at"),
     sourceUrl: text("source_url"),
     sourceTagsJson: text("source_tags_json").notNull().default("[]"),
+    inputPreview: text("input_preview"),
+    outputPreview: text("output_preview"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [

@@ -1,38 +1,43 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Braces, Code2, ListTree, Loader2 } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Activity, Loader2 } from "lucide-react";
 
 import {
-  Badge,
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from "~/lib/ui";
 import { trpc } from "~/trpc";
-import { relativeTime } from "~/lib/format";
-import type { Span } from "../../../server/telemetry/types";
+import type { Span, SpanNode } from "../../../server/telemetry/types";
 import {
   buildClientSpanTree,
   buildSessionSpanTree,
-  findFirstInspectableSpan,
-  flattenSpanTree,
   isSessionTraceGroupSpan,
   isSyntheticSpan,
 } from "../spanTree";
-import { SessionSourceBadge, TraceSourceBadge } from "../SourceBadges";
-import { SpanInspector } from "./SpanInspector";
-import { SpanTreeList } from "./SpanTreeList";
-import { Timeline } from "./Timeline";
+import { ConversationView } from "./ConversationView";
+import { SpanDetailPanel } from "./SpanDetailPanel";
+import { TimelineView } from "./TimelineView";
+import { timelineDomain } from "./timelineMath";
+import {
+  TraceDetailHeader,
+  type TraceDetailStatus,
+  type TraceDetailViewMode,
+} from "./TraceDetailHeader";
+import { maxLlmCost } from "./spanKinds";
 import { spanKey, upsertSpan } from "./spanUtils";
+import type { WaterfallHandle } from "./WaterfallCanvas";
 
 const EMPTY_SPANS: Span[] = [];
-
-type DetailTab = "tree" | "timeline" | "span" | "raw";
+const VIEW_MODE_STORAGE_KEY = "halo.traceViewer.view";
 
 export function TelemetryDetailSheet({
   followLatest,
@@ -49,10 +54,35 @@ export function TelemetryDetailSheet({
   sessionId?: string;
   traceId?: string;
 }) {
-  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>("tree");
   const [selectedSpanKey, setSelectedSpanKey] = useState<string | null>(null);
+  const [expandedSpanKeys, setExpandedSpanKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [heat, setHeat] = useState(false);
+  const [viewMode, setViewModeRaw] = useState<TraceDetailViewMode>(() => {
+    try {
+      const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+      return stored === "conversation" ? "conversation" : "timeline";
+    } catch {
+      return "timeline";
+    }
+  });
+  const setViewMode = useCallback((value: TraceDetailViewMode) => {
+    setViewModeRaw(value);
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, value);
+    } catch {
+      // best effort
+    }
+  }, []);
   const [recentSpanIds, setRecentSpanIds] = useState<Set<string>>(() => new Set());
   const recentSpanTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const expansionInitializedFor = useRef<string | null>(null);
+  const waterfallRef = useRef<WaterfallHandle | null>(null);
+  const sheetBodyRef = useRef<HTMLDivElement | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
   const detailTraceInput = useMemo(() => ({ traceId: traceId ?? "" }), [traceId]);
   const detailSpansInput = useMemo(
     () => ({ limit: 500, traceId: traceId ?? "" }),
@@ -174,7 +204,15 @@ export function TelemetryDetailSheet({
   useEffect(() => {
     setSelectedSpanKey(null);
     setRecentSpanIds(new Set());
+    expansionInitializedFor.current = null;
   }, [sessionId, traceId]);
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedSpanKey(null);
+      setRecentSpanIds(new Set());
+    }
+  }, [open]);
 
   const spans =
     mode === "session"
@@ -188,68 +226,131 @@ export function TelemetryDetailSheet({
         : buildClientSpanTree(spans),
     [mode, sessionTraces, spans],
   );
-  const displaySpans = useMemo(() => flattenSpanTree(displayTree), [displayTree]);
-  const firstInspectableSpan = useMemo(
-    () => findFirstInspectableSpan(displayTree) ?? displaySpans[0] ?? null,
-    [displaySpans, displayTree],
-  );
-  const firstInspectableSpanKey = firstInspectableSpan
-    ? spanKey(firstInspectableSpan)
-    : null;
-  const timelineSpans = useMemo(
-    () =>
-      mode === "session"
-        ? displaySpans.filter((span) => !isSessionTraceGroupSpan(span))
-        : displaySpans,
-    [displaySpans, mode],
-  );
+  const nodeByKey = useMemo(() => {
+    const map = new Map<string, SpanNode>();
+    const visit = (node: SpanNode) => {
+      map.set(spanKey(node.span), node);
+      node.children.forEach(visit);
+    };
+    displayTree.forEach(visit);
+    return map;
+  }, [displayTree]);
 
+  // Expand every parent once per opened item; auto-expand parents that stream
+  // in later, preserving the user's manual collapses otherwise.
+  const knownParentKeys = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!open) {
-      setSelectedSpanKey(null);
-      setRecentSpanIds(new Set());
+    const id = mode === "session" ? sessionId : traceId;
+    if (!id || nodeByKey.size === 0) return;
+    const parentKeys = new Set<string>();
+    for (const [key, node] of nodeByKey) {
+      if (node.children.length > 0) parentKeys.add(key);
     }
+    if (expansionInitializedFor.current !== id) {
+      expansionInitializedFor.current = id;
+      knownParentKeys.current = parentKeys;
+      setExpandedSpanKeys(parentKeys);
+      return;
+    }
+    const fresh = [...parentKeys].filter(
+      (key) => !knownParentKeys.current.has(key),
+    );
+    if (fresh.length > 0) {
+      knownParentKeys.current = parentKeys;
+      setExpandedSpanKeys((current) => {
+        const next = new Set(current);
+        fresh.forEach((key) => next.add(key));
+        return next;
+      });
+    }
+  }, [mode, nodeByKey, sessionId, traceId]);
+
+  const onToggleExpanded = useCallback((key: string) => {
+    setExpandedSpanKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const realSpans = useMemo(
+    () => spans.filter((span) => !isSyntheticSpan(span)),
+    [spans],
+  );
+  const maxCost = useMemo(() => maxLlmCost(realSpans), [realSpans]);
+
+  const selectedSpanCandidate = selectedSpanKey
+    ? (nodeByKey.get(selectedSpanKey) ?? null)
+    : null;
+  const selectedNode =
+    selectedSpanCandidate && !isSessionTraceGroupSpan(selectedSpanCandidate.span)
+      ? selectedSpanCandidate
+      : null;
+  const selectedSpan = selectedNode?.span ?? null;
+
+  const session = sessionQuery.data ?? null;
+  const trace = mode === "trace" ? (traceQuery.data ?? null) : null;
+  const waitingForLatest = mode === "trace" && followLatest && !traceId;
+
+  // Status: live spans still open → running; any error → failed; else done.
+  const hasOpenSpan = realSpans.some(
+    (span) => span.endTimeMs <= span.startTimeMs,
+  );
+  const running = recentSpanIds.size > 0 || (realSpans.length > 0 && hasOpenSpan);
+  const hasError =
+    mode === "session" ? Boolean(session?.hasError) : Boolean(trace?.hasError);
+  const status: TraceDetailStatus = running
+    ? "running"
+    : hasError
+      ? "failed"
+      : "completed";
+
+  // Tick a shared clock while running so in-flight bars/durations advance.
+  useEffect(() => {
+    if (!open || !running) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 500);
+    setNowMs(Date.now());
+    return () => clearInterval(timer);
+  }, [open, running]);
+
+  // Collapse header stats when the sheet is narrow (matches the prototype).
+  useLayoutEffect(() => {
+    const el = sheetBodyRef.current;
+    if (!el || !open) return;
+    const observer = new ResizeObserver(() =>
+      setNarrow(el.clientWidth < 1080),
+    );
+    observer.observe(el);
+    setNarrow(el.clientWidth < 1080);
+    return () => observer.disconnect();
   }, [open]);
 
-  useEffect(() => {
-    if (open && firstInspectableSpanKey && !selectedSpanKey) {
-      setSelectedSpanKey(firstInspectableSpanKey);
-    }
-  }, [firstInspectableSpanKey, open, selectedSpanKey]);
+  const title = waitingForLatest
+    ? "Waiting for next trace…"
+    : mode === "session"
+      ? (session?.latestTraceName || "Session detail")
+      : (trace?.rootSpanName || displayTree[0]?.span.spanName || "Trace detail");
+  const description = mode === "session" ? (sessionId ?? null) : (traceId ?? null);
+  const startedAt =
+    mode === "session" ? (session?.startTime ?? null) : (trace?.startTime ?? null);
+  const durationMs =
+    mode === "session"
+      ? (session?.durationMs ?? null)
+      : (trace?.durationMs ?? null);
+  const tokens =
+    mode === "session"
+      ? (session?.totalTokens ?? null)
+      : (trace?.totalTokens ?? null);
+  const costTotal =
+    mode === "session"
+      ? nullableNumber(session?.totalCost)
+      : nullableNumber(trace?.totalCost);
+  const liveDurationMs =
+    running && startedAt
+      ? Math.max(0, nowMs - Date.parse(startedAt))
+      : durationMs;
 
-  const selectedSpanCandidate =
-    displaySpans.find((span) => spanKey(span) === selectedSpanKey) ?? null;
-  const selectedSpan =
-    selectedSpanCandidate && !isSessionTraceGroupSpan(selectedSpanCandidate)
-      ? selectedSpanCandidate
-      : (firstInspectableSpan ?? null);
-  const session = sessionQuery.data ?? null;
-  const traceMap = useMemo(
-    () => new Map(sessionTraces.map((trace) => [trace.traceId, trace])),
-    [sessionTraces],
-  );
-  const trace =
-    mode === "session"
-      ? selectedSpan
-        ? (traceMap.get(selectedSpan.traceId) ?? null)
-        : null
-      : (traceQuery.data ?? null);
-  const waitingForLatest = mode === "trace" && followLatest && !traceId;
-  const rootSpan = displayTree[0]?.span ?? null;
-  const title =
-    waitingForLatest
-      ? "Waiting for next trace..."
-      : mode === "session"
-        ? (session?.latestTraceName || "Session detail")
-      : rootSpan && isSyntheticSpan(rootSpan)
-        ? rootSpan.spanName
-        : (trace?.rootSpanName ?? rootSpan?.spanName ?? "Trace detail");
-  const description =
-    mode === "session"
-      ? (sessionId ?? "Session")
-      : waitingForLatest
-        ? "Fire a local request and the sheet will switch automatically."
-        : traceId;
   const loading =
     mode === "session"
       ? sessionQuery.isLoading || sessionSpansQuery.isLoading
@@ -258,133 +359,86 @@ export function TelemetryDetailSheet({
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
       <SheetContent
-        className="flex w-[80vw] max-w-[80vw] flex-col overflow-hidden p-0 max-md:w-[92vw] max-md:max-w-[92vw] sm:max-w-[80vw]"
+        className="flex w-[88vw] max-w-[88vw] flex-col overflow-hidden p-0 max-md:w-[95vw] max-md:max-w-[95vw] sm:max-w-[88vw] [&>button]:top-3"
+        onEscapeKeyDown={(event) => {
+          if (selectedSpanKey) {
+            event.preventDefault();
+            setSelectedSpanKey(null);
+          }
+        }}
         side="right"
       >
-        <SheetHeader className="border-b border-subtle px-6 py-5 pr-12">
-          <div className="flex min-w-0 items-start justify-between gap-4">
-            <div className="min-w-0">
-              <SheetTitle className="truncate text-lg font-semibold">
-                {title}
-              </SheetTitle>
-              <SheetDescription className="mt-1 truncate font-mono">
-                {description}
-              </SheetDescription>
-              {session ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <SessionSourceBadge session={session} />
-                  <span>{session.traceCount} turns</span>
-                  <span>{session.spanCount} spans</span>
-                  {session.agentNames.slice(0, 2).map((agent) => (
-                    <Badge key={agent} size="sm" variant="outline">
-                      {agent}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-              {trace && trace.source !== "local" ? (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <TraceSourceBadge trace={trace} />
-                  {trace.sourceConnectionName ? (
-                    <span>{trace.sourceConnectionName}</span>
-                  ) : null}
-                  {trace.sourceImportedAt ? (
-                    <span>Imported {relativeTime(trace.sourceImportedAt)}</span>
-                  ) : null}
-                  {trace.sourceTags.slice(0, 3).map((tag) => (
-                    <Badge key={tag} size="sm" variant="outline">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {mode === "trace" && followLatest ? (
-                <Badge className="gap-1.5" variant="status-brand">
-                  <Activity className="h-3 w-3 animate-pulse" />
-                  Following latest
-                </Badge>
-              ) : null}
-              {session ? (
-                <Badge
-                  variant={session.hasError ? "status-failure" : "status-success"}
-                >
-                  {session.hasError ? "error" : "ok"}
-                </Badge>
-              ) : trace ? (
-                <Badge
-                  variant={trace.hasError ? "status-failure" : "status-success"}
-                >
-                  {trace.hasError ? "error" : "ok"}
-                </Badge>
-              ) : null}
-            </div>
-          </div>
+        <SheetHeader className="sr-only">
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{description ?? "Trace detail"}</SheetDescription>
         </SheetHeader>
 
-        {waitingForLatest ? (
-          <WaitingForLatestTrace />
-        ) : loading ? (
-          <div className="grid flex-1 place-items-center">
-            <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <Tabs
-            className="flex min-h-0 flex-1 flex-col"
-            onValueChange={(value) => setActiveDetailTab(value as DetailTab)}
-            value={activeDetailTab}
-          >
-            <div className="border-b border-subtle px-6 py-3">
-              <TabsList>
-                <TabsTrigger value="tree">
-                  <ListTree className="mr-2 h-4 w-4" />
-                  Tree
-                </TabsTrigger>
-                <TabsTrigger value="timeline">
-                  <Activity className="mr-2 h-4 w-4" />
-                  Timeline
-                </TabsTrigger>
-                <TabsTrigger value="span">
-                  <Braces className="mr-2 h-4 w-4" />
-                  Span
-                </TabsTrigger>
-                <TabsTrigger value="raw">
-                  <Code2 className="mr-2 h-4 w-4" />
-                  Raw
-                </TabsTrigger>
-              </TabsList>
+        <div className="relative flex min-h-0 flex-1 flex-col" ref={sheetBodyRef}>
+          <TraceDetailHeader
+            costTotal={costTotal}
+            description={description}
+            durationMs={liveDurationMs}
+            followingLatest={mode === "trace" && Boolean(followLatest)}
+            heat={heat}
+            narrow={narrow}
+            onHeatChange={setHeat}
+            onViewModeChange={setViewMode}
+            onZoomFit={() => waterfallRef.current?.zoomToFit()}
+            onZoomIn={() => waterfallRef.current?.zoomIn()}
+            onZoomOut={() => waterfallRef.current?.zoomOut()}
+            spanCount={realSpans.length}
+            startedAt={startedAt}
+            status={status}
+            title={title}
+            tokens={tokens}
+            viewMode={viewMode}
+          />
+
+          {waitingForLatest ? (
+            <WaitingForLatestTrace />
+          ) : loading ? (
+            <div className="grid flex-1 place-items-center">
+              <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
             </div>
+          ) : viewMode === "conversation" ? (
+            <ConversationView
+              heat={heat}
+              maxCost={maxCost}
+              mode={mode}
+              onSelect={setSelectedSpanKey}
+              selectedSpanKey={selectedSpanKey}
+              spans={spans}
+              tree={displayTree}
+            />
+          ) : (
+            <TimelineView
+              expanded={expandedSpanKeys}
+              heat={heat}
+              maxCost={maxCost}
+              nodeByKey={nodeByKey}
+              nowMs={nowMs}
+              onSelect={setSelectedSpanKey}
+              onToggle={onToggleExpanded}
+              recentSpanIds={recentSpanIds}
+              ref={waterfallRef}
+              running={running}
+              selectedSpanKey={selectedSpanKey}
+              tree={displayTree}
+            />
+          )}
 
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0" value="tree">
-              <div className="grid min-h-full grid-cols-[360px_minmax(0,1fr)]">
-                <div className="border-r border-subtle p-4">
-                  <SpanTreeList
-                    nodes={displayTree}
-                    onSelectSpan={setSelectedSpanKey}
-                    recentSpanIds={recentSpanIds}
-                    selectedSpanId={selectedSpan ? spanKey(selectedSpan) : undefined}
-                  />
-                </div>
-                <SpanInspector span={selectedSpan} trace={trace} />
-              </div>
-            </TabsContent>
-
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-6" value="timeline">
-              <Timeline recentSpanIds={recentSpanIds} spans={timelineSpans} />
-            </TabsContent>
-
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0" value="span">
-              <SpanInspector span={selectedSpan} trace={trace} />
-            </TabsContent>
-
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-6" value="raw">
-              <pre className="overflow-auto rounded-md border border-subtle bg-background-muted p-4 text-xs">
-                {JSON.stringify({ session, spans, trace, traces: sessionTraces }, null, 2)}
-              </pre>
-            </TabsContent>
-          </Tabs>
-        )}
+          {/* Span details pop over the views as a nested, resizable sheet. */}
+          {selectedSpan && !waitingForLatest && !loading ? (
+            <SpanDetailPanel
+              domainStartMs={timelineDomain(realSpans, nowMs).startMs}
+              heat={heat}
+              maxCost={maxCost}
+              node={selectedNode}
+              onClose={() => setSelectedSpanKey(null)}
+              span={selectedSpan}
+            />
+          ) : null}
+        </div>
       </SheetContent>
     </Sheet>
   );
@@ -405,4 +459,10 @@ function WaitingForLatestTrace() {
       </div>
     </div>
   );
+}
+
+function nullableNumber(value: string | null | undefined): number | null {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

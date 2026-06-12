@@ -54,6 +54,7 @@ import {
   traceIdsForLiveEvent,
 } from "./followLatest";
 import { FilterSidebar } from "./FilterSidebar";
+import { LiveRangeControl } from "./logTable";
 import { SessionList } from "./SessionList";
 import { TelemetryStatStrip } from "./TelemetryStatStrip";
 import { TraceList } from "./TraceList";
@@ -593,12 +594,10 @@ export function TraceMonitorPage({
         {isTelemetryEmpty ? null : (
           <FilterSidebar
             agentName={agentName}
-            dateRange={dateRange}
             description="Switch views, then narrow local telemetry by runtime, model, and time."
             facets={activeFacets ?? {}}
             modelName={modelName}
             onAgentNameChange={setAgentName}
-            onDateRangeChange={setDateRange}
             onModelNameChange={setModelName}
             onReset={() => {
               setDateRange("24h");
@@ -725,6 +724,11 @@ export function TraceMonitorPage({
                         value={sessionSortBy}
                       />
                     )}
+                    <LiveRangeControl
+                      dateRange={dateRange}
+                      liveStatus={liveStatus}
+                      onDateRangeChange={setDateRange}
+                    />
                   </div>
                 </div>
               </div>

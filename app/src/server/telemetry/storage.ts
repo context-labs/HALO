@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { LiveEventStore } from "../live/events";
 import { decodeOtlpJsonBody, buildSpanRowsFromOtlp } from "./otlp";
+import { extractInputPreview, extractOutputPreview } from "./preview";
 import type {
   FacetId,
   FacetOption,
@@ -396,28 +397,11 @@ function refreshTraceSummary(sqlite: Database, traceId: string, updatedAt: numbe
 
   if (!aggregate || aggregate.span_count === 0) return;
 
-  const rootCandidates = sqlite
-    .query<Record<string, string | number | null>, [string, string]>(
-      `SELECT *
-       FROM spans
-       WHERE project_id = ? AND trace_id = ? AND parent_span_id = ''
-       ORDER BY start_time ASC, span_id ASC`,
-    )
-    .all(projectId, traceId);
-  const root =
-    chooseTraceRoot(rootCandidates) ??
-    sqlite
-      .query<Record<string, string | number | null>, [string, string]>(
-        `SELECT *
-         FROM spans
-         WHERE project_id = ? AND trace_id = ?
-         ORDER BY CASE WHEN parent_span_id = '' THEN 0 ELSE 1 END, start_time ASC, span_id ASC
-         LIMIT 1`,
-      )
-      .get(projectId, traceId) ?? {};
+  const { root, rootCandidates } = loadTraceRootContext(sqlite, projectId, traceId);
 
   const durationMs = Math.max(0, aggregate.end_time - aggregate.start_time);
   const durationNs = String(Math.round(durationMs * 1_000_000));
+  const previews = deriveTracePreviews(sqlite, projectId, traceId, root);
   const existingSource = sqlite
     .query<{ source: string }, [string, string]>(
       `SELECT source
@@ -440,8 +424,8 @@ function refreshTraceSummary(sqlite: Database, traceId: string, updatedAt: numbe
         service_name, service_version, deployment_environment, agent_name,
         agent_id, source, source_trace_id, source_connection_id,
         source_connection_name, source_import_job_id, source_imported_at,
-        source_url, source_tags_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_url, source_tags_json, input_preview, output_preview, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(project_id, trace_id) DO UPDATE SET
         session_id = excluded.session_id,
         start_time = excluded.start_time,
@@ -469,6 +453,8 @@ function refreshTraceSummary(sqlite: Database, traceId: string, updatedAt: numbe
         source_imported_at = excluded.source_imported_at,
         source_url = excluded.source_url,
         source_tags_json = excluded.source_tags_json,
+        input_preview = excluded.input_preview,
+        output_preview = excluded.output_preview,
         updated_at = excluded.updated_at`,
     )
     .run(
@@ -500,8 +486,140 @@ function refreshTraceSummary(sqlite: Database, traceId: string, updatedAt: numbe
       source.sourceImportedAt,
       source.sourceUrl,
       JSON.stringify(source.sourceTags),
+      previews.inputPreview,
+      previews.outputPreview,
       updatedAt,
     );
+}
+
+function loadTraceRootContext(
+  sqlite: Database,
+  projectId: string,
+  traceId: string,
+): {
+  root: Record<string, string | number | null>;
+  rootCandidates: Record<string, string | number | null>[];
+} {
+  const rootCandidates = sqlite
+    .query<Record<string, string | number | null>, [string, string]>(
+      `SELECT *
+       FROM spans
+       WHERE project_id = ? AND trace_id = ? AND parent_span_id = ''
+       ORDER BY start_time ASC, span_id ASC`,
+    )
+    .all(projectId, traceId);
+  const root =
+    chooseTraceRoot(rootCandidates) ??
+    sqlite
+      .query<Record<string, string | number | null>, [string, string]>(
+        `SELECT *
+         FROM spans
+         WHERE project_id = ? AND trace_id = ?
+         ORDER BY CASE WHEN parent_span_id = '' THEN 0 ELSE 1 END, start_time ASC, span_id ASC
+         LIMIT 1`,
+      )
+      .get(projectId, traceId) ?? {};
+  return { root, rootCandidates };
+}
+
+/**
+ * Fill previews for trace summaries written before the preview columns
+ * existed (including rows landed by concurrent import branches). '' marks
+ * "processed, nothing derivable", so this is a cheap no-op on every later
+ * startup.
+ */
+export function backfillTracePreviews(sqlite: Database): number {
+  const projectId = LOCAL_TELEMETRY_AUTH.projectId;
+  let updated = 0;
+  for (;;) {
+    const pending = sqlite
+      .query<{ trace_id: string }, [string]>(
+        `SELECT trace_id
+         FROM trace_summaries
+         WHERE project_id = ?
+           AND (input_preview IS NULL OR output_preview IS NULL)
+         LIMIT 500`,
+      )
+      .all(projectId);
+    if (pending.length === 0) break;
+    const transaction = sqlite.transaction(() => {
+      for (const { trace_id: traceId } of pending) {
+        const { root } = loadTraceRootContext(sqlite, projectId, traceId);
+        const previews = deriveTracePreviews(sqlite, projectId, traceId, root);
+        sqlite
+          .query(
+            `UPDATE trace_summaries
+             SET input_preview = ?, output_preview = ?
+             WHERE project_id = ? AND trace_id = ?`,
+          )
+          .run(previews.inputPreview, previews.outputPreview, projectId, traceId);
+      }
+    });
+    transaction();
+    updated += pending.length;
+  }
+  return updated;
+}
+
+/**
+ * One-line input/output previews for the trace list. Root span first (imports
+ * map trace-level input/output there), then earliest span with input and the
+ * latest LLM-preferred span with output. Stored as '' when nothing is
+ * derivable so backfill can tell "processed" from "pending".
+ */
+function deriveTracePreviews(
+  sqlite: Database,
+  projectId: string,
+  traceId: string,
+  root: Record<string, string | number | null>,
+): { inputPreview: string; outputPreview: string } {
+  const content = (row: Record<string, string | number | null>) => ({
+    input: nullableString(row.input),
+    inputMessages: nullableString(row.input_messages),
+    output: nullableString(row.output),
+    outputMessages: nullableString(row.output_messages),
+  });
+
+  let inputPreview = extractInputPreview(content(root));
+  if (!inputPreview) {
+    const candidates = sqlite
+      .query<Record<string, string | number | null>, [string, string]>(
+        `SELECT input, input_messages, output, output_messages
+         FROM spans
+         WHERE project_id = ? AND trace_id = ?
+           AND ((input IS NOT NULL AND input != '')
+             OR (input_messages IS NOT NULL AND input_messages != ''))
+         ORDER BY start_time ASC, span_id ASC
+         LIMIT 5`,
+      )
+      .all(projectId, traceId);
+    for (const candidate of candidates) {
+      inputPreview = extractInputPreview(content(candidate));
+      if (inputPreview) break;
+    }
+  }
+
+  let outputPreview = extractOutputPreview(content(root));
+  if (!outputPreview) {
+    const candidates = sqlite
+      .query<Record<string, string | number | null>, [string, string]>(
+        `SELECT input, input_messages, output, output_messages
+         FROM spans
+         WHERE project_id = ? AND trace_id = ?
+           AND ((output IS NOT NULL AND output != '')
+             OR (output_messages IS NOT NULL AND output_messages != ''))
+         ORDER BY CASE WHEN observation_kind = 'LLM' THEN 0 ELSE 1 END,
+           end_time DESC, span_id DESC
+         LIMIT 5`,
+      )
+      .all(projectId, traceId);
+    for (const candidate of candidates) {
+      outputPreview = extractOutputPreview(content(candidate));
+      if (outputPreview) break;
+    }
+  }
+
+  return { inputPreview: inputPreview ?? "", outputPreview: outputPreview ?? "" };
 }
 
 type TraceSourceMetadata = {
@@ -1451,7 +1569,27 @@ function sessionAggregateSql(where: string): string {
           ON ts.project_id = s.project_id AND ts.trace_id = s.trace_id
         WHERE ts.project_id = trace_summaries.project_id
           AND ts.session_id = trace_summaries.session_id
-      ) AS llm_model_names
+      ) AS llm_model_names,
+      (
+        SELECT first_turn.input_preview
+        FROM trace_summaries first_turn
+        WHERE first_turn.project_id = trace_summaries.project_id
+          AND first_turn.session_id = trace_summaries.session_id
+          AND first_turn.input_preview IS NOT NULL
+          AND first_turn.input_preview != ''
+        ORDER BY first_turn.start_time ASC, first_turn.trace_id ASC
+        LIMIT 1
+      ) AS input_preview,
+      (
+        SELECT last_turn.output_preview
+        FROM trace_summaries last_turn
+        WHERE last_turn.project_id = trace_summaries.project_id
+          AND last_turn.session_id = trace_summaries.session_id
+          AND last_turn.output_preview IS NOT NULL
+          AND last_turn.output_preview != ''
+        ORDER BY last_turn.start_time DESC, last_turn.trace_id DESC
+        LIMIT 1
+      ) AS output_preview
     FROM trace_summaries
     ${where}
     GROUP BY project_id, session_id
@@ -1797,10 +1935,12 @@ function mapSessionSummary(row: Record<string, unknown>): SessionSummary {
     endTime: isoFromMs(endTimeMs),
     endTimeMs,
     hasError: Number(row.has_error ?? 0) > 0,
+    inputPreview: emptyToNull(String(row.input_preview ?? "")),
     latestTraceId: String(row.latest_trace_id ?? ""),
     latestTraceName: String(row.latest_trace_name ?? ""),
     llmModelNames: csvToStrings(row.llm_model_names),
     llmSpanCount: Number(row.llm_span_count ?? 0),
+    outputPreview: emptyToNull(String(row.output_preview ?? "")),
     projectId: String(row.project_id ?? ""),
     serviceNames: csvToStrings(row.service_names),
     sessionId: String(row.session_id ?? ""),
@@ -1827,7 +1967,9 @@ function mapTrace(row: Record<string, unknown>): Trace {
     endTime: isoFromMs(Number(row.end_time ?? 0)),
     endTimeMs: Number(row.end_time ?? 0),
     hasError: Number(row.has_error ?? 0) > 0,
+    inputPreview: emptyToNull(String(row.input_preview ?? "")),
     llmSpanCount: Number(row.llm_span_count ?? 0),
+    outputPreview: emptyToNull(String(row.output_preview ?? "")),
     projectId: String(row.project_id ?? ""),
     rootObservationKind: asObservationKind(String(row.root_observation_kind ?? "SPAN")),
     rootSpanName: String(row.root_span_name ?? ""),

@@ -58,15 +58,27 @@ function parseMessagesJson(
 ): ParsedMessage[] {
   const parsed = tryParseJson(raw);
   if (!parsed) return [];
-  const list = Array.isArray(parsed)
-    ? parsed
-    : isRecord(parsed) && Array.isArray(parsed.messages)
-      ? parsed.messages
-      : null;
+  const list = messageListFrom(parsed);
   if (!list) return [];
   return list
     .map((item) => normalizeMessage(item, source))
     .filter((item): item is ParsedMessage => item !== null);
+}
+
+/**
+ * Find the message array in the many shapes ingest passes through verbatim:
+ * a bare array, {messages}, request envelopes like {context: {messages}}
+ * (Pi/Catalyst), or a single message object.
+ */
+function messageListFrom(parsed: unknown): unknown[] | null {
+  if (Array.isArray(parsed)) return parsed;
+  if (!isRecord(parsed)) return null;
+  if (Array.isArray(parsed.messages)) return parsed.messages;
+  if (isRecord(parsed.context) && Array.isArray(parsed.context.messages)) {
+    return parsed.context.messages;
+  }
+  if ("role" in parsed || "content" in parsed) return [parsed];
+  return null;
 }
 
 function parseLooseValue(
@@ -77,21 +89,11 @@ function parseLooseValue(
   if (!raw?.trim()) return [];
   const parsed = tryParseJson(raw);
   if (parsed) {
-    if (Array.isArray(parsed)) {
-      const normalized = parsed
+    const list = messageListFrom(parsed);
+    if (list) {
+      return list
         .map((item) => normalizeMessage(item, source))
         .filter((item): item is ParsedMessage => item !== null);
-      if (normalized.length > 0) return normalized;
-    }
-    if (isRecord(parsed)) {
-      if (Array.isArray(parsed.messages)) {
-        return parsed.messages
-          .map((item) => normalizeMessage(item, source))
-          .filter((item): item is ParsedMessage => item !== null);
-      }
-      const single = normalizeMessage(parsed, source);
-      if (single) return [single];
-      return [];
     }
     return [];
   }
@@ -124,8 +126,28 @@ function normalizeMessage(
       : typeof inner.type === "string"
         ? inner.type
         : null;
-  const toolCalls = normalizeToolCalls(inner);
+  const parts = Array.isArray(inner.content) ? inner.content : null;
+  const toolCalls = [
+    ...normalizeToolCalls(inner),
+    ...(parts ? toolUseParts(parts) : []),
+  ];
+
+  // Anthropic packs tool results into "user" messages — surface them as tool
+  // turns so they don't read as something the human typed.
+  const toolResults = parts ? toolResultParts(parts) : [];
   const content = stringifyContent(inner.content);
+  if (toolResults.length > 0 && !content.trim() && toolCalls.length === 0) {
+    return {
+      content: toolResults.join("\n"),
+      key: "",
+      role: "tool",
+      roleLabel: "tool result",
+      source,
+      toolCallId: undefined,
+      toolCalls: [],
+    };
+  }
+
   const hasSignal =
     rawRole !== null || toolCalls.length > 0 || content.trim().length > 0;
   if (!hasSignal) return null;
@@ -141,6 +163,63 @@ function normalizeMessage(
       typeof inner.tool_call_id === "string" ? inner.tool_call_id : undefined,
     toolCalls,
   };
+}
+
+const TOOL_USE_PART_TYPES = new Set(["tool-call", "toolCall", "tool_use"]);
+const TOOL_RESULT_PART_TYPES = new Set([
+  "tool-result",
+  "toolResult",
+  "tool_result",
+]);
+
+/** Tool-call content parts: Anthropic tool_use, Pi/Vercel toolCall shapes. */
+function toolUseParts(parts: unknown[]): ParsedToolCall[] {
+  return parts
+    .map((part): ParsedToolCall | null => {
+      if (
+        !isRecord(part) ||
+        typeof part.type !== "string" ||
+        !TOOL_USE_PART_TYPES.has(part.type)
+      ) {
+        return null;
+      }
+      const name =
+        typeof part.name === "string"
+          ? part.name
+          : typeof part.toolName === "string"
+            ? part.toolName
+            : null;
+      if (!name) return null;
+      const args = part.input ?? part.arguments ?? part.args;
+      return {
+        argsRaw: args == null ? "" : safeStringify(args),
+        id:
+          typeof part.id === "string"
+            ? part.id
+            : typeof part.toolCallId === "string"
+              ? part.toolCallId
+              : undefined,
+        name,
+      };
+    })
+    .filter((item): item is ParsedToolCall => item !== null);
+}
+
+/** Flattened text of tool-result parts. */
+function toolResultParts(parts: unknown[]): string[] {
+  return parts
+    .map((part) => {
+      if (
+        !isRecord(part) ||
+        typeof part.type !== "string" ||
+        !TOOL_RESULT_PART_TYPES.has(part.type)
+      ) {
+        return null;
+      }
+      const text = stringifyContent(part.content ?? part.result ?? part.output);
+      return text.trim() ? text : "(empty tool result)";
+    })
+    .filter((item): item is string => item !== null);
 }
 
 function normalizeToolCalls(message: Record<string, unknown>): ParsedToolCall[] {
@@ -168,7 +247,11 @@ function normalizeToolCalls(message: Record<string, unknown>): ParsedToolCall[] 
     .filter((item): item is ParsedToolCall => item !== null);
 }
 
-/** Flatten string | parts-array | object content into displayable text. */
+/**
+ * Flatten string | parts-array | object content into displayable text.
+ * Thinking, tool_use, and tool_result parts are handled elsewhere (tool call
+ * chips / tool turns) — dumping their JSON here buries the actual message.
+ */
 export function stringifyContent(content: unknown): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
@@ -177,6 +260,16 @@ export function stringifyContent(content: unknown): string {
       .map((part) => {
         if (typeof part === "string") return part;
         if (!isRecord(part)) return "";
+        if (
+          typeof part.type === "string" &&
+          (part.type === "thinking" ||
+            part.type === "redacted_thinking" ||
+            part.type === "reasoning" ||
+            TOOL_USE_PART_TYPES.has(part.type) ||
+            TOOL_RESULT_PART_TYPES.has(part.type))
+        ) {
+          return "";
+        }
         if (typeof part.text === "string") return part.text;
         if (typeof part.type === "string" && part.type.includes("image")) {
           return "[image]";

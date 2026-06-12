@@ -7,6 +7,7 @@ import type {
   ParsedMessage,
   ThreadRole,
 } from "../llmMessages";
+import { CopyTextButton } from "./CopyTextButton";
 
 const ROLE_VARIANT: Record<ThreadRole, "outline" | "secondary" | "status-brand" | "status-warning"> = {
   assistant: "status-brand",
@@ -30,8 +31,9 @@ export function LlmSpanView({ conversation }: { conversation: ParsedConversation
 
 function MessageRow({ message }: { message: ParsedMessage }) {
   return (
-    <div className="rounded-md border border-subtle bg-background-muted/60 p-3">
-      <div className="flex items-center gap-2">
+    <div className="relative rounded-md border border-subtle bg-background-muted/60 p-3">
+      {/* pr-9 keeps the source tag clear of the corner copy button. */}
+      <div className="flex items-center gap-2 pr-9">
         <Badge size="sm" variant={ROLE_VARIANT[message.role]}>
           {message.roleLabel}
         </Badge>
@@ -44,6 +46,7 @@ function MessageRow({ message }: { message: ParsedMessage }) {
           {message.source}
         </span>
       </div>
+      {message.content ? <CopyTextButton text={message.content} /> : null}
       {message.content ? (
         <CollapsibleText text={message.content} />
       ) : null}

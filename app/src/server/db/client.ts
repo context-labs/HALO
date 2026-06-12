@@ -136,6 +136,8 @@ export function ensureSchema(sqlite: Database) {
       source_imported_at INTEGER,
       source_url TEXT,
       source_tags_json TEXT NOT NULL DEFAULT '[]',
+      input_preview TEXT,
+      output_preview TEXT,
       updated_at INTEGER NOT NULL
     );
   `);
@@ -364,6 +366,8 @@ export function ensureSchema(sqlite: Database) {
     "source_tags_json",
     "TEXT NOT NULL DEFAULT '[]'",
   );
+  ensureColumn(sqlite, "trace_summaries", "input_preview", "TEXT");
+  ensureColumn(sqlite, "trace_summaries", "output_preview", "TEXT");
 
   const indexes = [
     "CREATE UNIQUE INDEX IF NOT EXISTS spans_project_trace_span_uidx ON spans(project_id, trace_id, span_id)",

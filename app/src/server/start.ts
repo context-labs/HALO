@@ -7,6 +7,7 @@ import { createPhoenixImportService } from "./phoenix/importQueue";
 import { createLiveEventStore } from "./live/events";
 import { startLiveWebSocketServer } from "./live/server";
 import { appRouter } from "./router";
+import { backfillTracePreviews } from "./telemetry/storage";
 import { INGEST_HOSTNAME, TRACE_INGEST_PATH } from "./telemetry/types";
 
 type StartTelemetryServerOptions = {
@@ -24,6 +25,14 @@ export function startTelemetryServer(options: StartTelemetryServerOptions = {}) 
   const database = createDatabase(options.dbPath);
 
   ensureSchema(database.sqlite);
+  try {
+    const backfilled = backfillTracePreviews(database.sqlite);
+    if (backfilled > 0) {
+      console.log(`[telemetry] backfilled previews for ${backfilled} traces`);
+    }
+  } catch (error) {
+    console.error("[telemetry] preview backfill failed", error);
+  }
 
   const live = createLiveEventStore(database.sqlite);
   const langfuseImports = createLangfuseImportService({ database, live });
