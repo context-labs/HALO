@@ -162,6 +162,16 @@ export function DesktopCommandCenter() {
     });
   }, [appMetadata]);
 
+  // Update-available results open the install dialog instead of toasting —
+  // a manual check is an explicit ask, so it always prompts (no snooze).
+  const handleNativeStatus = useCallback((status: DesktopNativeStatus) => {
+    if (status.status === "update" && status.updateAvailable) {
+      setUpdatePrompt({ version: status.version ?? "latest" });
+      return;
+    }
+    showNativeStatus(status);
+  }, []);
+
   const checkForUpdates = useCallback(async () => {
     const rpc = await getDesktopRpc();
     if (!rpc) {
@@ -171,8 +181,8 @@ export function DesktopCommandCenter() {
       });
       return;
     }
-    showNativeStatus(await rpc.request.checkForUpdates());
-  }, []);
+    handleNativeStatus(await rpc.request.checkForUpdates());
+  }, [handleNativeStatus]);
 
   const executeCommand = useCallback(
     async (command: DesktopCommand) => {
@@ -281,14 +291,14 @@ export function DesktopCommandCenter() {
     };
     const onNativeStatus = (
       event: WindowEventMap[typeof DESKTOP_NATIVE_STATUS_EVENT],
-    ) => showNativeStatus(event.detail);
+    ) => handleNativeStatus(event.detail);
     window.addEventListener(DESKTOP_COMMAND_EVENT, onCommand);
     window.addEventListener(DESKTOP_NATIVE_STATUS_EVENT, onNativeStatus);
     return () => {
       window.removeEventListener(DESKTOP_COMMAND_EVENT, onCommand);
       window.removeEventListener(DESKTOP_NATIVE_STATUS_EVENT, onNativeStatus);
     };
-  }, [executeCommand]);
+  }, [executeCommand, handleNativeStatus]);
 
   // Automatic update prompts from the bun process: show the dialog when a
   // release lands; surface install failures and unlock the UI again.
