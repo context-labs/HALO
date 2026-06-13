@@ -111,7 +111,8 @@ Code repository:
   traces is available at {repo_root}. Tools: `view_repo_tree` (a directory
   overview — call once to orient), `glob_files` (find files by name),
   `grep_files` (regex-search contents), `read_file` (numbered file contents).
-  Use the code to explain why the agent behaved as the traces show.
+  Discovery honors .gitignore. Use the code to explain why the agent behaved as
+  the traces show.
 - Protect your own context. Reading files and scanning matches consumes context
   fast. When you can spawn subagents (depth < maximum_depth), DELEGATE code
   exploration: have a subagent search the repo and report back the relevant

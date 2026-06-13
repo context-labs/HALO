@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,16 +12,15 @@ from engine.code.models import (
     GrepMatches,
     GrepMatchRecord,
 )
+from engine.errors import EngineDependencyError
 
 logger = logging.getLogger(__name__)
 
-# Directories never worth searching: VCS metadata, dependency vendoring,
-# build/output trees, and tool caches. Pruned by the pure-Python glob/grep/tree
-# paths. Ripgrep additionally honours ``.gitignore`` natively (with ``.git``
-# always excluded via ``-g '!.git/'``); the Python paths fall back to this fixed
-# set rather than parse ``.gitignore`` (a faithful implementation would need a
-# new dependency for marginal benefit). The asymmetry is intentional and visible
-# in the ``grep engine: ...`` startup log line.
+# Baseline directories to exclude on top of whatever ``.gitignore`` says: VCS
+# metadata, dependency vendoring, build/output trees, and tool caches. Fed to
+# ripgrep as ``-g '!<dir>/'`` so a repo with no (or an incomplete) ``.gitignore``
+# still doesn't surface this junk. Ripgrep honours ``.gitignore`` natively on
+# top of these.
 _EXCLUDED_DIRS = frozenset(
     {
         ".git",
@@ -45,11 +42,8 @@ _EXCLUDED_DIRS = frozenset(
     }
 )
 
-# Pure-Python grep skips files larger than this — large generated/vendored blobs
-# blow scan time for no analytical value (ripgrep has its own size heuristics).
-_GREP_MAX_FILE_BYTES = 1_000_000
-
-# How many leading bytes to sniff for a NUL when deciding a file is binary.
+# How many leading bytes to sniff for a NUL when deciding a file is binary
+# (read_file only — ripgrep does its own binary detection for glob/grep/tree).
 _BINARY_SNIFF_BYTES = 8192
 
 # Per-match line truncation, so one pathological minified line can't flood the
@@ -62,22 +56,15 @@ _GREP_LINE_TEXT_CAP_CHARS = 500
 _READ_LINE_CAP_CHARS = 2000
 _READ_RESPONSE_CHAR_BUDGET = 150_000
 
-# Repo-tree snapshot caps so the embedded map stays bounded on large repos.
+# Repo-tree overview caps so the map stays bounded on large repos.
 _TREE_MAX_DEPTH = 4
 _TREE_MAX_ENTRIES = 500
 
-
-def _compile_regex_or_raise(regex_pattern: str) -> re.Pattern[str]:
-    """Compile a regex string or raise ``ValueError`` with a clear, model-actionable message."""
-    try:
-        return re.compile(regex_pattern)
-    except re.error as exc:
-        raise ValueError(f"Invalid regex pattern {regex_pattern!r}: {exc}") from exc
-
-
-def _is_excluded(parts: tuple[str, ...]) -> bool:
-    """True if any path segment is an always-excluded directory name."""
-    return any(part in _EXCLUDED_DIRS for part in parts)
+_RIPGREP_INSTALL_HINT = (
+    "ripgrep (rg) is required to analyze a code repository but was not found on PATH. "
+    "Install it (`brew install ripgrep`, `apt-get install ripgrep`, or `pip install ripgrep`) "
+    "and re-run."
+)
 
 
 def _looks_binary(blob: bytes) -> bool:
@@ -86,44 +73,45 @@ def _looks_binary(blob: bytes) -> bool:
 
 
 class CodeRepo:
-    """Read-only, path-confined view of a local source checkout for agent code tools.
+    """Read-only, ripgrep-backed view of a local source checkout for agent code tools.
 
     Owns the primitives the code tools expose — ``glob`` (file discovery),
-    ``grep`` (regex content search), ``read`` (numbered file contents), and
-    ``tree`` (a directory overview, served by the ``view_repo_tree`` tool).
+    ``grep`` (regex content search), ``tree`` (a directory overview, served by
+    ``view_repo_tree``), and ``read`` (numbered file contents).
 
-    Every path argument is resolved and confined to ``root`` (symlink escapes
-    included), so an agent cannot read outside the repo. ``grep`` shells out to
-    ripgrep when available (honouring ``.gitignore``) and falls back to a pure-
-    Python scan otherwise; ``glob``/``read``/``tree`` are always pure Python and
-    prune a fixed set of excluded directories. There is no persistent index —
-    repos are small enough for on-demand scans. ``tree`` is rendered lazily on
-    first access and cached for the rest of the run.
+    ``glob``/``grep``/``tree`` all run through **ripgrep**, so ``.gitignore`` is
+    honoured natively and consistently and symlinks aren't followed (rg's
+    default), keeping discovery confined to the repo. Ripgrep is therefore a
+    hard requirement — ``open`` fails fast if ``rg`` isn't on PATH. ``read`` is
+    the one pure-Python primitive (explicit path access); it resolves and
+    confines the path to ``root`` and rejects binary files. There is no
+    persistent index. ``tree`` is rendered lazily on first access and cached for
+    the rest of the run.
     """
 
-    def __init__(self, *, root: Path, rg_executable: str | None) -> None:
+    def __init__(self, *, root: Path, rg_executable: str) -> None:
         self._root = root
         self._rg_executable = rg_executable
         self._tree: str | None = None
 
     @classmethod
     def open(cls, repo_path: Path) -> "CodeRepo":
-        """Resolve and validate ``repo_path`` and detect ripgrep. Fails fast.
+        """Resolve and validate ``repo_path`` and locate ripgrep. Fails fast.
 
-        Raises ``FileNotFoundError`` if the path does not exist and
-        ``NotADirectoryError`` if it is not a directory. Runs before any LLM
-        call so a bad ``--repo-path`` surfaces immediately, not mid-run. The
-        tree is not rendered here — it is built lazily on first ``view_repo_tree``.
+        Raises ``FileNotFoundError`` if the path does not exist,
+        ``NotADirectoryError`` if it is not a directory, and
+        ``EngineDependencyError`` if ``rg`` is not on PATH. Runs before any LLM
+        call so a bad ``--repo-path`` or a missing ripgrep surfaces immediately,
+        not mid-run. The tree is not rendered here — it is built lazily on first
+        ``view_repo_tree``.
         """
         root = Path(repo_path).resolve(strict=True)
         if not root.is_dir():
             raise NotADirectoryError(f"repo_path is not a directory: {root}")
         rg_executable = shutil.which("rg")
-        logger.info(
-            "code repo opened at %s (grep engine: %s)",
-            root,
-            "ripgrep" if rg_executable else "python",
-        )
+        if rg_executable is None:
+            raise EngineDependencyError(_RIPGREP_INSTALL_HINT)
+        logger.info("code repo opened at %s (ripgrep: %s)", root, rg_executable)
         return cls(root=root, rg_executable=rg_executable)
 
     @property
@@ -135,62 +123,48 @@ class CodeRepo:
     def tree(self) -> str:
         """The depth/entry-capped directory overview, rendered once and cached for the run."""
         if self._tree is None:
-            self._tree = _render_tree(self._root)
+            self._tree = _build_tree(self._root.name, self._rg_files(glob_pattern=None))
         return self._tree
 
-    def _resolve_confined(self, path: str) -> Path:
-        """Resolve ``path`` (relative to root, or an absolute path already inside root) within the repo.
+    def _exclude_glob_args(self) -> list[str]:
+        """Baseline ``-g '!<dir>/'`` excludes shared by every ripgrep invocation."""
+        args: list[str] = []
+        for excluded in sorted(_EXCLUDED_DIRS):
+            args += ["-g", f"!{excluded}/"]
+        return args
 
-        ``.resolve()`` follows symlinks before the containment check, so a
-        symlink pointing outside the repo is rejected. Raises ``ValueError``
-        with a model-actionable message on escape.
+    def _rg_files(self, *, glob_pattern: str | None) -> list[str]:
+        """List repo files via ``rg --files`` (honours .gitignore), optionally filtered by a glob.
+
+        Returns sorted relative POSIX paths. Raises ``ValueError`` (surfaced to
+        the model) if ripgrep errors, e.g. on a malformed glob.
         """
-        candidate = Path(path)
-        if not candidate.is_absolute():
-            candidate = self._root / candidate
-        resolved = candidate.resolve()
-        if resolved != self._root and self._root not in resolved.parents:
-            raise ValueError(
-                f"path {path!r} resolves outside the repo root; pass a path relative "
-                "to the repo root (see glob_files/grep_files output)"
-            )
-        return resolved
-
-    def _validate_glob_pattern(self, pattern: str) -> None:
-        """Reject absolute patterns and ``..`` traversal so a glob can't escape the root."""
-        if Path(pattern).is_absolute():
-            raise ValueError(
-                f"glob pattern {pattern!r} must be relative to the repo root, not absolute"
-            )
-        if ".." in Path(pattern).parts:
-            raise ValueError(f"glob pattern {pattern!r} must not contain '..' segments")
+        args = [
+            self._rg_executable,
+            "--files",
+            "--hidden",
+            "--no-require-git",
+            *self._exclude_glob_args(),
+        ]
+        if glob_pattern is not None:
+            args += ["-g", glob_pattern]
+        completed = subprocess.run(args, cwd=self._root, capture_output=True, text=True)
+        # rg --files exit codes: 0 = files listed, 1 = none matched, >=2 = error.
+        if completed.returncode >= 2:
+            raise ValueError(f"glob failed: {completed.stderr.strip()}")
+        return sorted(line for line in completed.stdout.splitlines() if line)
 
     def glob(self, pattern: str, max_results: int) -> GlobMatches:
-        """Return repo files matching ``pattern`` (relative POSIX paths + sizes), excluded dirs pruned.
+        """Return repo files matching ``pattern`` (relative POSIX paths + sizes), via ``rg --files``.
 
-        ``has_more`` is true when more files matched than ``max_results``.
+        ``pattern`` is gitignore-style: a pattern without ``/`` matches at any
+        depth (``*.py`` → all .py), one with ``/`` is anchored (``engine/*.py``).
+        Results honour ``.gitignore``. ``has_more`` is true when more files
+        matched than ``max_results``.
         """
-        self._validate_glob_pattern(pattern)
-        matched: list[Path] = []
-        for candidate in self._root.glob(pattern):
-            # Skip symlinks entirely (matches ripgrep's default --no-follow):
-            # a symlink could point outside the repo and leak content, and an
-            # in-repo symlink is just a duplicate of its target.
-            if candidate.is_symlink() or not candidate.is_file():
-                continue
-            rel = candidate.relative_to(self._root)
-            if _is_excluded(rel.parts):
-                continue
-            matched.append(candidate)
-        matched.sort()
+        matched = self._rg_files(glob_pattern=pattern)
         capped = matched[:max_results]
-        files = [
-            GlobFileEntry(
-                path=p.relative_to(self._root).as_posix(),
-                size_bytes=p.stat().st_size,
-            )
-            for p in capped
-        ]
+        files = [GlobFileEntry(path=p, size_bytes=(self._root / p).stat().st_size) for p in capped]
         return GlobMatches(
             files=files,
             returned_count=len(files),
@@ -198,48 +172,28 @@ class CodeRepo:
         )
 
     def grep(self, regex_pattern: str, glob_pattern: str | None, max_matches: int) -> GrepMatches:
-        """Regex-search file contents across the repo (optionally filtered by ``glob_pattern``).
+        """Regex-search file contents across the repo via ripgrep (honours .gitignore).
 
-        Validates the regex up front. Uses ripgrep when available, else a pure-
-        Python scan. Returns up to ``max_matches`` records with 1-based line
-        numbers and per-line-truncated text; ``has_more`` is true when more
-        matches existed than were returned.
+        ``glob_pattern`` optionally confines the search to matching files.
+        Returns up to ``max_matches`` records with 1-based line numbers and
+        per-line-truncated text; ``has_more`` is true when more matches existed
+        than were returned. Ripgrep owns regex validation — a bad pattern raises
+        ``ValueError`` carrying rg's message, surfaced to the model.
         """
-        _compile_regex_or_raise(regex_pattern)
-        if glob_pattern is not None:
-            self._validate_glob_pattern(glob_pattern)
-        if self._rg_executable is not None:
-            return self._grep_ripgrep(regex_pattern, glob_pattern, max_matches)
-        return self._grep_python(regex_pattern, glob_pattern, max_matches)
-
-    def _grep_ripgrep(
-        self, regex_pattern: str, glob_pattern: str | None, max_matches: int
-    ) -> GrepMatches:
-        """Run ripgrep from the repo root and parse ``path:line:text`` output into match records."""
-        assert self._rg_executable is not None
         args = [
             self._rg_executable,
             "--line-number",
             "--no-heading",
             "--color=never",
             "--hidden",
+            "--no-require-git",
+            *self._exclude_glob_args(),
         ]
-        # Exclude the same baseline dirs as the pure-Python path so both engines
-        # share a floor; ``--hidden`` keeps dotfiles like .github/ searchable
-        # while these globs prune VCS/build/cache trees. Ripgrep additionally
-        # honours .gitignore on top of this.
-        for excluded in sorted(_EXCLUDED_DIRS):
-            args += ["-g", f"!{excluded}/"]
         if glob_pattern is not None:
             args += ["-g", glob_pattern]
         args += ["-e", regex_pattern, "."]
-        completed = subprocess.run(
-            args,
-            cwd=self._root,
-            capture_output=True,
-            text=True,
-        )
-        # rg exit codes: 0 = matches, 1 = no matches, >=2 = error.
+        completed = subprocess.run(args, cwd=self._root, capture_output=True, text=True)
+        # rg exit codes: 0 = matches, 1 = no matches, >=2 = error (e.g. bad regex).
         if completed.returncode >= 2:
             raise ValueError(f"grep failed: {completed.stderr.strip()}")
 
@@ -266,77 +220,31 @@ class CodeRepo:
         line_str, sep2, text = rest.partition(":")
         if sep2 == "" or not line_str.isdigit():
             return None
-        rel = Path(path_str)
         # rg prints paths relative to cwd (the repo root); normalise the leading "./".
-        path = rel.as_posix()
+        path = Path(path_str).as_posix()
         return GrepMatchRecord(
             path=path,
             line_number=int(line_str),
             line_text=_truncate_line(text),
         )
 
-    def _grep_python(
-        self, regex_pattern: str, glob_pattern: str | None, max_matches: int
-    ) -> GrepMatches:
-        """Pure-Python regex scan over repo files (no ripgrep), pruning excluded dirs and binary/large files."""
-        pattern = _compile_regex_or_raise(regex_pattern)
-        candidates = self._candidate_files(glob_pattern)
+    def _resolve_confined(self, path: str) -> Path:
+        """Resolve ``path`` (relative to root, or an absolute path already inside root) within the repo.
 
-        matches: list[GrepMatchRecord] = []
-        total = 0
-        for file_path in candidates:
-            try:
-                blob = file_path.read_bytes()
-            except OSError:
-                continue
-            if len(blob) > _GREP_MAX_FILE_BYTES or _looks_binary(blob):
-                continue
-            rel = file_path.relative_to(self._root).as_posix()
-            text = blob.decode("utf-8", errors="replace")
-            for line_number, line in enumerate(text.splitlines(), start=1):
-                if pattern.search(line):
-                    total += 1
-                    if len(matches) < max_matches:
-                        matches.append(
-                            GrepMatchRecord(
-                                path=rel,
-                                line_number=line_number,
-                                line_text=_truncate_line(line),
-                            )
-                        )
-        return GrepMatches(
-            matches=matches,
-            returned_match_count=len(matches),
-            has_more=total > len(matches),
-        )
-
-    def _candidate_files(self, glob_pattern: str | None) -> list[Path]:
-        """Enumerate scannable files for the pure-Python grep, pruning excluded dirs.
-
-        With a ``glob_pattern`` set, reuse ``glob`` (already excluded-dir-aware).
-        Without one, walk the tree pruning excluded directories in place.
+        ``.resolve()`` follows symlinks before the containment check, so a
+        symlink pointing outside the repo is rejected. Raises ``ValueError``
+        with a model-actionable message on escape.
         """
-        if glob_pattern is not None:
-            return sorted(
-                self._root / entry.path
-                for entry in self.glob(glob_pattern, max_results=_TREE_MAX_ENTRIES * 100).files
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = self._root / candidate
+        resolved = candidate.resolve()
+        if resolved != self._root and self._root not in resolved.parents:
+            raise ValueError(
+                f"path {path!r} resolves outside the repo root; pass a path relative "
+                "to the repo root (see glob_files/grep_files output)"
             )
-        found: list[Path] = []
-        # ``os.walk`` does not follow symlinked directories (followlinks=False
-        # by default); we additionally skip symlinked files so a symlink can't
-        # leak content from outside the repo (matches ripgrep's default).
-        for dirpath, dirnames, filenames in os.walk(self._root):
-            dirnames[:] = sorted(
-                d
-                for d in dirnames
-                if d not in _EXCLUDED_DIRS and not (Path(dirpath) / d).is_symlink()
-            )
-            for name in sorted(filenames):
-                file_path = Path(dirpath) / name
-                if file_path.is_symlink():
-                    continue
-                found.append(file_path)
-        return found
+        return resolved
 
     def read(self, path: str, offset: int, limit: int) -> FileContent:
         """Return a 1-based ``[offset, offset+limit)`` window of ``path`` as ``cat -n`` numbered lines.
@@ -408,48 +316,45 @@ def _truncate_line(text: str) -> str:
     return f"{text[:_GREP_LINE_TEXT_CAP_CHARS]}... [HALO truncated: original {len(text)} chars]"
 
 
-def _render_tree(root: Path) -> str:
-    """Render a dirs-first, depth/entry-capped file tree of ``root`` as an indented string.
+def _build_tree(root_name: str, paths: list[str]) -> str:
+    """Render a dirs-first, depth/entry-capped tree from a sorted list of relative file paths.
 
-    Excluded directories are pruned. Stops at ``_TREE_MAX_DEPTH`` levels and
-    ``_TREE_MAX_ENTRIES`` total entries, marking each cap explicitly so the
-    model knows the map is partial and should fall back to ``glob_files``.
+    ``paths`` comes from ``rg --files`` (already .gitignore-honoured), so only
+    directories that contain non-ignored files appear. Stops at ``_TREE_MAX_DEPTH``
+    levels and ``_TREE_MAX_ENTRIES`` total entries, marking each cap explicitly so
+    the model knows the map is partial and should fall back to ``glob_files``.
     """
-    lines: list[str] = [f"{root.name}/"]
+    # Nested dict: dir -> {child: ...}; file -> None.
+    tree: dict = {}
+    for path in paths:
+        parts = path.split("/")
+        node = tree
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node.setdefault(parts[-1], None)
+
+    lines: list[str] = [f"{root_name}/"]
     state = {"count": 0, "entry_capped": False}
 
-    def walk(directory: Path, depth: int) -> None:
+    def walk(node: dict, depth: int) -> None:
         if state["entry_capped"]:
             return
-        try:
-            entries = sorted(
-                os.scandir(directory),
-                key=lambda e: (not e.is_dir(follow_symlinks=False), e.name),
-            )
-        except OSError:
-            return
-        for entry in entries:
+        # Directories first (dict values), then files (None values), each alphabetical.
+        for name, child in sorted(node.items(), key=lambda kv: (kv[1] is None, kv[0])):
             if state["entry_capped"]:
                 return
-            # Skip symlinks for consistency with glob/grep (and so the map never
-            # advertises a path read_file would reject as escaping the root).
-            if entry.is_symlink():
-                continue
-            if entry.is_dir(follow_symlinks=False) and entry.name in _EXCLUDED_DIRS:
-                continue
             if state["count"] >= _TREE_MAX_ENTRIES:
                 state["entry_capped"] = True
                 lines.append(f"{'  ' * depth}... (entry cap of {_TREE_MAX_ENTRIES} reached)")
                 return
             state["count"] += 1
-            indent = "  " * depth
-            is_dir = entry.is_dir(follow_symlinks=False)
-            lines.append(f"{indent}{entry.name}{'/' if is_dir else ''}")
+            is_dir = child is not None
+            lines.append(f"{'  ' * depth}{name}{'/' if is_dir else ''}")
             if is_dir:
                 if depth + 1 >= _TREE_MAX_DEPTH:
                     lines.append(f"{'  ' * (depth + 1)}... (depth cap reached)")
                 else:
-                    walk(Path(entry.path), depth + 1)
+                    walk(child, depth + 1)
 
-    walk(root, 1)
+    walk(tree, 1)
     return "\n".join(lines)

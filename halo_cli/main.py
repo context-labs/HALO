@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from pathlib import Path
 from typing import get_args
 
@@ -252,6 +253,14 @@ def _run(
     if api_key is None and not os.environ.get("OPENAI_API_KEY"):
         typer.echo(
             "OPENAI_API_KEY not set; pass --api-key or export OPENAI_API_KEY.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if repo_path is not None and shutil.which("rg") is None:
+        typer.echo(
+            "--repo-path requires ripgrep (rg), which was not found on PATH. "
+            "Install it (`brew install ripgrep`, `apt-get install ripgrep`, or "
+            "`pip install ripgrep`) and re-run.",
             err=True,
         )
         raise typer.Exit(1)

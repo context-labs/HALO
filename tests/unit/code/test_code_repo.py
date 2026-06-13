@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
 
 from engine.code.code_repo import CodeRepo
+from engine.errors import EngineDependencyError
 
 
 def _build_repo(tmp_path: Path) -> Path:
@@ -32,6 +32,19 @@ def _build_repo(tmp_path: Path) -> Path:
     return root
 
 
+def _build_gitignore_repo(tmp_path: Path) -> Path:
+    """A repo whose .gitignore excludes a dir and a glob NOT in the fixed excluded-dirs set."""
+    root = tmp_path / "gi"
+    (root / "src").mkdir(parents=True)
+    (root / "ignored_dir").mkdir()
+    (root / "src" / "app.py").write_text("MARK = 1\n")
+    (root / "keep.py").write_text("MARK = 2\n")
+    (root / "debug.log").write_text("MARK\n")
+    (root / "ignored_dir" / "x.py").write_text("MARK = 3\n")
+    (root / ".gitignore").write_text("*.log\nignored_dir/\n")
+    return root
+
+
 # --- open / validation -------------------------------------------------------
 
 
@@ -53,7 +66,15 @@ def test_open_resolves_root(tmp_path: Path) -> None:
     assert repo.root == root.resolve()
 
 
-# --- path confinement --------------------------------------------------------
+def test_open_raises_without_ripgrep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import engine.code.code_repo as code_repo_module
+
+    monkeypatch.setattr(code_repo_module.shutil, "which", lambda _name: None)
+    with pytest.raises(EngineDependencyError, match="ripgrep"):
+        CodeRepo.open(_build_repo(tmp_path))
+
+
+# --- path confinement (read) -------------------------------------------------
 
 
 def test_read_parent_traversal_raises(tmp_path: Path) -> None:
@@ -84,7 +105,7 @@ def test_read_absolute_inside_root_accepted(tmp_path: Path) -> None:
 # --- glob --------------------------------------------------------------------
 
 
-def test_glob_matches_nested_excludes_special_dirs(tmp_path: Path) -> None:
+def test_glob_anchored_pattern(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     result = repo.glob("**/*.py", 100)
     assert [f.path for f in result.files] == [
@@ -98,6 +119,18 @@ def test_glob_matches_nested_excludes_special_dirs(tmp_path: Path) -> None:
     assert all(f.size_bytes > 0 for f in result.files)
 
 
+def test_glob_star_matches_any_depth(tmp_path: Path) -> None:
+    """gitignore-style: a pattern without `/` matches at any depth."""
+    repo = CodeRepo.open(_build_repo(tmp_path))
+    result = repo.glob("*.py", 100)
+    assert [f.path for f in result.files] == [
+        "engine/config.py",
+        "engine/long.py",
+        "engine/main.py",
+        "engine/tools/runner.py",
+    ]
+
+
 def test_glob_caps_with_has_more(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     result = repo.glob("**/*.py", 2)
@@ -106,96 +139,46 @@ def test_glob_caps_with_has_more(tmp_path: Path) -> None:
     assert result.has_more is True
 
 
-def test_glob_excludes_symlinks(tmp_path: Path) -> None:
+def test_glob_excludes_special_dirs_and_symlinks(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
-    result = repo.glob("**/*", 500)
-    assert "sub/escape_link" not in {f.path for f in result.files}
+    paths = {f.path for f in repo.glob("**/*", 500).files}
+    assert "sub/escape_link" not in paths
+    assert not any(p.startswith(".git/") or "__pycache__" in p for p in paths)
 
 
-def test_glob_absolute_pattern_raises(tmp_path: Path) -> None:
-    repo = CodeRepo.open(_build_repo(tmp_path))
-    with pytest.raises(ValueError, match="must be relative"):
-        repo.glob("/etc/*.conf", 10)
+def test_glob_honors_gitignore(tmp_path: Path) -> None:
+    repo = CodeRepo.open(_build_gitignore_repo(tmp_path))
+    paths = {f.path for f in repo.glob("*.py", 100).files}
+    assert paths == {"keep.py", "src/app.py"}  # ignored_dir/x.py excluded by .gitignore
 
 
-def test_glob_parent_traversal_pattern_raises(tmp_path: Path) -> None:
-    repo = CodeRepo.open(_build_repo(tmp_path))
-    with pytest.raises(ValueError, match="must not contain"):
-        repo.glob("../*.txt", 10)
+# --- grep --------------------------------------------------------------------
 
 
-# --- grep (pure-Python path) -------------------------------------------------
-
-
-def _python_repo(tmp_path: Path) -> CodeRepo:
-    """A CodeRepo forced onto the pure-Python grep path (no ripgrep)."""
-    root = _build_repo(tmp_path).resolve()
-    return CodeRepo(root=root, rg_executable=None)
-
-
-def test_grep_python_line_numbers_and_paths(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    result = repo.grep("retries", None, 50)
-    assert [(m.path, m.line_number, m.line_text) for m in result.matches] == [
-        ("engine/config.py", 1, 'CONFIG = {"max_retries": 3}'),
-        ("engine/tools/runner.py", 5, "    return retries"),
-    ]
-    assert result.returned_match_count == 2
-    assert result.has_more is False
-
-
-def test_grep_python_glob_filter(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    result = repo.grep("max_retries", "engine/*.py", 50)
-    assert [(m.path, m.line_number) for m in result.matches] == [("engine/config.py", 1)]
-
-
-def test_grep_python_invalid_regex_raises(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    with pytest.raises(ValueError, match="Invalid regex pattern"):
-        repo.grep("(", None, 50)
-
-
-def test_grep_python_caps_with_has_more(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    result = repo.grep(".", None, 1)
-    assert result.returned_match_count == 1
-    assert result.has_more is True
-
-
-def test_grep_python_skips_binary_and_excluded(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    paths = {m.path for m in repo.grep(".", None, 500).matches}
-    assert paths == {
-        "engine/config.py",
-        "engine/long.py",
-        "engine/main.py",
-        "engine/tools/runner.py",
-    }
-
-
-def test_grep_python_truncates_long_line(tmp_path: Path) -> None:
-    repo = _python_repo(tmp_path)
-    result = repo.grep("AAAA", None, 50)
-    assert len(result.matches) == 1
-    assert "[HALO truncated:" in result.matches[0].line_text
-
-
-# --- grep (ripgrep path) -----------------------------------------------------
-
-
-@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
-def test_grep_ripgrep_parity(tmp_path: Path) -> None:
+def test_grep_line_numbers_and_paths(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     result = repo.grep("retries", None, 50)
     assert sorted((m.path, m.line_number) for m in result.matches) == [
         ("engine/config.py", 1),
         ("engine/tools/runner.py", 5),
     ]
+    assert result.has_more is False
 
 
-@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
-def test_grep_ripgrep_excludes_special_dirs_and_symlinks(tmp_path: Path) -> None:
+def test_grep_glob_filter(tmp_path: Path) -> None:
+    repo = CodeRepo.open(_build_repo(tmp_path))
+    result = repo.grep("max_retries", "engine/*.py", 50)
+    assert [(m.path, m.line_number) for m in result.matches] == [("engine/config.py", 1)]
+
+
+def test_grep_caps_with_has_more(tmp_path: Path) -> None:
+    repo = CodeRepo.open(_build_repo(tmp_path))
+    result = repo.grep(".", None, 1)
+    assert result.returned_match_count == 1
+    assert result.has_more is True
+
+
+def test_grep_excludes_special_dirs_and_binary(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     paths = {m.path for m in repo.grep(".", None, 500).matches}
     assert paths == {
@@ -206,8 +189,13 @@ def test_grep_ripgrep_excludes_special_dirs_and_symlinks(tmp_path: Path) -> None
     }
 
 
-@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
-def test_grep_ripgrep_syntax_error_raises(tmp_path: Path) -> None:
+def test_grep_honors_gitignore(tmp_path: Path) -> None:
+    repo = CodeRepo.open(_build_gitignore_repo(tmp_path))
+    paths = {m.path for m in repo.grep("MARK", None, 500).matches}
+    assert paths == {"keep.py", "src/app.py"}  # debug.log + ignored_dir/ excluded
+
+
+def test_grep_invalid_regex_raises(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     # Rust regex rejects backreferences; rg exits >=2 with a message on stderr.
     with pytest.raises(ValueError, match="grep failed"):
@@ -280,6 +268,15 @@ def test_tree_excludes_special_dirs_and_symlinks(tmp_path: Path) -> None:
     assert "escape_link" not in tree
 
 
+def test_tree_honors_gitignore(tmp_path: Path) -> None:
+    repo = CodeRepo.open(_build_gitignore_repo(tmp_path))
+    tree = repo.tree
+    assert "src/" in tree
+    assert "keep.py" in tree
+    assert "ignored_dir" not in tree
+    assert "debug.log" not in tree
+
+
 def test_tree_depth_cap_marker(tmp_path: Path) -> None:
     root = tmp_path / "deep"
     deep = root / "a" / "b" / "c" / "d" / "e"
@@ -311,13 +308,13 @@ def test_tree_not_rendered_at_open(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     import engine.code.code_repo as code_repo_module
 
     calls = {"n": 0}
-    real_render = code_repo_module._render_tree
+    real_build = code_repo_module._build_tree
 
-    def _counting_render(root: Path) -> str:
+    def _counting_build(root_name: str, paths: list[str]) -> str:
         calls["n"] += 1
-        return real_render(root)
+        return real_build(root_name, paths)
 
-    monkeypatch.setattr(code_repo_module, "_render_tree", _counting_render)
+    monkeypatch.setattr(code_repo_module, "_build_tree", _counting_build)
     repo = CodeRepo.open(_build_repo(tmp_path))
     assert calls["n"] == 0
     _ = repo.tree

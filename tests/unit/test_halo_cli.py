@@ -189,6 +189,25 @@ def test_cli_rejects_nonexistent_repo_path(
     assert result.exit_code != 0
 
 
+def test_cli_repo_path_requires_ripgrep(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text("")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    monkeypatch.setattr(cli_main.shutil, "which", lambda _name: None)
+
+    result = CliRunner().invoke(
+        cli, [str(trace_path), "--prompt", "hi", "--repo-path", str(repo_dir)]
+    )
+
+    assert result.exit_code == 1
+    assert "ripgrep" in result.output
+
+
 def test_parse_headers() -> None:
     assert _parse_headers(
         [
