@@ -127,7 +127,12 @@ class CodeRepo:
         return self._tree
 
     def _exclude_glob_args(self) -> list[str]:
-        """Baseline ``-g '!<dir>/'`` excludes shared by every ripgrep invocation."""
+        """Baseline ``-g '!<dir>/'`` excludes shared by every ripgrep invocation.
+
+        Ripgrep glob precedence is last-match-wins, so these must be appended
+        *after* any caller-supplied ``-g`` pattern — otherwise a broad pattern
+        like ``**/*`` would re-include ``.git``/``node_modules``.
+        """
         args: list[str] = []
         for excluded in sorted(_EXCLUDED_DIRS):
             args += ["-g", f"!{excluded}/"]
@@ -139,15 +144,10 @@ class CodeRepo:
         Returns sorted relative POSIX paths. Raises ``ValueError`` (surfaced to
         the model) if ripgrep errors, e.g. on a malformed glob.
         """
-        args = [
-            self._rg_executable,
-            "--files",
-            "--hidden",
-            "--no-require-git",
-            *self._exclude_glob_args(),
-        ]
+        args = [self._rg_executable, "--files", "--hidden", "--no-require-git"]
         if glob_pattern is not None:
             args += ["-g", glob_pattern]
+        args += self._exclude_glob_args()
         completed = subprocess.run(args, cwd=self._root, capture_output=True, text=True)
         # rg --files exit codes: 0 = files listed, 1 = none matched, >=2 = error.
         if completed.returncode >= 2:
@@ -187,10 +187,10 @@ class CodeRepo:
             "--color=never",
             "--hidden",
             "--no-require-git",
-            *self._exclude_glob_args(),
         ]
         if glob_pattern is not None:
             args += ["-g", glob_pattern]
+        args += self._exclude_glob_args()
         args += ["-e", regex_pattern, "."]
         completed = subprocess.run(args, cwd=self._root, capture_output=True, text=True)
         # rg exit codes: 0 = matches, 1 = no matches, >=2 = error (e.g. bad regex).
