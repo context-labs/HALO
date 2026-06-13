@@ -198,7 +198,7 @@ def test_grep_honors_gitignore(tmp_path: Path) -> None:
 def test_grep_invalid_regex_raises(tmp_path: Path) -> None:
     repo = CodeRepo.open(_build_repo(tmp_path))
     # Rust regex rejects backreferences; rg exits >=2 with a message on stderr.
-    with pytest.raises(ValueError, match="grep failed"):
+    with pytest.raises(ValueError, match="ripgrep failed"):
         repo.grep(r"(\w)\1", None, 50)
 
 

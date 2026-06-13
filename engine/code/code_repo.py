@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sysconfig
 import threading
+from collections.abc import Generator
 from pathlib import Path
 
 from engine.code.models import (
@@ -149,7 +150,9 @@ class CodeRepo:
     def tree(self) -> str:
         """The depth/entry-capped directory overview, rendered once and cached for the run."""
         if self._tree is None:
-            self._tree = _build_tree(self._root.name, self._rg_files(glob_pattern=None))
+            args = self._rg_files_args(glob_pattern=None, sort=False)
+            paths = [line.rstrip("\n") for line in self._rg_line_stream(args) if line.strip()]
+            self._tree = _build_tree(self._root.name, paths)
         return self._tree
 
     def _exclude_glob_args(self) -> list[str]:
@@ -164,70 +167,33 @@ class CodeRepo:
             args += ["-g", f"!{excluded}/"]
         return args
 
-    def _rg_files(self, *, glob_pattern: str | None) -> list[str]:
-        """List repo files via ``rg --files`` (honours .gitignore), optionally filtered by a glob.
+    def _rg_files_args(self, *, glob_pattern: str | None, sort: bool) -> list[str]:
+        """Build the ``rg --files`` argv (honours .gitignore), with baseline excludes last.
 
-        Returns sorted relative POSIX paths. Raises ``ValueError`` (surfaced to
-        the model) if ripgrep errors, e.g. on a malformed glob.
+        ``sort=True`` adds ``--sort path`` so a streamed, early-stopped consumer
+        still sees the lexicographically-smallest paths first.
         """
         args = [self._rg_executable, "--files", "--hidden", "--no-require-git"]
+        if sort:
+            args += ["--sort", "path"]
         if glob_pattern is not None:
             args += ["-g", glob_pattern]
         args += self._exclude_glob_args()
-        completed = subprocess.run(args, cwd=self._root, capture_output=True, text=True)
-        # rg --files exit codes: 0 = files listed, 1 = none matched, >=2 = error.
-        if completed.returncode >= 2:
-            raise ValueError(f"glob failed: {completed.stderr.strip()}")
-        return sorted(line for line in completed.stdout.splitlines() if line)
+        return args
 
-    def glob(self, pattern: str, max_results: int) -> GlobMatches:
-        """Return repo files matching ``pattern`` (relative POSIX paths + sizes), via ``rg --files``.
+    def _rg_line_stream(self, args: list[str]) -> Generator[str, None, None]:
+        """Run ripgrep and yield stdout lines, draining stderr concurrently.
 
-        ``pattern`` is gitignore-style: a pattern without ``/`` matches at any
-        depth (``*.py`` → all .py), one with ``/`` is anchored (``engine/*.py``).
-        Results honour ``.gitignore``. ``has_more`` is true when more files
-        matched than ``max_results``.
+        Streaming lets callers stop early (so memory stays bounded to what they
+        keep) instead of buffering all of rg's output. stderr is drained in a
+        thread so a chatty rg (file-open warnings on a large/locked-down repo)
+        can't fill its pipe buffer and deadlock against our stdout read; capture
+        is capped, excess drained and discarded. If the stream is consumed to the
+        end and rg exits with an error code (>=2, e.g. a malformed pattern), it
+        raises ``ValueError`` with rg's message (surfaced to the model). If the
+        caller stops early, rg is terminated and no error is raised. This mirrors
+        ripgrep's stdout/stderr handling in other harnesses (e.g. OpenCode).
         """
-        matched = self._rg_files(glob_pattern=pattern)
-        capped = matched[:max_results]
-        files = [GlobFileEntry(path=p, size_bytes=(self._root / p).stat().st_size) for p in capped]
-        return GlobMatches(
-            files=files,
-            returned_count=len(files),
-            has_more=len(matched) > len(capped),
-        )
-
-    def grep(self, regex_pattern: str, glob_pattern: str | None, max_matches: int) -> GrepMatches:
-        """Regex-search file contents across the repo via ripgrep (honours .gitignore).
-
-        ``glob_pattern`` optionally confines the search to matching files.
-        Returns up to ``max_matches`` records with 1-based line numbers and
-        per-line-truncated text; ``has_more`` is true when more matches existed
-        than were returned. Ripgrep owns regex validation — a bad pattern raises
-        ``ValueError`` carrying rg's message, surfaced to the model.
-        """
-        # ``--json`` gives unambiguous per-match records (path, line number, text
-        # as separate fields), so a repo path containing a ``:`` parses correctly
-        # — unlike the ``path:line:text`` text format.
-        args = [self._rg_executable, "--json", "--hidden", "--no-require-git"]
-        if glob_pattern is not None:
-            args += ["-g", glob_pattern]
-        args += self._exclude_glob_args()
-        args += ["-e", regex_pattern, "."]
-
-        # Stream rg's output and stop once we have one match past the cap, so a
-        # broad pattern (e.g. ``.``) on a large repo can't buffer megabytes of
-        # stdout just to return a capped slice. The extra match only sets
-        # ``has_more`` — we don't need the exact total.
-        #
-        # Drain stderr concurrently (in a thread) alongside stdout: we only read
-        # stdout in the loop below, so an unread stderr pipe could fill its OS
-        # buffer (file-open warnings on a large/locked-down repo) and deadlock rg
-        # against our blocked stdout read. The thread keeps reading to EOF;
-        # capture is capped (excess drained but discarded). This mirrors
-        # ripgrep's stderr handling in other harnesses (e.g. OpenCode).
-        matches: list[GrepMatchRecord] = []
-        has_more = False
         proc = subprocess.Popen(
             args,
             cwd=self._root,
@@ -250,7 +216,78 @@ class CodeRepo:
         stderr_thread.start()
         try:
             assert proc.stdout is not None
-            for line in proc.stdout:
+            yield from proc.stdout
+            # Natural end — the caller consumed everything. rg exit codes:
+            # 0 = ok, 1 = nothing matched, >=2 = error (e.g. a bad pattern).
+            returncode = proc.wait()
+            stderr_thread.join()
+            if returncode >= 2:
+                raise ValueError(f"ripgrep failed: {''.join(stderr_capture).strip()}")
+        finally:
+            # Runs on natural end, error, or GeneratorExit (caller stopped early).
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait()
+            stderr_thread.join()
+            if proc.stdout is not None:
+                proc.stdout.close()
+            if proc.stderr is not None:
+                proc.stderr.close()
+
+    def glob(self, pattern: str, max_results: int) -> GlobMatches:
+        """Return repo files matching ``pattern`` (relative POSIX paths + sizes), via ``rg --files``.
+
+        ``pattern`` is gitignore-style: a pattern without ``/`` matches at any
+        depth (``*.py`` → all .py), one with ``/`` is anchored (``engine/*.py``).
+        Results honour ``.gitignore``. Streams ``rg --files --sort path`` and
+        stops after ``max_results`` (+1 to set ``has_more``), so a broad pattern
+        on a large repo never materializes the full path list — the sorted
+        ordering means the returned slice is still the smallest ``max_results``.
+        """
+        args = self._rg_files_args(glob_pattern=pattern, sort=True)
+        files: list[GlobFileEntry] = []
+        has_more = False
+        stream = self._rg_line_stream(args)
+        try:
+            for line in stream:
+                path = line.rstrip("\n")
+                if not path:
+                    continue
+                if len(files) < max_results:
+                    files.append(
+                        GlobFileEntry(path=path, size_bytes=(self._root / path).stat().st_size)
+                    )
+                    continue
+                has_more = True
+                break
+        finally:
+            stream.close()
+        return GlobMatches(files=files, returned_count=len(files), has_more=has_more)
+
+    def grep(self, regex_pattern: str, glob_pattern: str | None, max_matches: int) -> GrepMatches:
+        """Regex-search file contents across the repo via ripgrep (honours .gitignore).
+
+        ``glob_pattern`` optionally confines the search to matching files.
+        Returns up to ``max_matches`` records with 1-based line numbers and
+        per-line-truncated text; ``has_more`` is true when more matches existed
+        than were returned. Streams rg's output and stops one match past the cap
+        so a broad pattern can't buffer megabytes. Ripgrep owns regex validation
+        — a bad pattern raises ``ValueError`` carrying rg's message.
+        """
+        # ``--json`` gives unambiguous per-match records (path, line number, text
+        # as separate fields), so a repo path containing a ``:`` parses correctly
+        # — unlike the ``path:line:text`` text format.
+        args = [self._rg_executable, "--json", "--hidden", "--no-require-git"]
+        if glob_pattern is not None:
+            args += ["-g", glob_pattern]
+        args += self._exclude_glob_args()
+        args += ["-e", regex_pattern, "."]
+
+        matches: list[GrepMatchRecord] = []
+        has_more = False
+        stream = self._rg_line_stream(args)
+        try:
+            for line in stream:
                 parsed = self._parse_rg_json_match(line)
                 if parsed is None:
                     continue
@@ -259,25 +296,8 @@ class CodeRepo:
                     continue
                 has_more = True
                 break
-            if has_more:
-                proc.terminate()
-            returncode = proc.wait()
-            stderr_thread.join()
-            # rg exit codes: 0 = matches, 1 = no matches, >=2 = error (e.g. bad
-            # regex). When we stopped early the process is terminated, so its
-            # code is meaningless — only check it on a natural end.
-            if not has_more and returncode >= 2:
-                raise ValueError(f"grep failed: {''.join(stderr_capture).strip()}")
         finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait()
-            stderr_thread.join()
-            if proc.stdout is not None:
-                proc.stdout.close()
-            if proc.stderr is not None:
-                proc.stderr.close()
-
+            stream.close()
         return GrepMatches(
             matches=matches,
             returned_match_count=len(matches),
