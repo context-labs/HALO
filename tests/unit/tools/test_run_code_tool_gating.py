@@ -85,6 +85,7 @@ def _run_state(*, sandbox: Sandbox | None) -> EngineRunState:
     run_state.output_bus = EngineOutputBus()
     run_state.trace_store = MagicMock()
     run_state.sandbox = sandbox
+    run_state.code_repo = None
     run_state.openai_client = AsyncOpenAI(api_key="test")
     return run_state
 

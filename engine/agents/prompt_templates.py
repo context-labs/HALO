@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from engine.code.code_repo import CodeRepo
+
 FINAL_SENTINEL = "<final/>"
 
 SYSTEM_PROMPT = (
@@ -99,6 +104,30 @@ Instructions:
 {system_prompt}
 """
 
+CODE_REPO_PROMPT_SECTION_TEMPLATE = """\
+
+Code repository:
+- A read-only checkout of the agent/harness source code that produced these
+  traces is available at {repo_root}. Tools: `view_repo_tree` (a directory
+  overview — call once to orient), `glob_files` (find files by name),
+  `grep_files` (regex-search contents), `read_file` (numbered file contents).
+  Discovery honors .gitignore. Use the code to explain why the agent behaved as
+  the traces show.
+- Protect your own context. Reading files and scanning matches consumes context
+  fast. When you can spawn subagents (depth < maximum_depth), DELEGATE code
+  exploration: have a subagent search the repo and report back the relevant
+  `path:line` locations plus a short summary, instead of reading files into your
+  own context. Spawn separate subagents for independent questions. Reserve
+  direct `read_file`/`grep_files` calls for quick, targeted lookups you need
+  inline.
+- Reporting:
+  - Cite every code-level claim as `path:line` (1-based, exactly as shown by
+    `read_file`/`grep_files`). Never invent code, paths, or line numbers — if
+    something is not in the repository, say so.
+  - Propose fixes as prose plus fenced code blocks. You have read-only access —
+    never claim to have changed any file.
+"""
+
 COMPACTION_SYSTEM_PROMPT = """\
 You summarize a single conversation item for storage. Preserve tool names,
 argument shapes, and key result facts that future reasoning might need.
@@ -112,17 +141,33 @@ patterns, model names, and token counts when available.
 """
 
 
+def _render_code_repo_section(code_repo: "CodeRepo | None") -> str:
+    """Render the code-repository prompt section, or empty string when no repo is configured.
+
+    The directory overview is intentionally NOT embedded here — it is served on
+    demand by the ``view_repo_tree`` tool to keep the prompt lean.
+    """
+    if code_repo is None:
+        return ""
+    return CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=code_repo.root)
+
+
 def render_root_system_prompt(
     *,
     maximum_depth: int,
     maximum_parallel_subagents: int,
+    code_repo: "CodeRepo | None",
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract."""
+    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
+
+    Appends the code-repository section (tools + guidance, not the tree itself)
+    when ``code_repo`` is set; nothing otherwise.
+    """
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-    )
+    ) + _render_code_repo_section(code_repo)
 
 
 def render_subagent_system_prompt(
@@ -130,11 +175,16 @@ def render_subagent_system_prompt(
     depth: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
+    code_repo: "CodeRepo | None",
 ) -> str:
-    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root."""
+    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
+
+    Appends the code-repository section (tools + guidance, not the tree itself)
+    when ``code_repo`` is set; nothing otherwise.
+    """
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
-    )
+    ) + _render_code_repo_section(code_repo)

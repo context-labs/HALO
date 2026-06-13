@@ -25,6 +25,7 @@ from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
+from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
 from engine.sandbox.sandbox import Sandbox
@@ -96,18 +97,21 @@ def wired_tools(
     agent_context: AgentContext,
     parent_execution: AgentExecution,
     sandbox: Sandbox | None = None,
+    code_repo: CodeRepo | None = None,
 ) -> dict[str, object]:
     """Build the production tool list for a depth-0 agent, indexed by tool name.
 
     Pass ``sandbox=`` to register ``run_code`` (use ``MagicMock(spec=Sandbox)``
     when the test does not actually invoke ``run_code``, or a real resolved
-    ``Sandbox`` when it does).
+    ``Sandbox`` when it does). Pass ``code_repo=`` to register the code tools
+    (``glob_files``/``grep_files``/``read_file``).
     """
     run_state = EngineRunState(
         trace_store=store,
         output_bus=EngineOutputBus(),
         config=cfg,
         sandbox=sandbox,
+        code_repo=code_repo,
         openai_client=AsyncOpenAI(
             base_url=cfg.model_provider.base_url,
             api_key=cfg.model_provider.api_key,

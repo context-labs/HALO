@@ -17,6 +17,7 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.turn_counter import TurnCounterInputFilter
+from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
@@ -72,12 +73,21 @@ async def stream_engine_async(
                 )
                 trace_store = TraceStore.load(trace_path=trace_path, index_path=index_path)
 
+                # Resolve the code repo (or None) before any LLM call so a bad
+                # ``repo_path`` fails fast. None leaves the code tools unregistered.
+                code_repo = (
+                    CodeRepo.open(engine_config.repo_path)
+                    if engine_config.repo_path is not None
+                    else None
+                )
+
                 output_bus = EngineOutputBus()
                 run_state = EngineRunState(
                     trace_store=trace_store,
                     output_bus=output_bus,
                     config=engine_config,
                     sandbox=sandbox,
+                    code_repo=code_repo,
                     openai_client=client,
                 )
 
@@ -91,7 +101,7 @@ async def stream_engine_async(
                 run_state.register(root_execution)
 
                 root_context = AgentContext.from_input_messages(
-                    messages=messages, engine_config=engine_config
+                    messages=messages, engine_config=engine_config, code_repo=code_repo
                 )
 
                 sdk_agent = build_root_sdk_agent(

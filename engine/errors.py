@@ -23,3 +23,7 @@ class EngineSandboxDeniedError(EngineError):
 
 class EngineToolError(EngineError):
     """Raised from a tool adapter when returning a typed error to the caller."""
+
+
+class EngineDependencyError(EngineError):
+    """Raised when a required external dependency (e.g. ripgrep) is missing."""
