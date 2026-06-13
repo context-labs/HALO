@@ -130,9 +130,7 @@ def test_glob_parent_traversal_pattern_raises(tmp_path: Path) -> None:
 def _python_repo(tmp_path: Path) -> CodeRepo:
     """A CodeRepo forced onto the pure-Python grep path (no ripgrep)."""
     root = _build_repo(tmp_path).resolve()
-    from engine.code.code_repo import _render_tree
-
-    return CodeRepo(root=root, rg_executable=None, tree=_render_tree(root))
+    return CodeRepo(root=root, rg_executable=None)
 
 
 def test_grep_python_line_numbers_and_paths(tmp_path: Path) -> None:
@@ -298,3 +296,31 @@ def test_tree_entry_cap_marker(tmp_path: Path) -> None:
         (root / f"f{i:04d}.txt").write_text("x\n")
     repo = CodeRepo.open(root)
     assert "entry cap of 500 reached" in repo.tree
+
+
+def test_tree_is_cached(tmp_path: Path) -> None:
+    """The tree is rendered lazily on first access and memoized for the run."""
+    repo = CodeRepo.open(_build_repo(tmp_path))
+    first = repo.tree
+    # Same object returned on subsequent access — rendered once, then cached.
+    assert repo.tree is first
+
+
+def test_tree_not_rendered_at_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``open`` must not render the tree — it is deferred to first ``view_repo_tree``."""
+    import engine.code.code_repo as code_repo_module
+
+    calls = {"n": 0}
+    real_render = code_repo_module._render_tree
+
+    def _counting_render(root: Path) -> str:
+        calls["n"] += 1
+        return real_render(root)
+
+    monkeypatch.setattr(code_repo_module, "_render_tree", _counting_render)
+    repo = CodeRepo.open(_build_repo(tmp_path))
+    assert calls["n"] == 0
+    _ = repo.tree
+    assert calls["n"] == 1
+    _ = repo.tree
+    assert calls["n"] == 1

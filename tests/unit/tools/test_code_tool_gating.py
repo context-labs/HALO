@@ -16,7 +16,7 @@ from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
 
-_CODE_TOOL_NAMES = {"glob_files", "grep_files", "read_file"}
+_CODE_TOOL_NAMES = {"view_repo_tree", "glob_files", "grep_files", "read_file"}
 
 
 def _engine_config(*, maximum_depth: int = 2) -> EngineConfig:

@@ -9,8 +9,14 @@ from engine.code.models import (
     GlobFilesArguments,
     GrepFilesArguments,
     ReadFileArguments,
+    ViewRepoTreeArguments,
 )
-from engine.tools.code_tools import GlobFilesTool, GrepFilesTool, ReadFileTool
+from engine.tools.code_tools import (
+    GlobFilesTool,
+    GrepFilesTool,
+    ReadFileTool,
+    ViewRepoTreeTool,
+)
 from engine.tools.tool_protocol import ToolContext
 
 
@@ -44,6 +50,22 @@ async def test_read_file_tool(ctx: ToolContext) -> None:
     result = await tool.run(ctx, ReadFileArguments(path="engine/main.py"))
     assert result.result.content == "     1\tdef main():\n     2\t    return 0"
     assert result.result.total_line_count == 2
+
+
+@pytest.mark.asyncio
+async def test_view_repo_tree_tool(ctx: ToolContext) -> None:
+    tool = ViewRepoTreeTool()
+    result = await tool.run(ctx, ViewRepoTreeArguments())
+    assert "engine/" in result.result.tree
+    assert "config.py" in result.result.tree
+    assert result.result.root  # absolute repo root path
+
+
+@pytest.mark.asyncio
+async def test_view_repo_tree_requires_code_repo() -> None:
+    tool = ViewRepoTreeTool()
+    with pytest.raises(RuntimeError, match="ToolContext.code_repo required"):
+        await tool.run(ToolContext.model_construct(), ViewRepoTreeArguments())
 
 
 @pytest.mark.asyncio

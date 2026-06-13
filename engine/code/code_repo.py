@@ -88,42 +88,43 @@ def _looks_binary(blob: bytes) -> bool:
 class CodeRepo:
     """Read-only, path-confined view of a local source checkout for agent code tools.
 
-    Owns the three primitives the code tools expose — ``glob`` (file discovery),
-    ``grep`` (regex content search), and ``read`` (numbered file contents) —
-    plus a one-time ``tree`` snapshot embedded in agent prompts as a repo map.
+    Owns the primitives the code tools expose — ``glob`` (file discovery),
+    ``grep`` (regex content search), ``read`` (numbered file contents), and
+    ``tree`` (a directory overview, served by the ``view_repo_tree`` tool).
 
     Every path argument is resolved and confined to ``root`` (symlink escapes
     included), so an agent cannot read outside the repo. ``grep`` shells out to
     ripgrep when available (honouring ``.gitignore``) and falls back to a pure-
     Python scan otherwise; ``glob``/``read``/``tree`` are always pure Python and
     prune a fixed set of excluded directories. There is no persistent index —
-    repos are small enough for on-demand scans, and only ``tree`` is precomputed.
+    repos are small enough for on-demand scans. ``tree`` is rendered lazily on
+    first access and cached for the rest of the run.
     """
 
-    def __init__(self, *, root: Path, rg_executable: str | None, tree: str) -> None:
+    def __init__(self, *, root: Path, rg_executable: str | None) -> None:
         self._root = root
         self._rg_executable = rg_executable
-        self._tree = tree
+        self._tree: str | None = None
 
     @classmethod
     def open(cls, repo_path: Path) -> "CodeRepo":
-        """Resolve and validate ``repo_path``, detect ripgrep, render the tree snapshot. Fails fast.
+        """Resolve and validate ``repo_path`` and detect ripgrep. Fails fast.
 
         Raises ``FileNotFoundError`` if the path does not exist and
         ``NotADirectoryError`` if it is not a directory. Runs before any LLM
-        call so a bad ``--repo-path`` surfaces immediately, not mid-run.
+        call so a bad ``--repo-path`` surfaces immediately, not mid-run. The
+        tree is not rendered here — it is built lazily on first ``view_repo_tree``.
         """
         root = Path(repo_path).resolve(strict=True)
         if not root.is_dir():
             raise NotADirectoryError(f"repo_path is not a directory: {root}")
         rg_executable = shutil.which("rg")
-        tree = _render_tree(root)
         logger.info(
             "code repo opened at %s (grep engine: %s)",
             root,
             "ripgrep" if rg_executable else "python",
         )
-        return cls(root=root, rg_executable=rg_executable, tree=tree)
+        return cls(root=root, rg_executable=rg_executable)
 
     @property
     def root(self) -> Path:
@@ -132,7 +133,9 @@ class CodeRepo:
 
     @property
     def tree(self) -> str:
-        """The depth/entry-capped file-tree snapshot rendered once at ``open``."""
+        """The depth/entry-capped directory overview, rendered once and cached for the run."""
+        if self._tree is None:
+            self._tree = _render_tree(self._root)
         return self._tree
 
     def _resolve_confined(self, path: str) -> Path:

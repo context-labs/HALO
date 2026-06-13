@@ -138,3 +138,30 @@ class ReadFileResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     result: FileContent
+
+
+class ViewRepoTreeArguments(BaseModel):
+    """Tool arguments for ``view_repo_tree``: none — returns the whole-repo, depth/entry-capped tree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RepoTree(BaseModel):
+    """A directory-tree overview of the repository, rooted at ``root``.
+
+    ``tree`` is depth/entry-capped, with explicit markers where a cap clipped it
+    — fall back to ``glob_files`` for anything not shown.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    root: str
+    tree: str
+
+
+class ViewRepoTreeResult(BaseModel):
+    """Result envelope for ``view_repo_tree`` — wraps a RepoTree under ``result``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    result: RepoTree

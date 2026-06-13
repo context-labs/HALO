@@ -108,17 +108,17 @@ CODE_REPO_PROMPT_SECTION_TEMPLATE = """\
 
 Code repository:
 - A read-only checkout of the agent/harness source code that produced these
-  traces is available at {repo_root}. Explore it with the `glob_files`,
-  `grep_files`, and `read_file` tools to understand how the agent is built and
-  why it behaves as the traces show.
-- Repository map (depth/entry capped — use `glob_files` for anything not shown):
-{repo_tree}
-- Search strategy:
-  - Targeted lookup (a known symbol, config value, error string, or file): search
-    directly. `grep_files` to locate it, then `read_file` a window around the
-    line. Batch independent searches in the same turn.
-  - Open-ended exploration (unknown scope, many files to skim): if you can spawn
-    a subagent, delegate it with `call_subagent` to keep your own context lean.
+  traces is available at {repo_root}. Tools: `view_repo_tree` (a directory
+  overview — call once to orient), `glob_files` (find files by name),
+  `grep_files` (regex-search contents), `read_file` (numbered file contents).
+  Use the code to explain why the agent behaved as the traces show.
+- Protect your own context. Reading files and scanning matches consumes context
+  fast. When you can spawn subagents (depth < maximum_depth), DELEGATE code
+  exploration: have a subagent search the repo and report back the relevant
+  `path:line` locations plus a short summary, instead of reading files into your
+  own context. Spawn separate subagents for independent questions. Reserve
+  direct `read_file`/`grep_files` calls for quick, targeted lookups you need
+  inline.
 - Reporting:
   - Cite every code-level claim as `path:line` (1-based, exactly as shown by
     `read_file`/`grep_files`). Never invent code, paths, or line numbers — if
@@ -141,13 +141,14 @@ patterns, model names, and token counts when available.
 
 
 def _render_code_repo_section(code_repo: "CodeRepo | None") -> str:
-    """Render the code-repository prompt section, or empty string when no repo is configured."""
+    """Render the code-repository prompt section, or empty string when no repo is configured.
+
+    The directory overview is intentionally NOT embedded here — it is served on
+    demand by the ``view_repo_tree`` tool to keep the prompt lean.
+    """
     if code_repo is None:
         return ""
-    return CODE_REPO_PROMPT_SECTION_TEMPLATE.format(
-        repo_root=code_repo.root,
-        repo_tree=code_repo.tree,
-    )
+    return CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=code_repo.root)
 
 
 def render_root_system_prompt(
@@ -158,8 +159,8 @@ def render_root_system_prompt(
 ) -> str:
     """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
 
-    Appends the code-repository section (with the repo map) when ``code_repo`` is
-    set; nothing otherwise.
+    Appends the code-repository section (tools + guidance, not the tree itself)
+    when ``code_repo`` is set; nothing otherwise.
     """
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
@@ -177,8 +178,8 @@ def render_subagent_system_prompt(
 ) -> str:
     """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
 
-    Appends the code-repository section (with the repo map) when ``code_repo`` is
-    set; nothing otherwise.
+    Appends the code-repository section (tools + guidance, not the tree itself)
+    when ``code_repo`` is set; nothing otherwise.
     """
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,

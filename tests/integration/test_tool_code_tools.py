@@ -39,6 +39,16 @@ async def _code_tools(tmp_path: Path, fixtures_dir: Path) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+async def test_view_repo_tree_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
+    tools = await _code_tools(tmp_path, fixtures_dir)
+    raw = await tools["view_repo_tree"].on_invoke_tool(MagicMock(spec=SdkToolContext), "{}")
+    result = json.loads(raw)["result"]
+    assert result["root"].endswith("tiny_repo")
+    assert "agent/" in result["tree"]
+    assert "config.py" in result["tree"]
+
+
+@pytest.mark.asyncio
 async def test_glob_files_through_sdk_adapter(tmp_path: Path, fixtures_dir: Path) -> None:
     tools = await _code_tools(tmp_path, fixtures_dir)
     raw = await tools["glob_files"].on_invoke_tool(

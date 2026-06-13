@@ -16,6 +16,12 @@ dependencies = [
     # unsupported platforms (e.g. musl Linux) pip will fall back to the
     # sdist and the sandbox will look for ``deno`` on PATH instead.
     "deno==2.7.14",
+    # Ships the ripgrep binary as a platform wheel so the code tools' grep runs
+    # fast and honours .gitignore out-of-the-box. Wheels exist only for macOS
+    # (arm64) and Linux (x86_64), so the marker pins the dep to just those
+    # platforms — elsewhere it is not pulled (no broken install) and CodeRepo
+    # falls back to a system ``rg`` on PATH, then to a pure-Python scan.
+    "ripgrep==15.1.0; (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     "typer==0.25.0",
     "rich==15.0.0",
     # Catalyst tracing is mandatory: the engine always imports it for

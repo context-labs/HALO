@@ -20,7 +20,12 @@ from engine.agents.turn_counter import TurnCounterInputFilter
 from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
 from engine.telemetry.tracing import halo_agent_span
 from engine.tools.agent_context_tools import GetContextItemTool
-from engine.tools.code_tools import GlobFilesTool, GrepFilesTool, ReadFileTool
+from engine.tools.code_tools import (
+    GlobFilesTool,
+    GrepFilesTool,
+    ReadFileTool,
+    ViewRepoTreeTool,
+)
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.synthesis_tool import SynthesisTool
@@ -143,6 +148,7 @@ def _child_tools_for_depth(
     # configured. Children spawned via ``call_subagent`` reuse this factory, so
     # delegated open-ended code exploration inherits them automatically.
     if run_state.code_repo is not None:
+        leaf_tools.append(to_sdk_function_tool(ViewRepoTreeTool(), context_factory=make_ctx))
         leaf_tools.append(to_sdk_function_tool(GlobFilesTool(), context_factory=make_ctx))
         leaf_tools.append(to_sdk_function_tool(GrepFilesTool(), context_factory=make_ctx))
         leaf_tools.append(to_sdk_function_tool(ReadFileTool(), context_factory=make_ctx))

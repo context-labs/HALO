@@ -7,8 +7,38 @@ from engine.code.models import (
     GrepFilesResult,
     ReadFileArguments,
     ReadFileResult,
+    RepoTree,
+    ViewRepoTreeArguments,
+    ViewRepoTreeResult,
 )
 from engine.tools.tool_protocol import ToolContext
+
+
+class ViewRepoTreeTool:
+    """Tool wrapper around ``CodeRepo.tree``: a directory overview of the repo.
+
+    Stateless: the live ``CodeRepo`` comes through ``tool_context.code_repo``
+    (wired by the per-run ``make_ctx`` factory). Registration is gated upstream
+    on a configured repo, so ``tool_context.code_repo`` is always populated here.
+    """
+
+    name = "view_repo_tree"
+    description = (
+        "Return a directory-tree overview of the code repository (depth/entry capped, "
+        "VCS/build/cache dirs pruned). Call this once for orientation before searching; "
+        "the result is cached for the run. Use `glob_files` for anything the tree's caps "
+        "leave out, and `grep_files`/`read_file` to drill into contents."
+    )
+    arguments_model = ViewRepoTreeArguments
+    result_model = ViewRepoTreeResult
+
+    async def run(
+        self, tool_context: ToolContext, arguments: ViewRepoTreeArguments
+    ) -> ViewRepoTreeResult:
+        """Return the cached (lazily rendered) repo tree overview."""
+        del arguments
+        repo = tool_context.require_code_repo()
+        return ViewRepoTreeResult(result=RepoTree(root=str(repo.root), tree=repo.tree))
 
 
 class GlobFilesTool:

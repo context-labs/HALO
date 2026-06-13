@@ -36,7 +36,7 @@ EXPECTED_TOOL_NAMES = {
     "call_subagent",
 }
 
-CODE_TOOL_NAMES = {"glob_files", "grep_files", "read_file"}
+CODE_TOOL_NAMES = {"view_repo_tree", "glob_files", "grep_files", "read_file"}
 
 
 @pytest.mark.asyncio
