@@ -27,9 +27,10 @@ def test_help_exposes_provider_and_model_flags_without_no_telemetry() -> None:
     assert "--parallel-tool-calls / --no-parallel-tool-calls" in result.output
     assert "--telemetry" in result.output
     assert "--no-telemetry" not in result.output
+    assert "--repo-path" in result.output
 
 
-def test_make_config_threads_cli_options_into_engine_config() -> None:
+def test_make_config_threads_cli_options_into_engine_config(tmp_path: Path) -> None:
     cfg = _make_config(
         model="claude-opus-4-7",
         synthesis_model=None,
@@ -45,6 +46,7 @@ def test_make_config_threads_cli_options_into_engine_config() -> None:
         base_url="https://api.anthropic.com/v1/",
         api_key="sk-ant-test",
         default_headers={"anthropic-beta": "tools-2025-01-01"},
+        repo_path=tmp_path,
     )
 
     assert cfg.maximum_depth == 3
@@ -56,6 +58,7 @@ def test_make_config_threads_cli_options_into_engine_config() -> None:
     assert cfg.model_provider.base_url == "https://api.anthropic.com/v1/"
     assert cfg.model_provider.api_key == "sk-ant-test"
     assert cfg.model_provider.default_headers == {"anthropic-beta": "tools-2025-01-01"}
+    assert cfg.repo_path == tmp_path
 
     for model in (cfg.root_agent.model, cfg.subagent.model):
         assert model.name == "claude-opus-4-7"
@@ -92,8 +95,10 @@ def test_make_config_overrides_synthesis_and_compaction_models() -> None:
         base_url=None,
         api_key=None,
         default_headers=None,
+        repo_path=None,
     )
 
+    assert cfg.repo_path is None
     assert cfg.root_agent.model.name == "claude-opus-4-7"
     assert cfg.root_agent.model.reasoning_effort == "low"
     assert cfg.subagent.model.name == "claude-opus-4-7"
@@ -137,6 +142,51 @@ def test_cli_leaves_provider_fields_unset_for_openai_env_fallback(
     assert captured["cfg"].model_provider.api_key is None
     assert captured["cfg"].model_provider.base_url is None
     assert captured["telemetry"] is False
+
+
+def test_cli_threads_repo_path_into_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text("")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(
+        trace_path: Path,
+        prompt: str,
+        cfg: EngineConfig,
+        *,
+        telemetry: bool = False,
+    ) -> None:
+        captured["cfg"] = cfg
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    monkeypatch.setattr(cli_main, "_stream", capture_stream)
+
+    result = CliRunner().invoke(
+        cli, [str(trace_path), "--prompt", "hi", "--repo-path", str(repo_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert captured["cfg"].repo_path == repo_dir
+
+
+def test_cli_rejects_nonexistent_repo_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "traces.jsonl"
+    trace_path.write_text("")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    result = CliRunner().invoke(
+        cli, [str(trace_path), "--prompt", "hi", "--repo-path", str(tmp_path / "nope")]
+    )
+
+    assert result.exit_code != 0
 
 
 def test_parse_headers() -> None:

@@ -68,6 +68,7 @@ def _make_config(
     base_url: str | None,
     api_key: str | None,
     default_headers: dict[str, str] | None,
+    repo_path: Path | None,
 ) -> EngineConfig:
     def make_model_config(name: str, reasoning_effort: ReasoningEffort | None) -> ModelConfig:
         return ModelConfig(
@@ -116,6 +117,7 @@ def _make_config(
         ),
         maximum_depth=max_depth,
         maximum_parallel_subagents=max_parallel,
+        repo_path=repo_path,
     )
 
 
@@ -166,6 +168,21 @@ def _run(
     max_depth: int = typer.Option(2, "--max-depth", min=0),
     max_turns: int = typer.Option(20, "--max-turns", min=1),
     max_parallel: int = typer.Option(10, "--max-parallel", min=1),
+    repo_path: Path | None = typer.Option(
+        None,
+        "--repo-path",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        help=(
+            "Local checkout of the agent/harness source code that produced the "
+            "traces. Enables the read-only code tools (glob_files/grep_files/"
+            "read_file) so the analysis can cross-reference findings with code "
+            "and cite file:line. Omit to disable."
+        ),
+    ),
     base_url: str | None = typer.Option(
         None,
         "--base-url",
@@ -253,6 +270,7 @@ def _run(
         base_url=base_url,
         api_key=api_key,
         default_headers=_parse_headers(headers),
+        repo_path=repo_path,
     )
     asyncio.run(_stream(trace_path, prompt, cfg, telemetry=telemetry))
 

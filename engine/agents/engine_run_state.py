@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 
 from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
+from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
 from engine.sandbox.sandbox import Sandbox
 from engine.traces.trace_store import TraceStore
@@ -22,12 +23,17 @@ class EngineRunState:
     provide a working sandbox (e.g. Deno not installed or Pyodide wheels could
     not be pre-cached) — in that case the tool factory simply does not register
     ``run_code`` so the agent never sees it.
+
+    ``code_repo`` is resolved once at run start from ``config.repo_path``.
+    ``None`` means no repo was configured — the tool factory then does not
+    register the code tools so the agent never sees them.
     """
 
     trace_store: TraceStore
     output_bus: EngineOutputBus
     config: EngineConfig
     sandbox: Sandbox | None
+    code_repo: CodeRepo | None
     openai_client: AsyncOpenAI
     executions_by_agent_id: dict[str, AgentExecution] = field(default_factory=dict)
     executions_by_tool_call_id: dict[str, AgentExecution] = field(default_factory=dict)
