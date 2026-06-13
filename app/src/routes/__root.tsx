@@ -6,6 +6,8 @@ import {
   HeadContent,
   Outlet,
   Scripts,
+  useNavigate,
+  useRouterState,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -117,6 +119,7 @@ function RootComponent() {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider storage={safeThemeStorage} storageKey="halo-canvas-theme">
             <PrefetchAppData />
+            <OnboardingGate />
             <StartupTransition>
               <Outlet />
             </StartupTransition>
@@ -127,6 +130,26 @@ function RootComponent() {
       </trpc.Provider>
     </RootDocument>
   );
+}
+
+/**
+ * First launches go through the welcome flow before anything else. Renders
+ * nothing; existing users are grandfathered server-side so the query returns
+ * a completion timestamp and this never navigates.
+ */
+function OnboardingGate() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const onboardingQuery = trpc.onboarding.get.useQuery();
+  const completedAt = onboardingQuery.data?.completedAt;
+
+  useEffect(() => {
+    if (!onboardingQuery.isSuccess) return;
+    if (completedAt || pathname === "/welcome") return;
+    void navigate({ replace: true, to: "/welcome" });
+  }, [completedAt, navigate, onboardingQuery.isSuccess, pathname]);
+
+  return null;
 }
 
 const SPLASH_VISIBLE_MS = 500;

@@ -4,6 +4,7 @@ import { BrainCircuit, Filter, Play, Trash2 } from "lucide-react";
 
 import { Button, Dialog, EmptyState, cn, toast } from "~/lib/ui";
 import { trpc } from "~/trpc";
+import { SetupNudgeBanner } from "~/onboarding/OnboardingPage";
 import { WorkspaceNav } from "~/workspace/WorkspaceNav";
 import { AppHeader } from "~/components/AppHeader";
 import { FilterSelect } from "~/components/FilterSelect";
@@ -144,7 +145,9 @@ export function AnalysisPage() {
                 }}
               >
                 <Play className="mr-2 h-4 w-4" />
-                Run Analysis
+        
+            <SetupNudgeBanner />
+        Run Analysis
               </Button>
             </div>
 

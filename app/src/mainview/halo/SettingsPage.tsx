@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Copy,
   DownloadCloud,
@@ -25,6 +26,7 @@ import { StatusBadge } from "~/components/StatusBadge";
 
 export function SettingsPage() {
   const utils = trpc.useUtils();
+  const navigate = useNavigate();
   const engineQuery = trpc.halo.engine.status.useQuery();
   const providersQuery = trpc.halo.providers.list.useQuery();
   const telemetryInfoQuery = trpc.telemetry.info.useQuery();
@@ -63,6 +65,12 @@ export function SettingsPage() {
     },
     onError(error) {
       toast.error({ title: "Provider test failed", description: error.message });
+    },
+  });
+  const replayOnboardingMutation = trpc.onboarding.reset.useMutation({
+    async onSuccess() {
+      await utils.onboarding.get.invalidate();
+      void navigate({ to: "/welcome" });
     },
   });
   const deleteProviderMutation = trpc.halo.providers.delete.useMutation({
@@ -105,14 +113,24 @@ export function SettingsPage() {
                       Appearance and local runtime details for this desktop app.
                     </p>
                   </div>
-                  <ThemeToggle
-                    trigger={
-                      <Button size="sm" variant="outline">
-                        <Palette className="mr-2 h-4 w-4" />
-                        Theme
-                      </Button>
-                    }
-                  />
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      disabled={replayOnboardingMutation.isPending}
+                      onClick={() => replayOnboardingMutation.mutate()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Replay onboarding
+                    </Button>
+                    <ThemeToggle
+                      trigger={
+                        <Button size="sm" variant="outline">
+                          <Palette className="mr-2 h-4 w-4" />
+                          Theme
+                        </Button>
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="divide-y divide-subtle px-5">
                   <DefinitionRow

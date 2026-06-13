@@ -21,6 +21,7 @@ export default defineConfig({
     "phoenix_connections",
     "phoenix_import_jobs",
     "file_import_jobs",
+    "app_settings",
     "halo_engine_settings",
     "halo_model_providers",
     "halo_runs",

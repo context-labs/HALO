@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as TracesRouteImport } from './routes/traces'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ImportsRouteImport } from './routes/imports'
@@ -23,6 +24,11 @@ import { Route as ComponentsFoundationsRouteImport } from './routes/components.f
 import { Route as ComponentsCustomRouteImport } from './routes/components.custom'
 import { Route as AnalysisRunIdRouteImport } from './routes/analysis_.$runId'
 
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TracesRoute = TracesRouteImport.update({
   id: '/traces',
   path: '/traces',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/imports': typeof ImportsRoute
   '/settings': typeof SettingsRoute
   '/traces': typeof TracesRoute
+  '/welcome': typeof WelcomeRoute
   '/analysis/$runId': typeof AnalysisRunIdRoute
   '/components/custom': typeof ComponentsCustomRoute
   '/components/foundations': typeof ComponentsFoundationsRoute
@@ -112,6 +119,7 @@ export interface FileRoutesByTo {
   '/imports': typeof ImportsRoute
   '/settings': typeof SettingsRoute
   '/traces': typeof TracesRoute
+  '/welcome': typeof WelcomeRoute
   '/analysis/$runId': typeof AnalysisRunIdRoute
   '/components/custom': typeof ComponentsCustomRoute
   '/components/foundations': typeof ComponentsFoundationsRoute
@@ -128,6 +136,7 @@ export interface FileRoutesById {
   '/imports': typeof ImportsRoute
   '/settings': typeof SettingsRoute
   '/traces': typeof TracesRoute
+  '/welcome': typeof WelcomeRoute
   '/analysis_/$runId': typeof AnalysisRunIdRoute
   '/components/custom': typeof ComponentsCustomRoute
   '/components/foundations': typeof ComponentsFoundationsRoute
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/imports'
     | '/settings'
     | '/traces'
+    | '/welcome'
     | '/analysis/$runId'
     | '/components/custom'
     | '/components/foundations'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/imports'
     | '/settings'
     | '/traces'
+    | '/welcome'
     | '/analysis/$runId'
     | '/components/custom'
     | '/components/foundations'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/imports'
     | '/settings'
     | '/traces'
+    | '/welcome'
     | '/analysis_/$runId'
     | '/components/custom'
     | '/components/foundations'
@@ -191,11 +203,19 @@ export interface RootRouteChildren {
   ImportsRoute: typeof ImportsRoute
   SettingsRoute: typeof SettingsRoute
   TracesRoute: typeof TracesRoute
+  WelcomeRoute: typeof WelcomeRoute
   AnalysisRunIdRoute: typeof AnalysisRunIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/traces': {
       id: '/traces'
       path: '/traces'
@@ -318,6 +338,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportsRoute: ImportsRoute,
   SettingsRoute: SettingsRoute,
   TracesRoute: TracesRoute,
+  WelcomeRoute: WelcomeRoute,
   AnalysisRunIdRoute: AnalysisRunIdRoute,
 }
 export const routeTree = rootRouteImport

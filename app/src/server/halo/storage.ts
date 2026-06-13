@@ -89,6 +89,7 @@ type EngineRow = {
   repo_url: string;
   install_path: string;
   status: "not_installed" | "installing" | "installed" | "error";
+  status_detail: string | null;
   commit_sha: string | null;
   last_error: string | null;
   installed_at: number | null;
@@ -131,6 +132,7 @@ export function getHaloEngineSettings(
     lastError: row?.last_error ?? null,
     repoUrl: row?.repo_url ?? HALO_REPO_URL,
     status: row?.status ?? "not_installed",
+    statusDetail: row?.status_detail ?? null,
     updatedAt: row?.updated_at ? isoFromMs(row.updated_at) : null,
   };
 }
@@ -163,6 +165,7 @@ export function saveHaloEngineSettings(
     error?: string | null;
     installPath?: string;
     repoUrl?: string;
+    statusDetail?: string | null;
   },
 ) {
   const now = Date.now();
@@ -170,13 +173,14 @@ export function saveHaloEngineSettings(
   sqlite
     .query(
       `INSERT INTO halo_engine_settings (
-        id, repo_url, install_path, status, commit_sha, last_error,
-        installed_at, updated_at
-      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?)
+        id, repo_url, install_path, status, status_detail, commit_sha,
+        last_error, installed_at, updated_at
+      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         repo_url = excluded.repo_url,
         install_path = excluded.install_path,
         status = excluded.status,
+        status_detail = excluded.status_detail,
         commit_sha = excluded.commit_sha,
         last_error = excluded.last_error,
         installed_at = excluded.installed_at,
@@ -186,6 +190,7 @@ export function saveHaloEngineSettings(
       input.repoUrl ?? existing.repoUrl,
       input.installPath ?? existing.installPath,
       input.status,
+      input.statusDetail ?? null,
       input.commitSha ?? existing.commitSha,
       input.error ?? null,
       input.status === "installed"

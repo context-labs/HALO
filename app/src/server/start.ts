@@ -6,6 +6,7 @@ import { createLangfuseImportService } from "./langfuse/importQueue";
 import { createPhoenixImportService } from "./phoenix/importQueue";
 import { createFileImportService } from "./fileimport/importQueue";
 import { createLiveEventStore } from "./live/events";
+import { grandfatherOnboarding } from "./settings/storage";
 import { startLiveWebSocketServer } from "./live/server";
 import { appRouter } from "./router";
 import { backfillTracePreviews } from "./telemetry/storage";
@@ -26,6 +27,7 @@ export function startTelemetryServer(options: StartTelemetryServerOptions = {}) 
   const database = createDatabase(options.dbPath);
 
   ensureSchema(database.sqlite);
+  grandfatherOnboarding(database.sqlite);
   try {
     const backfilled = backfillTracePreviews(database.sqlite);
     if (backfilled > 0) {

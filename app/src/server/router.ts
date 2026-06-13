@@ -25,6 +25,11 @@ import {
   saveLangfuseConnection,
 } from "./langfuse/storage";
 import { discoverPhoenix, previewPhoenixImport } from "./phoenix/client";
+import {
+  getOnboardingState,
+  markOnboardingComplete,
+  resetOnboarding,
+} from "./settings/storage";
 import type { PhoenixImportService } from "./phoenix/importQueue";
 import { previewJsonlFile } from "./fileimport/parser";
 import type { FileImportService } from "./fileimport/importQueue";
@@ -823,6 +828,14 @@ export const appRouter = t.router({
           }
         }),
     }),
+  }),
+
+  onboarding: t.router({
+    get: t.procedure.query(({ ctx }) => getOnboardingState(ctx.database.sqlite)),
+    complete: t.procedure.mutation(({ ctx }) =>
+      markOnboardingComplete(ctx.database.sqlite),
+    ),
+    reset: t.procedure.mutation(({ ctx }) => resetOnboarding(ctx.database.sqlite)),
   }),
 
   fileImport: t.router({

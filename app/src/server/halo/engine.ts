@@ -15,6 +15,12 @@ export async function getHaloEngineStatus(
   database: DatabaseHandle,
 ): Promise<HaloEngineStatus> {
   const settings = getHaloEngineSettings(database.sqlite, database.path);
+  // While an install runs, status polls would spawn `uv run` checks into the
+  // same directory `uv sync` is writing — skip the expensive probes and
+  // report the stored phase instead.
+  if (settings.status === "installing") {
+    return { ...settings, status: "installing" };
+  }
   const [git, uv, python, commit, importable] = await Promise.all([
     commandVersion(["git", "--version"]),
     commandVersion(["uv", "--version"]),
@@ -33,35 +39,56 @@ export async function getHaloEngineStatus(
       uv,
     },
     commitSha: commit ?? settings.commitSha,
-    status:
-      settings.status === "installing"
-        ? "installing"
-        : importable
-          ? "installed"
-          : settings.status === "error"
-            ? "error"
-            : "not_installed",
+    status: importable
+      ? "installed"
+      : settings.status === "error"
+        ? "error"
+        : "not_installed",
   };
 }
 
-export async function installOrUpdateHaloEngine(database: DatabaseHandle) {
+// Onboarding auto-starts the install while the Settings button stays
+// clickable; share one in-flight install per database instead of racing two
+// clones into the same directory.
+const installsInFlight = new Map<string, Promise<HaloEngineStatus>>();
+
+export function installOrUpdateHaloEngine(database: DatabaseHandle) {
+  const inFlight = installsInFlight.get(database.path);
+  if (inFlight) return inFlight;
+  const install = runHaloEngineInstall(database).finally(() => {
+    installsInFlight.delete(database.path);
+  });
+  installsInFlight.set(database.path, install);
+  return install;
+}
+
+async function runHaloEngineInstall(database: DatabaseHandle) {
   const current = getHaloEngineSettings(database.sqlite, database.path);
   const installPath = current.installPath || defaultHaloInstallPath(database.path);
-  saveHaloEngineSettings(database.sqlite, {
-    dbPath: database.path,
-    installPath,
-    repoUrl: current.repoUrl || HALO_REPO_URL,
-    status: "installing",
-  });
+  const repoUrl = current.repoUrl || HALO_REPO_URL;
+  const setPhase = (statusDetail: string) =>
+    saveHaloEngineSettings(database.sqlite, {
+      dbPath: database.path,
+      installPath,
+      repoUrl,
+      status: "installing",
+      statusDetail,
+    });
+
+  setPhase("Preparing…");
 
   try {
     mkdirSync(dirname(installPath), { recursive: true });
     if (existsSync(`${installPath}/.git`)) {
+      setPhase("Updating the HALO repository…");
       await runCommand(["git", "-C", installPath, "pull", "--ff-only"]);
     } else {
-      await runCommand(["git", "clone", current.repoUrl || HALO_REPO_URL, installPath]);
+      setPhase("Downloading the HALO repository…");
+      await runCommand(["git", "clone", repoUrl, installPath]);
     }
+    setPhase("Installing Python dependencies…");
     await runCommand(["uv", "sync"], { cwd: installPath, timeoutMs: 240_000 });
+    setPhase("Verifying the engine…");
     await runCommand(
       [
         "uv",
@@ -78,7 +105,7 @@ export async function installOrUpdateHaloEngine(database: DatabaseHandle) {
       dbPath: database.path,
       error: null,
       installPath,
-      repoUrl: current.repoUrl || HALO_REPO_URL,
+      repoUrl,
       status: "installed",
     });
   } catch (error) {
@@ -87,7 +114,7 @@ export async function installOrUpdateHaloEngine(database: DatabaseHandle) {
       dbPath: database.path,
       error: message,
       installPath,
-      repoUrl: current.repoUrl || HALO_REPO_URL,
+      repoUrl,
       status: "error",
     });
     throw error;

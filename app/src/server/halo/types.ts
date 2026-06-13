@@ -30,6 +30,7 @@ export type HaloEngineStatus = {
   lastError: string | null;
   repoUrl: string;
   status: "not_installed" | "installing" | "installed" | "error";
+  statusDetail: string | null;
   checks: {
     git: string | null;
     python: string | null;

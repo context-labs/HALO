@@ -11,7 +11,7 @@ export function githubReleaseUrl(version: string) {
 }
 export const DEFAULT_INGEST_URL = "http://127.0.0.1:8799/v1/traces";
 
-export type WorkspaceRoute = "traces" | "analysis" | "settings";
+export type WorkspaceRoute = "traces" | "analysis" | "settings" | "welcome";
 
 export type DesktopCommandName =
   | "about"
@@ -24,6 +24,7 @@ export type DesktopCommandName =
   | "navigate-analysis"
   | "navigate-sessions"
   | "navigate-settings"
+  | "open-setup"
   | "navigate-traces"
   | "open-app-data"
   | "open-docs"
@@ -212,6 +213,13 @@ export const commandPaletteItems: CommandPaletteItem[] = [
     shortcut: "⌘3",
   },
   {
+    command: "open-setup",
+    description: "Replay the welcome flow: engine install, model key, imports.",
+    group: "Navigation",
+    keywords: ["onboarding", "welcome", "setup", "getting started"],
+    label: "Open Setup Guide",
+  },
+  {
     command: "preferences",
     description: "Open local settings and model providers.",
     group: "Navigation",
@@ -317,6 +325,8 @@ export function routeForCommand(
     case "navigate-settings":
     case "preferences":
       return "settings";
+    case "open-setup":
+      return "welcome";
     default:
       return undefined;
   }

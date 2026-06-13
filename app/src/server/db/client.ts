@@ -247,6 +247,14 @@ export function ensureSchema(sqlite: Database) {
   `);
 
   sqlite.run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
+  sqlite.run(`
     CREATE TABLE IF NOT EXISTS file_import_jobs (
       id TEXT PRIMARY KEY NOT NULL,
       bunqueue_job_id TEXT,
@@ -378,6 +386,7 @@ export function ensureSchema(sqlite: Database) {
   `);
 
   ensureColumn(sqlite, "halo_run_events", "turn_index", "INTEGER");
+  ensureColumn(sqlite, "halo_engine_settings", "status_detail", "TEXT");
   ensureColumn(sqlite, "trace_summaries", "source", "TEXT NOT NULL DEFAULT 'local'");
   ensureColumn(sqlite, "trace_summaries", "source_trace_id", "TEXT");
   ensureColumn(sqlite, "trace_summaries", "source_connection_id", "TEXT");

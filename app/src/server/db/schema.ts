@@ -272,6 +272,12 @@ export const phoenixImportJobs = sqliteTable(
   ],
 );
 
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const fileImportJobs = sqliteTable(
   "file_import_jobs",
   {
@@ -307,6 +313,7 @@ export const haloEngineSettings = sqliteTable("halo_engine_settings", {
   repoUrl: text("repo_url").notNull().default("https://github.com/context-labs/HALO"),
   installPath: text("install_path").notNull(),
   status: text("status").notNull().default("not_installed"),
+  statusDetail: text("status_detail"),
   commitSha: text("commit_sha"),
   lastError: text("last_error"),
   installedAt: integer("installed_at"),
@@ -428,6 +435,7 @@ export type PhoenixConnectionRecord = typeof phoenixConnections.$inferSelect;
 export type NewPhoenixConnectionRecord = typeof phoenixConnections.$inferInsert;
 export type PhoenixImportJobRecord = typeof phoenixImportJobs.$inferSelect;
 export type NewPhoenixImportJobRecord = typeof phoenixImportJobs.$inferInsert;
+export type AppSettingRecord = typeof appSettings.$inferSelect;
 export type FileImportJobRecord = typeof fileImportJobs.$inferSelect;
 export type NewFileImportJobRecord = typeof fileImportJobs.$inferInsert;
 export type HaloEngineSettingsRecord = typeof haloEngineSettings.$inferSelect;
