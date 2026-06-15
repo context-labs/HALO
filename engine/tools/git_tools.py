@@ -27,16 +27,12 @@ class GitLogTool:
 
     name = "git_log"
     description = (
-        "List commits from the git history of the repository (read-only). Returns bounded "
-        "`CommitSummary` records (full/short sha, author, ISO-8601 `authored_at`, subject). "
-        "REGRESSION HUNTING: scope to a trace's timeframe with `since`/`until` (ISO-8601, "
-        "e.g. the trace's start/end timestamps) to see what shipped in that window; use "
-        "`pickaxe_string` to find the commit that introduced or removed an exact string (a "
-        "prompt fragment, a tool name like `spotify__login`, an error literal), or "
-        "`pickaxe_regex` for a POSIX extended-regex pattern. `ref_range` ('A..B' or a "
-        "branch/sha) and `path` "
-        "(repo-relative) narrow further. If `has_more`, tighten the window rather than "
-        "raising `max_commits`. Cite commits by short sha."
+        "List commits, newest first (read-only), as bounded `CommitSummary` records "
+        "(full/short sha, author, ISO-8601 `authored_at`, subject). `since`/`until` window "
+        "by date; `pickaxe_string` finds commits that changed an exact string and "
+        "`pickaxe_regex` a POSIX extended-regex (not PCRE — `\\w` won't work) — at most one. "
+        "`ref_range` ('A..B' or a branch/sha) and `path` narrow further. If `has_more`, "
+        "tighten the window rather than raising `max_commits`."
     )
     arguments_model = GitLogArguments
     result_model = GitLogResult
@@ -62,10 +58,8 @@ class GitShowTool:
 
     name = "git_show"
     description = (
-        "Inspect one commit (read-only). Returns the commit metadata plus a `--stat` file "
-        "summary by default; set `include_patch=true` for the (size-capped) diff body. Use "
-        "after `git_log`/`git_blame` surfaces a suspect short sha to see exactly what it "
-        "changed. `path` limits the stat/patch to one file. Cite the commit by short sha."
+        "Show one commit (read-only): its metadata plus a `--stat` file summary, or the "
+        "(size-capped) patch when `include_patch=true`. `path` limits to one file."
     )
     arguments_model = GitShowArguments
     result_model = GitShowResult
@@ -87,10 +81,8 @@ class GitDiffTool:
 
     name = "git_diff"
     description = (
-        "Diff two refs (read-only), e.g. a known-good commit/tag (`from_ref`) vs a later one "
-        "(`to_ref`) to see what changed across a regression window. Default `stat_only=true` "
-        "(cheap file summary); set false for the (size-capped) patch. `path` limits to one "
-        "file. Refs are shas/branches/tags."
+        "Diff two refs (read-only): a `--stat` summary by default, or the (size-capped) patch "
+        "when `stat_only=false`. `path` limits to one file; refs are shas/branches/tags."
     )
     arguments_model = GitDiffArguments
     result_model = GitDiffResult
@@ -113,11 +105,9 @@ class GitBlameTool:
 
     name = "git_blame"
     description = (
-        "Blame a line range of a file (read-only): for each line, the short sha, author, and "
-        "commit subject that last changed it. Take a problematic `path:line` from "
-        "`grep_files`/`read_file` and blame it to the commit that introduced the behavior, "
-        "then `git_show` that sha. `ref` defaults to the current checkout. Keep the "
-        "[start_line, end_line] window tight (capped)."
+        "Blame a file's line range (read-only): the short sha, author, and subject that last "
+        "changed each line. `ref` defaults to the working tree; keep the [start_line, "
+        "end_line] window tight (capped)."
     )
     arguments_model = GitBlameArguments
     result_model = GitBlameResult
@@ -140,11 +130,10 @@ class GitReadFileTool:
 
     name = "git_read_file"
     description = (
-        "Read a file's full contents AS OF a specific commit (`git show <ref>:<path>`), as "
-        "`cat -n` numbered lines with `offset`/`limit` paging — the same shape as `read_file`, "
-        "but at a historical `ref` instead of the working tree. The traces were produced by "
-        "whatever commit was deployed then, which may differ from the current checkout; use "
-        "this to read the code as it actually ran. Cite as `path:line`."
+        "Read a file's contents AS OF a commit (`git show <ref>:<path>`) as `cat -n` numbered "
+        "lines with `offset`/`limit` paging — like `read_file` but at a historical `ref`. "
+        "Reads the code as it actually ran: the traced commit may differ from the current "
+        "checkout."
     )
     arguments_model = GitReadFileArguments
     result_model = GitReadFileResult

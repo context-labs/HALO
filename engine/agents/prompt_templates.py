@@ -140,8 +140,7 @@ Git history:
   - Localize: `git_blame` a suspicious `path:line` to the commit that last
     touched it.
   - Inspect: `git_show` (or `git_diff` across a good..bad range) to confirm the
-    change; `git_read_file` to read the code *as it ran* (the traced commit may
-    differ from the current checkout).
+    change; `git_read_file` to read a suspect file at the traced commit.
   - Cite commits by short sha. Delegate git spelunking to subagents
     (depth < maximum_depth) to protect your own context, same as code exploration.
 """
