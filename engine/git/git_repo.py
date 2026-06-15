@@ -163,6 +163,30 @@ class GitRepo:
             env=_clean_git_env(),
         )
 
+    def _has_commits(self) -> bool:
+        """True if HEAD resolves to a commit; False on an unborn HEAD (a repo with no commits yet).
+
+        Uses ``rev-parse`` directly (not ``_git_stream``) because an unborn HEAD
+        exits 1 with no output, which the floor-1 streamer would surface as an
+        error — here that exit *is* the signal we want.
+        """
+        proc = subprocess.run(
+            [
+                self._git_executable,
+                "-C",
+                str(self._root),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "HEAD",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_clean_git_env(),
+        )
+        return proc.returncode == 0
+
     def _confined_rel(self, path: str) -> str:
         """Confine ``path`` to the repo root and return it repo-relative POSIX (for git ``-- <path>``)."""
         resolved = confine_path(self._root, path)
@@ -247,11 +271,12 @@ class GitRepo:
                 has_more = True
                 break
         except ValueError:
-            # ``git log`` exits 128 with no output on a repo that has no commits
-            # yet (unborn HEAD) — an empty history, not a failure, so return an
-            # empty log. A bad user-supplied ``ref_range`` also exits 128 (and is
-            # the only other way to get here with no output), so re-raise that.
-            if ref_range is not None:
+            # ``git log`` exits non-zero with no output for an unborn HEAD (a repo
+            # with no commits yet) — an empty history, not a failure. Every other
+            # such exit IS a real error (bad ``ref_range``, invalid ``pickaxe_regex``,
+            # ...) and must surface, so swallow only when there genuinely are no
+            # commits.
+            if self._has_commits():
                 raise
             return GitLog(commits=[], returned_count=0, has_more=False)
         finally:

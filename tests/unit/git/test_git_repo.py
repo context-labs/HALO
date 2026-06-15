@@ -119,6 +119,14 @@ def test_log_empty_repo_returns_empty(tmp_path: Path) -> None:
     assert _log(repo) == GitLog(commits=[], returned_count=0, has_more=False)
 
 
+def test_log_invalid_pickaxe_regex_raises(tmp_path: Path) -> None:
+    # An invalid regex makes git exit non-zero with no output, like an unborn HEAD;
+    # on a repo that HAS commits this must surface as an error, not an empty log.
+    repo = _repo(tmp_path)
+    with pytest.raises(ValueError, match="git failed"):
+        _log(repo, pickaxe_regex="(")
+
+
 # --- show --------------------------------------------------------------------
 
 
