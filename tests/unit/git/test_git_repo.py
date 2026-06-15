@@ -5,12 +5,14 @@ from pathlib import Path
 import pytest
 
 import engine.git.git_repo as git_repo_module
+from engine.code.models import FileContent
 from engine.git.git_repo import GitRepo
+from engine.git.models import BlameLine, GitBlame, GitDiff, GitLog, GitShow
 from tests.unit.git.git_fixture import (
     AUTHOR_NAME,
-    COMMIT_1_SUBJECT,
-    COMMIT_2_SUBJECT,
-    COMMIT_3_SUBJECT,
+    COMMIT_1,
+    COMMIT_2,
+    COMMIT_3,
     PICKAXE_TOKEN,
     build_empty_git_repo,
     build_git_repo,
@@ -23,19 +25,19 @@ def _repo(tmp_path: Path) -> GitRepo:
     return repo
 
 
-def _short_sha(repo: GitRepo, subject: str) -> str:
-    """Look up a commit's short sha by its subject (commits are unique here)."""
-    commits = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    ).commits
-    by_subject = {c.subject: c.short_sha for c in commits}
-    return by_subject[subject]
+def _log(repo: GitRepo, **overrides: object) -> GitLog:
+    """Call ``repo.log`` filling every keyword (all required) with a no-op default."""
+    args: dict[str, object] = {
+        "max_commits": 50,
+        "since": None,
+        "until": None,
+        "ref_range": None,
+        "path": None,
+        "pickaxe_string": None,
+        "pickaxe_regex": None,
+    }
+    args.update(overrides)
+    return repo.log(**args)  # type: ignore[arg-type]
 
 
 # --- open --------------------------------------------------------------------
@@ -67,128 +69,54 @@ def test_open_returns_none_when_git_missing(
 
 def test_log_orders_newest_first(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
+    assert _log(repo) == GitLog(
+        commits=[COMMIT_3, COMMIT_2, COMMIT_1], returned_count=3, has_more=False
     )
-    assert [c.subject for c in result.commits] == [
-        COMMIT_3_SUBJECT,
-        COMMIT_2_SUBJECT,
-        COMMIT_1_SUBJECT,
-    ]
-    assert [c.author for c in result.commits] == [AUTHOR_NAME, AUTHOR_NAME, AUTHOR_NAME]
-    assert result.commits[0].authored_at.startswith("2021-03-01")
-    assert result.returned_count == 3
-    assert result.has_more is False
 
 
 def test_log_since_until_window(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=50,
-        since="2021-01-15T00:00:00",
-        until="2021-02-15T00:00:00",
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    )
-    assert [c.subject for c in result.commits] == [COMMIT_2_SUBJECT]
+    result = _log(repo, since="2021-01-15T00:00:00", until="2021-02-15T00:00:00")
+    assert result == GitLog(commits=[COMMIT_2], returned_count=1, has_more=False)
 
 
 def test_log_max_commits_has_more(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=1,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    )
-    assert [c.subject for c in result.commits] == [COMMIT_3_SUBJECT]
-    assert result.returned_count == 1
-    assert result.has_more is True
+    assert _log(repo, max_commits=1) == GitLog(commits=[COMMIT_3], returned_count=1, has_more=True)
 
 
 def test_log_path_filter(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path="runner.py",
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    )
     # Commit 2 only touched config.py, so runner.py history is commits 3 and 1.
-    assert [c.subject for c in result.commits] == [COMMIT_3_SUBJECT, COMMIT_1_SUBJECT]
+    assert _log(repo, path="runner.py") == GitLog(
+        commits=[COMMIT_3, COMMIT_1], returned_count=2, has_more=False
+    )
 
 
 def test_log_pickaxe_string(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=PICKAXE_TOKEN,
-        pickaxe_regex=None,
+    assert _log(repo, pickaxe_string=PICKAXE_TOKEN) == GitLog(
+        commits=[COMMIT_2], returned_count=1, has_more=False
     )
-    assert [c.subject for c in result.commits] == [COMMIT_2_SUBJECT]
 
 
 def test_log_pickaxe_regex(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=r"UNIQUE_TOKEN_[A-Z]+",
+    assert _log(repo, pickaxe_regex=r"UNIQUE_TOKEN_[A-Z]+") == GitLog(
+        commits=[COMMIT_2], returned_count=1, has_more=False
     )
-    assert [c.subject for c in result.commits] == [COMMIT_2_SUBJECT]
 
 
 def test_log_bad_ref_range_raises(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     with pytest.raises(ValueError, match="git failed"):
-        repo.log(
-            max_commits=50,
-            since=None,
-            until=None,
-            ref_range="no-such-ref",
-            path=None,
-            pickaxe_string=None,
-            pickaxe_regex=None,
-        )
+        _log(repo, ref_range="no-such-ref")
 
 
 def test_log_empty_repo_returns_empty(tmp_path: Path) -> None:
     repo = GitRepo.open(build_empty_git_repo(tmp_path))
     assert repo is not None
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    )
-    assert result.commits == []
-    assert result.returned_count == 0
-    assert result.has_more is False
+    assert _log(repo) == GitLog(commits=[], returned_count=0, has_more=False)
 
 
 # --- show --------------------------------------------------------------------
@@ -196,28 +124,29 @@ def test_log_empty_repo_returns_empty(tmp_path: Path) -> None:
 
 def test_show_stat_summary(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    sha = _short_sha(repo, COMMIT_2_SUBJECT)
-    result = repo.show(ref=sha, path=None, include_patch=False)
-    assert result.commit.subject == COMMIT_2_SUBJECT
-    assert result.commit.short_sha == sha
-    assert "config.py" in result.body
-    assert "runner.py" not in result.body
-    assert result.truncated is False
+    result = repo.show(ref=COMMIT_2.short_sha, path=None, include_patch=False)
+    assert result == GitShow(
+        commit=COMMIT_2,
+        body=" config.py | 1 +\n 1 file changed, 1 insertion(+)",
+        truncated=False,
+    )
 
 
 def test_show_patch_body(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    sha = _short_sha(repo, COMMIT_2_SUBJECT)
-    result = repo.show(ref=sha, path=None, include_patch=True)
-    assert f"+{PICKAXE_TOKEN} = 1" in result.body
+    result = repo.show(ref=COMMIT_2.short_sha, path=None, include_patch=True)
+    # The full unified-diff body carries opaque blob-index shas; assert the commit
+    # and the added line rather than pinning the whole patch.
+    assert result.commit == COMMIT_2
     assert result.truncated is False
+    assert f"+{PICKAXE_TOKEN} = 1" in result.body
 
 
 def test_show_patch_truncates_on_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(git_repo_module, "RESPONSE_CHAR_BUDGET", 20)
     repo = _repo(tmp_path)
-    sha = _short_sha(repo, COMMIT_2_SUBJECT)
-    result = repo.show(ref=sha, path=None, include_patch=True)
+    result = repo.show(ref=COMMIT_2.short_sha, path=None, include_patch=True)
+    assert result.commit == COMMIT_2
     assert result.truncated is True
 
 
@@ -232,32 +161,38 @@ def test_show_bad_ref_raises(tmp_path: Path) -> None:
 
 def test_diff_stat(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    first = _short_sha(repo, COMMIT_1_SUBJECT)
-    last = _short_sha(repo, COMMIT_3_SUBJECT)
-    result = repo.diff(from_ref=first, to_ref=last, path=None, stat_only=True)
-    assert result.stat_only is True
-    assert "config.py" in result.diff
-    assert "runner.py" in result.diff
-    assert result.truncated is False
+    result = repo.diff(
+        from_ref=COMMIT_1.short_sha, to_ref=COMMIT_3.short_sha, path=None, stat_only=True
+    )
+    assert result == GitDiff(
+        diff=" config.py | 1 +\n runner.py | 2 +-\n 2 files changed, 2 insertions(+), 1 deletion(-)",
+        stat_only=True,
+        truncated=False,
+    )
 
 
 def test_diff_patch(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    first = _short_sha(repo, COMMIT_1_SUBJECT)
-    last = _short_sha(repo, COMMIT_3_SUBJECT)
-    result = repo.diff(from_ref=first, to_ref=last, path=None, stat_only=False)
+    result = repo.diff(
+        from_ref=COMMIT_1.short_sha, to_ref=COMMIT_3.short_sha, path=None, stat_only=False
+    )
+    # Full patch carries opaque blob-index shas; assert flags and the changed lines.
     assert result.stat_only is False
+    assert result.truncated is False
     assert f"+{PICKAXE_TOKEN} = 1" in result.diff
     assert "return MAX_RETRIES * 2" in result.diff
 
 
 def test_diff_path_filter(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    first = _short_sha(repo, COMMIT_1_SUBJECT)
-    last = _short_sha(repo, COMMIT_3_SUBJECT)
-    result = repo.diff(from_ref=first, to_ref=last, path="runner.py", stat_only=True)
-    assert "runner.py" in result.diff
-    assert "config.py" not in result.diff
+    result = repo.diff(
+        from_ref=COMMIT_1.short_sha, to_ref=COMMIT_3.short_sha, path="runner.py", stat_only=True
+    )
+    assert result == GitDiff(
+        diff=" runner.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)",
+        stat_only=True,
+        truncated=False,
+    )
 
 
 # --- blame -------------------------------------------------------------------
@@ -265,30 +200,62 @@ def test_diff_path_filter(tmp_path: Path) -> None:
 
 def test_blame_attributes_lines(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    first = _short_sha(repo, COMMIT_1_SUBJECT)
-    second = _short_sha(repo, COMMIT_2_SUBJECT)
     result = repo.blame(path="config.py", start_line=1, end_line=3, ref=None)
-    assert result.path == "config.py"
-    assert result.returned_count == 3
-    assert result.truncated is False
-    assert result.lines[0].line_number == 1
-    assert result.lines[0].line_text == "MAX_RETRIES = 3"
-    assert result.lines[0].short_sha == first
-    assert result.lines[0].summary == COMMIT_1_SUBJECT
-    assert result.lines[0].author == AUTHOR_NAME
-    # Line 3 (the pickaxe token) came in with commit 2.
-    assert result.lines[2].line_number == 3
-    assert result.lines[2].short_sha == second
-    assert result.lines[2].summary == COMMIT_2_SUBJECT
+    assert result == GitBlame(
+        path="config.py",
+        lines=[
+            BlameLine(
+                line_number=1,
+                short_sha=COMMIT_1.short_sha,
+                author=AUTHOR_NAME,
+                summary=COMMIT_1.subject,
+                line_text="MAX_RETRIES = 3",
+            ),
+            BlameLine(
+                line_number=2,
+                short_sha=COMMIT_1.short_sha,
+                author=AUTHOR_NAME,
+                summary=COMMIT_1.subject,
+                line_text="TIMEOUT_SECONDS = 30",
+            ),
+            BlameLine(
+                line_number=3,
+                short_sha=COMMIT_2.short_sha,
+                author=AUTHOR_NAME,
+                summary=COMMIT_2.subject,
+                line_text=f"{PICKAXE_TOKEN} = 1",
+            ),
+        ],
+        returned_count=3,
+        truncated=False,
+    )
 
 
 def test_blame_window_clamped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(git_repo_module, "_BLAME_MAX_LINES", 2)
     repo = _repo(tmp_path)
     result = repo.blame(path="config.py", start_line=1, end_line=3, ref=None)
-    assert result.truncated is True
-    assert result.returned_count == 2
-    assert [line.line_number for line in result.lines] == [1, 2]
+    assert result == GitBlame(
+        path="config.py",
+        lines=[
+            BlameLine(
+                line_number=1,
+                short_sha=COMMIT_1.short_sha,
+                author=AUTHOR_NAME,
+                summary=COMMIT_1.subject,
+                line_text="MAX_RETRIES = 3",
+            ),
+            BlameLine(
+                line_number=2,
+                short_sha=COMMIT_1.short_sha,
+                author=AUTHOR_NAME,
+                summary=COMMIT_1.subject,
+                line_text="TIMEOUT_SECONDS = 30",
+            ),
+        ],
+        returned_count=2,
+        truncated=True,
+    )
 
 
 def test_blame_confinement_raises(tmp_path: Path) -> None:
@@ -302,22 +269,30 @@ def test_blame_confinement_raises(tmp_path: Path) -> None:
 
 def test_read_at_ref_reads_historical_content(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    first = _short_sha(repo, COMMIT_1_SUBJECT)
-    result = repo.read_at_ref(ref=first, path="config.py", offset=1, limit=500)
     # config.py at commit 1 had no pickaxe token; only 2 lines.
-    assert result.content == "     1\tMAX_RETRIES = 3\n     2\tTIMEOUT_SECONDS = 30"
-    assert result.total_line_count == 2
-    assert result.start_line == 1
-    assert result.end_line == 2
-    assert result.truncated is False
+    result = repo.read_at_ref(ref=COMMIT_1.short_sha, path="config.py", offset=1, limit=500)
+    assert result == FileContent(
+        path="config.py",
+        content="     1\tMAX_RETRIES = 3\n     2\tTIMEOUT_SECONDS = 30",
+        start_line=1,
+        end_line=2,
+        total_line_count=2,
+        truncated=False,
+    )
 
 
-def test_read_at_ref_head_has_new_line(tmp_path: Path) -> None:
+def test_read_at_ref_reads_head(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    result = repo.read_at_ref(ref="HEAD", path="config.py", offset=1, limit=500)
     # At HEAD the pickaxe token line exists (3 lines).
-    assert result.total_line_count == 3
-    assert f"{PICKAXE_TOKEN} = 1" in result.content
+    result = repo.read_at_ref(ref="HEAD", path="config.py", offset=1, limit=500)
+    assert result == FileContent(
+        path="config.py",
+        content="     1\tMAX_RETRIES = 3\n     2\tTIMEOUT_SECONDS = 30\n     3\tUNIQUE_TOKEN_PICKAXE = 1",
+        start_line=1,
+        end_line=3,
+        total_line_count=3,
+        truncated=False,
+    )
 
 
 def test_read_at_ref_confinement_raises(tmp_path: Path) -> None:
@@ -368,18 +343,7 @@ def test_ignores_inherited_git_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     repo = GitRepo.open(root)
     assert repo is not None
     assert repo.root == root.resolve()
-    result = repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
+    # Reads ``root``'s history, not whatever GIT_DIR points at.
+    assert _log(repo) == GitLog(
+        commits=[COMMIT_3, COMMIT_2, COMMIT_1], returned_count=3, has_more=False
     )
-    # Reads ``root``'s history (3 commits), not whatever GIT_DIR points at.
-    assert [c.subject for c in result.commits] == [
-        COMMIT_3_SUBJECT,
-        COMMIT_2_SUBJECT,
-        COMMIT_1_SUBJECT,
-    ]

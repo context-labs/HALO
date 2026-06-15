@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from engine.agents.prompt_templates import (
+    CODE_REPO_PROMPT_SECTION_TEMPLATE,
     COMPACTION_SYSTEM_PROMPT,
     FINAL_SENTINEL,
+    GIT_REPO_PROMPT_SECTION_TEMPLATE,
     SYNTHESIS_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     render_root_system_prompt,
@@ -13,6 +14,7 @@ from engine.agents.prompt_templates import (
 )
 from engine.code.code_repo import CodeRepo
 from engine.git.git_repo import GitRepo
+from tests.unit.git.git_fixture import build_empty_git_repo
 
 
 def _code_repo(tmp_path: Path) -> CodeRepo:
@@ -22,8 +24,7 @@ def _code_repo(tmp_path: Path) -> CodeRepo:
 
 
 def _git_repo(tmp_path: Path) -> GitRepo:
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    repo = GitRepo.open(tmp_path)
+    repo = GitRepo.open(build_empty_git_repo(tmp_path))
     assert repo is not None
     return repo
 
@@ -63,15 +64,7 @@ def test_root_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
         code_repo=repo,
         git_repo=None,
     )
-    assert "Code repository:" in text
-    assert str(repo.root) in text
-    assert "`path:line`" in text
-    assert "Protect your own context" in text
-    assert "subagents" in text
-    # The section gives guidance only — no per-tool catalog (tool defs are
-    # already provided to the model) and no embedded tree.
-    assert "view_repo_tree" not in text
-    assert "main.py" not in text
+    assert CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=repo.root) in text
 
 
 def test_root_prompt_omits_git_section_without_repo() -> None:
@@ -92,11 +85,7 @@ def test_root_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
         code_repo=None,
         git_repo=repo,
     )
-    assert "Git history:" in text
-    assert str(repo.root) in text
-    assert "git_log" in text
-    assert "pickaxe" in text
-    assert "git_blame" in text
+    assert GIT_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=repo.root) in text
 
 
 def test_subagent_prompt_reports_depth_caps_and_system_prompt() -> None:
@@ -125,8 +114,7 @@ def test_subagent_prompt_includes_code_section_with_repo(tmp_path: Path) -> None
         code_repo=repo,
         git_repo=None,
     )
-    assert "Code repository:" in text
-    assert str(repo.root) in text
+    assert CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=repo.root) in text
 
 
 def test_subagent_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
@@ -138,8 +126,7 @@ def test_subagent_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
         code_repo=None,
         git_repo=repo,
     )
-    assert "Git history:" in text
-    assert str(repo.root) in text
+    assert GIT_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=repo.root) in text
 
 
 def test_compaction_and_synthesis_prompts_are_strings() -> None:

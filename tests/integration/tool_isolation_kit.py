@@ -164,8 +164,8 @@ def git_init_repo(tmp_path: Path, fixtures_dir: Path) -> GitRepo:
             "GIT_AUTHOR_EMAIL": "test@example.com",
             "GIT_COMMITTER_NAME": "Test Author",
             "GIT_COMMITTER_EMAIL": "test@example.com",
-            "GIT_AUTHOR_DATE": "2024-01-01T00:00:00",
-            "GIT_COMMITTER_DATE": "2024-01-01T00:00:00",
+            "GIT_AUTHOR_DATE": "2024-01-01T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2024-01-01T00:00:00+00:00",
         }
     )
     subprocess.run(

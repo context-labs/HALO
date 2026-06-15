@@ -46,9 +46,7 @@ def test_large_stderr_does_not_deadlock(tmp_path: Path) -> None:
         "    print('out', i)\n"
     )
     lines = list(stream_subprocess_lines(_py(code), cwd=tmp_path, error_label="prog"))
-    assert len(lines) == 100
-    assert lines[0] == "out 0\n"
-    assert lines[-1] == "out 99\n"
+    assert lines == [f"out {i}\n" for i in range(100)]
 
 
 def test_raises_on_error_without_output(tmp_path: Path) -> None:

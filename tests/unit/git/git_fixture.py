@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from engine.git.git_repo import _REPO_REDIRECT_GIT_ENV
+from engine.git.models import CommitSummary
 
 # Three commits, oldest first. Each entry is (commit subject, authored date,
 # {path: full new contents}). Commit 1 seeds config.py + runner.py; commit 2
@@ -26,10 +27,42 @@ COMMIT_3_SUBJECT = "Double the retries"
 PICKAXE_TOKEN = "UNIQUE_TOKEN_PICKAXE"
 AUTHOR_NAME = "Ada Lovelace"
 
+# Explicit UTC offsets so authored dates (and therefore the commit SHAs) are
+# identical on every machine regardless of the host timezone. These strings are
+# exactly what ``git_log``'s ``%aI`` renders back, so tests assert them verbatim.
+COMMIT_1_DATE = "2021-01-01T00:00:00+00:00"
+COMMIT_2_DATE = "2021-02-01T00:00:00+00:00"
+COMMIT_3_DATE = "2021-03-01T00:00:00+00:00"
+
 _CONFIG_V1 = "MAX_RETRIES = 3\nTIMEOUT_SECONDS = 30\n"
 _CONFIG_V2 = f"MAX_RETRIES = 3\nTIMEOUT_SECONDS = 30\n{PICKAXE_TOKEN} = 1\n"
 _RUNNER_V1 = "def run():\n    return MAX_RETRIES\n"
 _RUNNER_V2 = "def run():\n    return MAX_RETRIES * 2\n"
+
+# The exact ``CommitSummary`` each commit produces. SHAs are deterministic given
+# the pinned content, identity, and UTC-offset dates above, so tests assert whole
+# results against these literals (any fixture change is meant to break them).
+COMMIT_1 = CommitSummary(
+    full_sha="8f69edc1b54161bb565ec1e402fe05bf5528c140",
+    short_sha="8f69edc1b541",
+    author=AUTHOR_NAME,
+    authored_at=COMMIT_1_DATE,
+    subject=COMMIT_1_SUBJECT,
+)
+COMMIT_2 = CommitSummary(
+    full_sha="0da5bf2fb0c372d62766887f9d003e32510887f0",
+    short_sha="0da5bf2fb0c3",
+    author=AUTHOR_NAME,
+    authored_at=COMMIT_2_DATE,
+    subject=COMMIT_2_SUBJECT,
+)
+COMMIT_3 = CommitSummary(
+    full_sha="786f2e8035c64a12c41beb1c9ca423fa683bd5f4",
+    short_sha="786f2e8035c6",
+    author=AUTHOR_NAME,
+    authored_at=COMMIT_3_DATE,
+    subject=COMMIT_3_SUBJECT,
+)
 
 
 def _git_env(date: str | None = None) -> dict[str, str]:
@@ -77,15 +110,15 @@ def build_git_repo(tmp_path: Path) -> Path:
     (root / "config.py").write_text(_CONFIG_V1)
     (root / "runner.py").write_text(_RUNNER_V1)
     _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", COMMIT_1_SUBJECT, date="2021-01-01T00:00:00")
+    _git(root, "commit", "-q", "-m", COMMIT_1_SUBJECT, date=COMMIT_1_DATE)
 
     (root / "config.py").write_text(_CONFIG_V2)
     _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", COMMIT_2_SUBJECT, date="2021-02-01T00:00:00")
+    _git(root, "commit", "-q", "-m", COMMIT_2_SUBJECT, date=COMMIT_2_DATE)
 
     (root / "runner.py").write_text(_RUNNER_V2)
     _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", COMMIT_3_SUBJECT, date="2021-03-01T00:00:00")
+    _git(root, "commit", "-q", "-m", COMMIT_3_SUBJECT, date=COMMIT_3_DATE)
 
     return root
 

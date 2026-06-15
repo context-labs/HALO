@@ -4,12 +4,21 @@ from pathlib import Path
 
 import pytest
 
+from engine.code.models import FileContent
 from engine.git.git_repo import GitRepo
 from engine.git.models import (
+    BlameLine,
+    GitBlame,
     GitBlameArguments,
+    GitBlameResult,
+    GitDiff,
     GitDiffArguments,
+    GitDiffResult,
+    GitLog,
     GitLogArguments,
+    GitLogResult,
     GitReadFileArguments,
+    GitReadFileResult,
     GitShowArguments,
 )
 from engine.tools.git_tools import (
@@ -21,9 +30,10 @@ from engine.tools.git_tools import (
 )
 from engine.tools.tool_protocol import ToolContext
 from tests.unit.git.git_fixture import (
-    COMMIT_1_SUBJECT,
-    COMMIT_2_SUBJECT,
-    COMMIT_3_SUBJECT,
+    AUTHOR_NAME,
+    COMMIT_1,
+    COMMIT_2,
+    COMMIT_3,
     PICKAXE_TOKEN,
     build_git_repo,
 )
@@ -36,78 +46,103 @@ def ctx(tmp_path: Path) -> ToolContext:
     return ToolContext.model_construct(git_repo=repo)
 
 
-def _short_sha(ctx: ToolContext, subject: str) -> str:
-    assert ctx.git_repo is not None
-    commits = ctx.git_repo.log(
-        max_commits=50,
-        since=None,
-        until=None,
-        ref_range=None,
-        path=None,
-        pickaxe_string=None,
-        pickaxe_regex=None,
-    ).commits
-    return {c.subject: c.short_sha for c in commits}[subject]
-
-
-# --- happy paths -------------------------------------------------------------
+# --- happy paths (assert the whole envelope) ---------------------------------
 
 
 @pytest.mark.asyncio
 async def test_git_log_tool(ctx: ToolContext) -> None:
-    tool = GitLogTool()
-    result = await tool.run(ctx, GitLogArguments())
-    assert [c.subject for c in result.result.commits] == [
-        COMMIT_3_SUBJECT,
-        COMMIT_2_SUBJECT,
-        COMMIT_1_SUBJECT,
-    ]
-    assert result.result.has_more is False
+    result = await GitLogTool().run(ctx, GitLogArguments())
+    assert result == GitLogResult(
+        result=GitLog(commits=[COMMIT_3, COMMIT_2, COMMIT_1], returned_count=3, has_more=False)
+    )
 
 
 @pytest.mark.asyncio
 async def test_git_log_tool_pickaxe(ctx: ToolContext) -> None:
-    tool = GitLogTool()
-    result = await tool.run(ctx, GitLogArguments(pickaxe_string=PICKAXE_TOKEN))
-    assert [c.subject for c in result.result.commits] == [COMMIT_2_SUBJECT]
+    result = await GitLogTool().run(ctx, GitLogArguments(pickaxe_string=PICKAXE_TOKEN))
+    assert result == GitLogResult(
+        result=GitLog(commits=[COMMIT_2], returned_count=1, has_more=False)
+    )
 
 
 @pytest.mark.asyncio
 async def test_git_show_tool(ctx: ToolContext) -> None:
-    tool = GitShowTool()
-    sha = _short_sha(ctx, COMMIT_2_SUBJECT)
-    result = await tool.run(ctx, GitShowArguments(ref=sha, include_patch=True))
-    assert result.result.commit.subject == COMMIT_2_SUBJECT
+    result = await GitShowTool().run(
+        ctx, GitShowArguments(ref=COMMIT_2.short_sha, include_patch=True)
+    )
+    # Patch body carries opaque blob-index shas; assert the commit + added line.
+    assert result.result.commit == COMMIT_2
+    assert result.result.truncated is False
     assert f"+{PICKAXE_TOKEN} = 1" in result.result.body
 
 
 @pytest.mark.asyncio
 async def test_git_diff_tool(ctx: ToolContext) -> None:
-    tool = GitDiffTool()
-    first = _short_sha(ctx, COMMIT_1_SUBJECT)
-    last = _short_sha(ctx, COMMIT_3_SUBJECT)
-    result = await tool.run(ctx, GitDiffArguments(from_ref=first, to_ref=last, stat_only=True))
-    assert result.result.stat_only is True
-    assert "config.py" in result.result.diff
-    assert "runner.py" in result.result.diff
+    result = await GitDiffTool().run(
+        ctx,
+        GitDiffArguments(from_ref=COMMIT_1.short_sha, to_ref=COMMIT_3.short_sha, stat_only=True),
+    )
+    assert result == GitDiffResult(
+        result=GitDiff(
+            diff=" config.py | 1 +\n runner.py | 2 +-\n 2 files changed, 2 insertions(+), 1 deletion(-)",
+            stat_only=True,
+            truncated=False,
+        )
+    )
 
 
 @pytest.mark.asyncio
 async def test_git_blame_tool(ctx: ToolContext) -> None:
-    tool = GitBlameTool()
-    result = await tool.run(ctx, GitBlameArguments(path="config.py", start_line=1, end_line=3))
-    assert result.result.returned_count == 3
-    assert result.result.lines[0].line_text == "MAX_RETRIES = 3"
-    assert result.result.lines[2].summary == COMMIT_2_SUBJECT
+    result = await GitBlameTool().run(
+        ctx, GitBlameArguments(path="config.py", start_line=1, end_line=3)
+    )
+    assert result == GitBlameResult(
+        result=GitBlame(
+            path="config.py",
+            lines=[
+                BlameLine(
+                    line_number=1,
+                    short_sha=COMMIT_1.short_sha,
+                    author=AUTHOR_NAME,
+                    summary=COMMIT_1.subject,
+                    line_text="MAX_RETRIES = 3",
+                ),
+                BlameLine(
+                    line_number=2,
+                    short_sha=COMMIT_1.short_sha,
+                    author=AUTHOR_NAME,
+                    summary=COMMIT_1.subject,
+                    line_text="TIMEOUT_SECONDS = 30",
+                ),
+                BlameLine(
+                    line_number=3,
+                    short_sha=COMMIT_2.short_sha,
+                    author=AUTHOR_NAME,
+                    summary=COMMIT_2.subject,
+                    line_text=f"{PICKAXE_TOKEN} = 1",
+                ),
+            ],
+            returned_count=3,
+            truncated=False,
+        )
+    )
 
 
 @pytest.mark.asyncio
 async def test_git_read_file_tool(ctx: ToolContext) -> None:
-    tool = GitReadFileTool()
-    first = _short_sha(ctx, COMMIT_1_SUBJECT)
-    result = await tool.run(ctx, GitReadFileArguments(ref=first, path="config.py"))
-    assert result.result.content == "     1\tMAX_RETRIES = 3\n     2\tTIMEOUT_SECONDS = 30"
-    assert result.result.total_line_count == 2
+    result = await GitReadFileTool().run(
+        ctx, GitReadFileArguments(ref=COMMIT_1.short_sha, path="config.py")
+    )
+    assert result == GitReadFileResult(
+        result=FileContent(
+            path="config.py",
+            content="     1\tMAX_RETRIES = 3\n     2\tTIMEOUT_SECONDS = 30",
+            start_line=1,
+            end_line=2,
+            total_line_count=2,
+            truncated=False,
+        )
+    )
 
 
 # --- require_git_repo --------------------------------------------------------
@@ -115,30 +150,28 @@ async def test_git_read_file_tool(ctx: ToolContext) -> None:
 
 @pytest.mark.asyncio
 async def test_git_log_requires_git_repo() -> None:
-    tool = GitLogTool()
     with pytest.raises(RuntimeError, match="ToolContext.git_repo required"):
-        await tool.run(ToolContext.model_construct(), GitLogArguments())
+        await GitLogTool().run(ToolContext.model_construct(), GitLogArguments())
 
 
 @pytest.mark.asyncio
 async def test_git_show_requires_git_repo() -> None:
-    tool = GitShowTool()
     with pytest.raises(RuntimeError, match="ToolContext.git_repo required"):
-        await tool.run(ToolContext.model_construct(), GitShowArguments(ref="HEAD"))
+        await GitShowTool().run(ToolContext.model_construct(), GitShowArguments(ref="HEAD"))
 
 
 @pytest.mark.asyncio
 async def test_git_diff_requires_git_repo() -> None:
-    tool = GitDiffTool()
     with pytest.raises(RuntimeError, match="ToolContext.git_repo required"):
-        await tool.run(ToolContext.model_construct(), GitDiffArguments(from_ref="a", to_ref="b"))
+        await GitDiffTool().run(
+            ToolContext.model_construct(), GitDiffArguments(from_ref="a", to_ref="b")
+        )
 
 
 @pytest.mark.asyncio
 async def test_git_blame_requires_git_repo() -> None:
-    tool = GitBlameTool()
     with pytest.raises(RuntimeError, match="ToolContext.git_repo required"):
-        await tool.run(
+        await GitBlameTool().run(
             ToolContext.model_construct(),
             GitBlameArguments(path="x.py", start_line=1, end_line=1),
         )
@@ -146,9 +179,10 @@ async def test_git_blame_requires_git_repo() -> None:
 
 @pytest.mark.asyncio
 async def test_git_read_file_requires_git_repo() -> None:
-    tool = GitReadFileTool()
     with pytest.raises(RuntimeError, match="ToolContext.git_repo required"):
-        await tool.run(ToolContext.model_construct(), GitReadFileArguments(ref="HEAD", path="x.py"))
+        await GitReadFileTool().run(
+            ToolContext.model_construct(), GitReadFileArguments(ref="HEAD", path="x.py")
+        )
 
 
 # --- argument-model validators -----------------------------------------------
