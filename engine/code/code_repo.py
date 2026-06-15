@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import subprocess
 import sysconfig
-import threading
 from collections.abc import Generator
 from pathlib import Path
 
+from engine.code._paths import confine_path
+from engine.code._subprocess import stream_subprocess_lines
+from engine.code._textwindow import render_numbered_window
 from engine.code.models import (
     FileContent,
     GlobFileEntry,
@@ -59,9 +60,6 @@ _EXCLUDED_DIRS = frozenset(
         ".cache",
         ".tox",
         ".eggs",
-        "dist",
-        "build",
-        "target",
     }
 )
 
@@ -76,12 +74,6 @@ _GREP_LINE_TEXT_CAP_CHARS = 500
 # Cap on how much of ripgrep's stderr we retain (for the error message); excess
 # is still drained so the process never blocks, just not kept.
 _GREP_STDERR_CAP_CHARS = 64 * 1024
-
-# read_file caps: per-line and per-call. The response budget mirrors
-# ``_VIEW_TRACE_RESPONSE_BYTES_BUDGET`` in trace_store.py — a comfortable
-# fraction of even a modest context window.
-_READ_LINE_CAP_CHARS = 2000
-_READ_RESPONSE_CHAR_BUDGET = 150_000
 
 # Repo-tree overview caps so the map stays bounded on large repos.
 _TREE_MAX_DEPTH = 4
@@ -206,78 +198,17 @@ class CodeRepo:
         return args
 
     def _rg_line_stream(self, args: list[str]) -> Generator[str, None, None]:
-        """Run ripgrep and yield stdout lines, draining stderr concurrently.
+        """Stream ripgrep stdout lines (see ``stream_subprocess_lines`` for semantics).
 
-        Streaming lets callers stop early (so memory stays bounded to what they
-        keep) instead of buffering all of rg's output. stderr is drained in a
-        thread so a chatty rg (file-open warnings on a large/locked-down repo)
-        can't fill its pipe buffer and deadlock against our stdout read; capture
-        is capped, excess drained and discarded.
-
-        ``encoding="utf-8", errors="replace"`` decodes rg's (UTF-8) output
-        explicitly rather than via the process locale, so a non-UTF-8 locale or a
-        path with odd bytes can't raise ``UnicodeDecodeError``.
-
-        If rg exits with an error code (>=2, e.g. a malformed pattern) and
-        produced *no* output, raises ``ValueError`` with rg's message (surfaced
-        to the model). If it errored only after yielding output, the partial
-        results the caller already built are kept (a warning is logged) rather
-        than discarded. If the caller stops early, rg is terminated, no error.
-        This mirrors ripgrep's stdout/stderr handling in other harnesses (e.g.
-        OpenCode).
+        rg exit codes: 0 = ok, 1 = nothing matched, >=2 = error — so the error
+        floor is 2 (a "no matches" exit isn't a failure).
         """
-        proc = subprocess.Popen(
+        return stream_subprocess_lines(
             args,
             cwd=self._root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8",
-            errors="replace",
+            error_label="ripgrep",
+            stderr_cap=_GREP_STDERR_CAP_CHARS,
         )
-        stderr_capture: list[str] = []
-
-        def _drain_stderr() -> None:
-            pipe = proc.stderr
-            assert pipe is not None
-            captured = 0
-            for chunk in iter(lambda: pipe.read(8192), ""):
-                if captured < _GREP_STDERR_CAP_CHARS:
-                    stderr_capture.append(chunk)
-                    captured += len(chunk)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
-        yielded = False
-        try:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                yielded = True
-                yield line
-            # Natural end — the caller consumed everything. rg exit codes:
-            # 0 = ok, 1 = nothing matched, >=2 = error (e.g. a bad pattern).
-            returncode = proc.wait()
-            stderr_thread.join()
-            if returncode >= 2:
-                stderr = "".join(stderr_capture).strip()
-                if not yielded:
-                    raise ValueError(f"ripgrep failed: {stderr}")
-                # rg errored only after emitting output (rare): keep the partial
-                # results the caller built rather than failing the whole tool.
-                logger.warning(
-                    "ripgrep exited %d after producing output; returning partial results: %s",
-                    returncode,
-                    stderr,
-                )
-        finally:
-            # Runs on natural end, error, or GeneratorExit (caller stopped early).
-            if proc.poll() is None:
-                proc.terminate()
-                proc.wait()
-            stderr_thread.join()
-            if proc.stdout is not None:
-                proc.stdout.close()
-            if proc.stderr is not None:
-                proc.stderr.close()
 
     def glob(self, pattern: str, max_results: int) -> GlobMatches:
         """Return repo files matching ``pattern`` (relative POSIX paths + sizes), via ``rg --files``.
@@ -387,22 +318,8 @@ class CodeRepo:
         )
 
     def _resolve_confined(self, path: str) -> Path:
-        """Resolve ``path`` (relative to root, or an absolute path already inside root) within the repo.
-
-        ``.resolve()`` follows symlinks before the containment check, so a
-        symlink pointing outside the repo is rejected. Raises ``ValueError``
-        with a model-actionable message on escape.
-        """
-        candidate = Path(path)
-        if not candidate.is_absolute():
-            candidate = self._root / candidate
-        resolved = candidate.resolve()
-        if resolved != self._root and self._root not in resolved.parents:
-            raise ValueError(
-                f"path {path!r} resolves outside the repo root; pass a path relative "
-                "to the repo root (see glob_files/grep_files output)"
-            )
-        return resolved
+        """Resolve ``path`` within the repo root (shared canonical check); raise on escape."""
+        return confine_path(self._root, path)
 
     def read(self, path: str, offset: int, limit: int) -> FileContent:
         """Return a 1-based ``[offset, offset+limit)`` window of ``path`` as ``cat -n`` numbered lines.
@@ -410,11 +327,8 @@ class CodeRepo:
         Confines the path and rejects non-files and binary files (sniffing only
         the file head). Streams the file line-by-line — constant memory rather
         than loading and decoding the whole file — so a small window over a
-        multi-megabyte file is cheap. Line numbering is ``\\n``-based, matching
-        ripgrep, so ``read_file`` and ``grep_files`` agree on line numbers. Each
-        line is capped at ``_READ_LINE_CAP_CHARS`` and total output at
-        ``_READ_RESPONSE_CHAR_BUDGET``; ``truncated`` flags either clip.
-        ``start_line``/``end_line`` are ``0`` when the window is empty.
+        multi-megabyte file is cheap. Windowing/numbering/caps are shared with
+        ``git_read_file`` via ``render_numbered_window``.
         """
         resolved = self._resolve_confined(path)
         if not resolved.is_file():
@@ -426,52 +340,10 @@ class CodeRepo:
             if _looks_binary(fh.read(_BINARY_SNIFF_BYTES)):
                 raise ValueError(f"binary file: {path!r}; read_file only supports text files")
 
-        end_exclusive = offset + limit
-        rendered: list[str] = []
-        # ``truncated`` means output was clipped *within* the requested window —
-        # a line hit the per-line cap, or the response budget cut the window
-        # short. It does NOT flag a window that simply doesn't span the whole
-        # file: the caller sees that from ``total_line_count`` vs ``end_line``.
-        truncated = False
-        used_chars = 0
-        start_line = 0
-        end_line = 0
-        total_line_count = 0
         # ``newline="\n"`` splits on ``\n`` only (matching ripgrep's line counting);
-        # the per-line CR/LF terminator is stripped below.
+        # the per-line CR/LF terminator is stripped by the renderer.
         with resolved.open("r", encoding="utf-8", errors="replace", newline="\n") as fh:
-            for line_number, raw_line in enumerate(fh, start=1):
-                total_line_count = line_number
-                if not (offset <= line_number < end_exclusive):
-                    continue
-                if truncated:
-                    # Past the response budget — keep iterating only to finish
-                    # counting total_line_count.
-                    continue
-                line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
-                if line.endswith("\r"):
-                    line = line[:-1]
-                if len(line) > _READ_LINE_CAP_CHARS:
-                    line = f"{line[:_READ_LINE_CAP_CHARS]}... [HALO truncated: original {len(line)} chars]"
-                    truncated = True
-                entry = f"{line_number:6d}\t{line}"
-                if used_chars + len(entry) > _READ_RESPONSE_CHAR_BUDGET:
-                    truncated = True
-                    continue
-                rendered.append(entry)
-                used_chars += len(entry) + 1
-                if start_line == 0:
-                    start_line = line_number
-                end_line = line_number
-
-        return FileContent(
-            path=rel,
-            content="\n".join(rendered),
-            start_line=start_line,
-            end_line=end_line,
-            total_line_count=total_line_count,
-            truncated=truncated,
-        )
+            return render_numbered_window(fh, path=rel, offset=offset, limit=limit)
 
 
 def _truncate_line(text: str) -> str:

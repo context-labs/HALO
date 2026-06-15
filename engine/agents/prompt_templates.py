@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
+    from engine.git.git_repo import GitRepo
 
 FINAL_SENTINEL = "<final/>"
 
@@ -128,6 +129,30 @@ Code repository:
     never claim to have changed any file.
 """
 
+GIT_REPO_PROMPT_SECTION_TEMPLATE = """\
+
+Git history:
+- The repository at {repo_root} is a git checkout. Read-only git tools:
+  `git_log` (commits; supports `since`/`until` time-windowing and pickaxe
+  `-S`/`-G` string/regex search), `git_show` (one commit's stat or capped patch),
+  `git_diff` (two refs), `git_blame` (who last changed a line range),
+  `git_read_file` (a file's contents as of a commit). All are strictly read-only
+  — never claim to have committed, checked out, or changed anything.
+- Regression workflow:
+  - Window by trace time: pass a trace's start/end timestamps as `git_log`
+    `since`/`until` to see what shipped during the period the traces cover.
+  - Find an origin: use `git_log` `pickaxe_string` (or `pickaxe_regex`) to find
+    the commit that introduced or removed a specific prompt fragment, tool name,
+    or error string seen in the traces.
+  - Localize: take a suspicious `path:line` from `grep_files`/`read_file` and
+    `git_blame` it to the commit that last touched it.
+  - Inspect: `git_show <short_sha>` (or `git_diff <good>..<bad>`) to confirm the
+    change; `git_read_file <ref> <path>` to read the code *as it ran* (the traced
+    commit may differ from the current checkout).
+  - Cite commits by short sha. Delegate git spelunking to subagents
+    (depth < maximum_depth) to protect your own context, same as code exploration.
+"""
+
 COMPACTION_SYSTEM_PROMPT = """\
 You summarize a single conversation item for storage. Preserve tool names,
 argument shapes, and key result facts that future reasoning might need.
@@ -152,22 +177,40 @@ def _render_code_repo_section(code_repo: "CodeRepo | None") -> str:
     return CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=code_repo.root)
 
 
+def _render_git_repo_section(git_repo: "GitRepo | None") -> str:
+    """Render the git-history prompt section, or empty string when the repo is not a git work tree.
+
+    Live git context (branch, HEAD, recent commits) is intentionally NOT embedded
+    here — HALO analyzes historical traces, so the relevant commits come from the
+    trace timeframe, not HEAD. The agent orients via ``git_log`` on demand.
+    """
+    if git_repo is None:
+        return ""
+    return GIT_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=git_repo.root)
+
+
 def render_root_system_prompt(
     *,
     maximum_depth: int,
     maximum_parallel_subagents: int,
     code_repo: "CodeRepo | None",
+    git_repo: "GitRepo | None",
 ) -> str:
     """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
 
     Appends the code-repository section (tools + guidance, not the tree itself)
-    when ``code_repo`` is set; nothing otherwise.
+    when ``code_repo`` is set, and the git-history section when ``git_repo`` is
+    set; nothing otherwise.
     """
-    return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
-        system_prompt=SYSTEM_PROMPT,
-        maximum_depth=maximum_depth,
-        maximum_parallel_subagents=maximum_parallel_subagents,
-    ) + _render_code_repo_section(code_repo)
+    return (
+        ROOT_SYSTEM_PROMPT_TEMPLATE.format(
+            system_prompt=SYSTEM_PROMPT,
+            maximum_depth=maximum_depth,
+            maximum_parallel_subagents=maximum_parallel_subagents,
+        )
+        + _render_code_repo_section(code_repo)
+        + _render_git_repo_section(git_repo)
+    )
 
 
 def render_subagent_system_prompt(
@@ -176,15 +219,21 @@ def render_subagent_system_prompt(
     maximum_depth: int,
     maximum_parallel_subagents: int,
     code_repo: "CodeRepo | None",
+    git_repo: "GitRepo | None",
 ) -> str:
     """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
 
     Appends the code-repository section (tools + guidance, not the tree itself)
-    when ``code_repo`` is set; nothing otherwise.
+    when ``code_repo`` is set, and the git-history section when ``git_repo`` is
+    set; nothing otherwise.
     """
-    return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
-        system_prompt=SYSTEM_PROMPT,
-        depth=depth,
-        maximum_depth=maximum_depth,
-        maximum_parallel_subagents=maximum_parallel_subagents,
-    ) + _render_code_repo_section(code_repo)
+    return (
+        SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
+            system_prompt=SYSTEM_PROMPT,
+            depth=depth,
+            maximum_depth=maximum_depth,
+            maximum_parallel_subagents=maximum_parallel_subagents,
+        )
+        + _render_code_repo_section(code_repo)
+        + _render_git_repo_section(git_repo)
+    )

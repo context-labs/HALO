@@ -181,7 +181,10 @@ def _run(
             "Local checkout of the agent/harness source code that produced the "
             "traces. Enables the read-only code tools (glob_files/grep_files/"
             "read_file) so the analysis can cross-reference findings with code "
-            "and cite file:line. Omit to disable."
+            "and cite file:line. When the checkout is a git work tree (and git is "
+            "on PATH), the read-only git tools (git_log/git_show/git_diff/"
+            "git_blame/git_read_file) auto-enable too, for finding regressions and "
+            "problematic commits. Omit to disable."
         ),
     ),
     base_url: str | None = typer.Option(

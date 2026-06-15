@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -27,6 +29,7 @@ from engine.agents.engine_output_bus import EngineOutputBus
 from engine.agents.engine_run_state import EngineRunState
 from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
+from engine.git.git_repo import _REPO_REDIRECT_GIT_ENV, GitRepo
 from engine.model_config import ModelConfig
 from engine.sandbox.sandbox import Sandbox
 from engine.tools.subagent_tool_factory import _child_tools_for_depth
@@ -98,13 +101,16 @@ def wired_tools(
     parent_execution: AgentExecution,
     sandbox: Sandbox | None = None,
     code_repo: CodeRepo | None = None,
+    git_repo: GitRepo | None = None,
 ) -> dict[str, object]:
     """Build the production tool list for a depth-0 agent, indexed by tool name.
 
     Pass ``sandbox=`` to register ``run_code`` (use ``MagicMock(spec=Sandbox)``
     when the test does not actually invoke ``run_code``, or a real resolved
     ``Sandbox`` when it does). Pass ``code_repo=`` to register the code tools
-    (``glob_files``/``grep_files``/``read_file``).
+    (``glob_files``/``grep_files``/``read_file``); pass ``git_repo=`` to register
+    the git tools (``git_log``/``git_show``/``git_diff``/``git_blame``/
+    ``git_read_file``).
     """
     run_state = EngineRunState(
         trace_store=store,
@@ -112,6 +118,7 @@ def wired_tools(
         config=cfg,
         sandbox=sandbox,
         code_repo=code_repo,
+        git_repo=git_repo,
         openai_client=AsyncOpenAI(
             base_url=cfg.model_provider.base_url,
             api_key=cfg.model_provider.api_key,
@@ -136,3 +143,44 @@ def fake_sandbox() -> Sandbox:
     Tests that actually invoke ``run_code`` must use ``Sandbox.get()`` instead.
     """
     return MagicMock(spec=Sandbox)
+
+
+def git_init_repo(tmp_path: Path, fixtures_dir: Path) -> GitRepo:
+    """Copy ``tiny_repo`` into ``tmp_path``, git-init it with one commit, return an open ``GitRepo``.
+
+    Identity and dates are pinned and global/system git config is bypassed so
+    the result is independent of the host's git configuration.
+    """
+    root = tmp_path / "git_repo"
+    shutil.copytree(fixtures_dir / "tiny_repo", root)
+    # Strip ambient repo-redirect vars (e.g. GIT_DIR from a git pre-push hook) so
+    # the build targets the tmp repo, not HALO's own.
+    env = {k: v for k, v in os.environ.items() if k not in _REPO_REDIRECT_GIT_ENV}
+    env.update(
+        {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_AUTHOR_NAME": "Test Author",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test Author",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+            "GIT_AUTHOR_DATE": "2024-01-01T00:00:00",
+            "GIT_COMMITTER_DATE": "2024-01-01T00:00:00",
+        }
+    )
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-q", "-m", "Import tiny_repo"],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    repo = GitRepo.open(root)
+    assert repo is not None
+    return repo

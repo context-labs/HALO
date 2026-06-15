@@ -75,6 +75,7 @@ async def test_subagent_tool_streams_child_events_with_parent_linkage(
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
     parent_execution = AgentExecution(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from engine.agents.prompt_templates import (
@@ -11,12 +12,20 @@ from engine.agents.prompt_templates import (
     render_subagent_system_prompt,
 )
 from engine.code.code_repo import CodeRepo
+from engine.git.git_repo import GitRepo
 
 
 def _code_repo(tmp_path: Path) -> CodeRepo:
     (tmp_path / "engine").mkdir()
     (tmp_path / "engine" / "main.py").write_text("print('hi')\n")
     return CodeRepo.open(tmp_path)
+
+
+def _git_repo(tmp_path: Path) -> GitRepo:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    repo = GitRepo.open(tmp_path)
+    assert repo is not None
+    return repo
 
 
 def test_final_sentinel_constant() -> None:
@@ -28,6 +37,7 @@ def test_root_prompt_includes_sentinel_system_prompt_and_caps() -> None:
         maximum_depth=2,
         maximum_parallel_subagents=4,
         code_repo=None,
+        git_repo=None,
     )
     assert FINAL_SENTINEL in text
     assert SYSTEM_PROMPT in text
@@ -40,6 +50,7 @@ def test_root_prompt_omits_code_section_without_repo() -> None:
         maximum_depth=2,
         maximum_parallel_subagents=4,
         code_repo=None,
+        git_repo=None,
     )
     assert "Code repository:" not in text
 
@@ -50,6 +61,7 @@ def test_root_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
         maximum_depth=2,
         maximum_parallel_subagents=4,
         code_repo=repo,
+        git_repo=None,
     )
     assert "Code repository:" in text
     assert str(repo.root) in text
@@ -61,12 +73,38 @@ def test_root_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
     assert "main.py" not in text
 
 
+def test_root_prompt_omits_git_section_without_repo() -> None:
+    text = render_root_system_prompt(
+        maximum_depth=2,
+        maximum_parallel_subagents=4,
+        code_repo=None,
+        git_repo=None,
+    )
+    assert "Git history:" not in text
+
+
+def test_root_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    text = render_root_system_prompt(
+        maximum_depth=2,
+        maximum_parallel_subagents=4,
+        code_repo=None,
+        git_repo=repo,
+    )
+    assert "Git history:" in text
+    assert str(repo.root) in text
+    assert "git_log" in text
+    assert "pickaxe" in text
+    assert "git_blame" in text
+
+
 def test_subagent_prompt_reports_depth_caps_and_system_prompt() -> None:
     text = render_subagent_system_prompt(
         depth=1,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         code_repo=None,
+        git_repo=None,
     )
     assert "depth=1" in text
     assert "maximum_depth=2" in text
@@ -74,6 +112,7 @@ def test_subagent_prompt_reports_depth_caps_and_system_prompt() -> None:
     assert SYSTEM_PROMPT in text
     assert FINAL_SENTINEL in text
     assert "Code repository:" not in text
+    assert "Git history:" not in text
 
 
 def test_subagent_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
@@ -83,8 +122,22 @@ def test_subagent_prompt_includes_code_section_with_repo(tmp_path: Path) -> None
         maximum_depth=2,
         maximum_parallel_subagents=4,
         code_repo=repo,
+        git_repo=None,
     )
     assert "Code repository:" in text
+    assert str(repo.root) in text
+
+
+def test_subagent_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    text = render_subagent_system_prompt(
+        depth=1,
+        maximum_depth=2,
+        maximum_parallel_subagents=4,
+        code_repo=None,
+        git_repo=repo,
+    )
+    assert "Git history:" in text
     assert str(repo.root) in text
 
 

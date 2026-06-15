@@ -19,6 +19,7 @@ from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.turn_counter import TurnCounterInputFilter
 from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
+from engine.git.git_repo import GitRepo
 from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
@@ -80,6 +81,14 @@ async def stream_engine_async(
                     if engine_config.repo_path is not None
                     else None
                 )
+                # Git tools are additive: the same repo_path, enabled only when it's
+                # a git work tree and git is on PATH. GitRepo.open never raises —
+                # None just leaves the git tools unregistered.
+                git_repo = (
+                    GitRepo.open(engine_config.repo_path)
+                    if engine_config.repo_path is not None
+                    else None
+                )
 
                 output_bus = EngineOutputBus()
                 run_state = EngineRunState(
@@ -88,6 +97,7 @@ async def stream_engine_async(
                     config=engine_config,
                     sandbox=sandbox,
                     code_repo=code_repo,
+                    git_repo=git_repo,
                     openai_client=client,
                 )
 
@@ -101,7 +111,10 @@ async def stream_engine_async(
                 run_state.register(root_execution)
 
                 root_context = AgentContext.from_input_messages(
-                    messages=messages, engine_config=engine_config, code_repo=code_repo
+                    messages=messages,
+                    engine_config=engine_config,
+                    code_repo=code_repo,
+                    git_repo=git_repo,
                 )
 
                 sdk_agent = build_root_sdk_agent(

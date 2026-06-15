@@ -16,6 +16,7 @@ from engine.code.code_repo import CodeRepo
 from tests.integration.tool_isolation_kit import (
     engine_config,
     fake_sandbox,
+    git_init_repo,
     load_store,
     new_agent_context,
     root_execution,
@@ -37,6 +38,8 @@ EXPECTED_TOOL_NAMES = {
 }
 
 CODE_TOOL_NAMES = {"view_repo_tree", "glob_files", "grep_files", "read_file"}
+
+GIT_TOOL_NAMES = {"git_log", "git_show", "git_diff", "git_blame", "git_read_file"}
 
 
 @pytest.mark.asyncio
@@ -67,3 +70,19 @@ async def test_code_tools_registered_with_repo(tmp_path: Path, fixtures_dir: Pat
         code_repo=repo,
     )
     assert set(tools.keys()) == EXPECTED_TOOL_NAMES | CODE_TOOL_NAMES
+
+
+@pytest.mark.asyncio
+async def test_git_tools_registered_with_repo(tmp_path: Path, fixtures_dir: Path) -> None:
+    cfg = engine_config(maximum_depth=1)
+    store = await load_store(tmp_path, fixtures_dir)
+    repo = git_init_repo(tmp_path, fixtures_dir)
+    tools = wired_tools(
+        cfg=cfg,
+        store=store,
+        agent_context=new_agent_context(cfg),
+        parent_execution=root_execution(cfg),
+        sandbox=fake_sandbox(),
+        git_repo=repo,
+    )
+    assert set(tools.keys()) == EXPECTED_TOOL_NAMES | GIT_TOOL_NAMES

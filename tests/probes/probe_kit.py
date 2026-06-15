@@ -286,6 +286,7 @@ def make_root_context(
         messages=messages or make_default_messages(),
         engine_config=cfg,
         code_repo=None,
+        git_repo=None,
     )
 
 
@@ -349,6 +350,7 @@ async def make_run_state(
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 

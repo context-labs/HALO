@@ -76,6 +76,7 @@ def _mock_run_state(*, max_depth: int) -> MagicMock:
     run_state.trace_store = MagicMock()
     run_state.sandbox = None
     run_state.code_repo = None
+    run_state.git_repo = None
     run_state.openai_client = AsyncOpenAI(api_key="test")
     return run_state
 
@@ -123,6 +124,7 @@ async def test_guarded_invoke_raises_when_child_depth_exceeds_maximum() -> None:
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 
@@ -180,6 +182,7 @@ async def test_guarded_invoke_returns_failure_on_exception(monkeypatch: pytest.M
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 
@@ -225,6 +228,7 @@ async def test_guarded_invoke_counts_turns_and_tool_calls(monkeypatch) -> None:
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 
@@ -288,6 +292,7 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json(
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 
@@ -346,6 +351,7 @@ async def test_guarded_invoke_extracts_child_answer_from_raw_item(monkeypatch) -
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 
@@ -417,6 +423,7 @@ async def test_guarded_invoke_wires_run_state_client_via_run_config(
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=configured_client,
     )
 
@@ -492,6 +499,7 @@ async def test_depth_2_tool_runs_when_depth_1_slot_held(monkeypatch: pytest.Monk
         config=cfg,
         sandbox=None,
         code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 

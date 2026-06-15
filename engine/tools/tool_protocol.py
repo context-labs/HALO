@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from engine.agents.engine_output_bus import EngineOutputBus
     from engine.agents.engine_run_state import EngineRunState
     from engine.code.code_repo import CodeRepo
+    from engine.git.git_repo import GitRepo
     from engine.sandbox.sandbox import Sandbox
     from engine.traces.trace_store import TraceStore
 
@@ -34,6 +35,7 @@ class ToolContext(BaseModel):
     output_bus: "EngineOutputBus | None" = None
     sandbox: "Sandbox | None" = None
     code_repo: "CodeRepo | None" = None
+    git_repo: "GitRepo | None" = None
 
     def require_trace_store(self) -> "TraceStore":
         """Return the TraceStore or raise — every trace tool needs it."""
@@ -58,6 +60,12 @@ class ToolContext(BaseModel):
         if self.code_repo is None:
             raise RuntimeError("ToolContext.code_repo required")
         return self.code_repo
+
+    def require_git_repo(self) -> "GitRepo":
+        """Return the run's GitRepo or raise — needed by the git tools (``git_log``/``git_show``/...)."""
+        if self.git_repo is None:
+            raise RuntimeError("ToolContext.git_repo required")
+        return self.git_repo
 
 
 @runtime_checkable

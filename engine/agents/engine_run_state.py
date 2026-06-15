@@ -8,6 +8,7 @@ from engine.agents.agent_execution import AgentExecution
 from engine.agents.engine_output_bus import EngineOutputBus
 from engine.code.code_repo import CodeRepo
 from engine.engine_config import EngineConfig
+from engine.git.git_repo import GitRepo
 from engine.sandbox.sandbox import Sandbox
 from engine.traces.trace_store import TraceStore
 
@@ -27,6 +28,12 @@ class EngineRunState:
     ``code_repo`` is resolved once at run start from ``config.repo_path``.
     ``None`` means no repo was configured — the tool factory then does not
     register the code tools so the agent never sees them.
+
+    ``git_repo`` is resolved once at run start from ``config.repo_path`` when that
+    path is a git work tree and git is on PATH; ``None`` otherwise (the tool
+    factory then does not register the git tools). It is independent of
+    ``code_repo`` — a non-git source dir still enables code tools, and a git
+    checkout without ripgrep still enables git tools.
     """
 
     trace_store: TraceStore
@@ -34,6 +41,7 @@ class EngineRunState:
     config: EngineConfig
     sandbox: Sandbox | None
     code_repo: CodeRepo | None
+    git_repo: GitRepo | None
     openai_client: AsyncOpenAI
     executions_by_agent_id: dict[str, AgentExecution] = field(default_factory=dict)
     executions_by_tool_call_id: dict[str, AgentExecution] = field(default_factory=dict)

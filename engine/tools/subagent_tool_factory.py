@@ -26,6 +26,13 @@ from engine.tools.code_tools import (
     ReadFileTool,
     ViewRepoTreeTool,
 )
+from engine.tools.git_tools import (
+    GitBlameTool,
+    GitDiffTool,
+    GitLogTool,
+    GitReadFileTool,
+    GitShowTool,
+)
 from engine.tools.run_code_tool import RunCodeTool
 from engine.tools.subagent_result import SubagentToolResult
 from engine.tools.synthesis_tool import SynthesisTool
@@ -121,6 +128,7 @@ def _child_tools_for_depth(
             agent_context=parent_context,
             sandbox=run_state.sandbox,
             code_repo=run_state.code_repo,
+            git_repo=run_state.git_repo,
         )
 
     leaf_tools: list[Tool] = [
@@ -152,6 +160,15 @@ def _child_tools_for_depth(
         leaf_tools.append(to_sdk_function_tool(GlobFilesTool(), context_factory=make_ctx))
         leaf_tools.append(to_sdk_function_tool(GrepFilesTool(), context_factory=make_ctx))
         leaf_tools.append(to_sdk_function_tool(ReadFileTool(), context_factory=make_ctx))
+
+    # Git tools are additive and independent of the code tools (gated on a git
+    # work tree, not ripgrep). Like the code tools, registered at every depth.
+    if run_state.git_repo is not None:
+        leaf_tools.append(to_sdk_function_tool(GitLogTool(), context_factory=make_ctx))
+        leaf_tools.append(to_sdk_function_tool(GitShowTool(), context_factory=make_ctx))
+        leaf_tools.append(to_sdk_function_tool(GitDiffTool(), context_factory=make_ctx))
+        leaf_tools.append(to_sdk_function_tool(GitBlameTool(), context_factory=make_ctx))
+        leaf_tools.append(to_sdk_function_tool(GitReadFileTool(), context_factory=make_ctx))
 
     if depth >= engine_config.maximum_depth:
         return leaf_tools
@@ -185,6 +202,7 @@ def _build_subagent_as_tool(
         maximum_depth=engine_config.maximum_depth,
         maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
         code_repo=run_state.code_repo,
+        git_repo=run_state.git_repo,
     )
     # ``as_tool()``'s schema is fixed (``AgentAsToolInput`` shape) and does not
     # depend on the wrapped agent's tool list, so this stub Agent is enough to
