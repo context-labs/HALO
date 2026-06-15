@@ -268,6 +268,22 @@ def test_read_long_line_truncates(tmp_path: Path) -> None:
     assert "[HALO truncated:" in result.content
 
 
+def test_read_long_line_does_not_drop_later_lines(tmp_path: Path) -> None:
+    """A capped long line must not suppress the shorter lines after it (budget remains)."""
+    root = _build_repo(tmp_path)
+    (root / "mixed.py").write_text('x = "' + "A" * 3000 + '"\nshort = 1\nalso = 2\n')
+    repo = CodeRepo.open(root)
+    result = repo.read("mixed.py", 1, 500)
+    lines = result.content.split("\n")
+    assert lines[0].startswith("     1\t") and "[HALO truncated:" in lines[0]
+    assert lines[1] == "     2\tshort = 1"
+    assert lines[2] == "     3\talso = 2"
+    assert result.start_line == 1
+    assert result.end_line == 3
+    assert result.total_line_count == 3
+    assert result.truncated is True
+
+
 def test_read_empty_file(tmp_path: Path) -> None:
     root = _build_repo(tmp_path)
     (root / "empty.txt").write_text("")

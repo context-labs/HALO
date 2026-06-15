@@ -29,6 +29,7 @@ def render_numbered_window(
     end_exclusive = offset + limit
     rendered: list[str] = []
     truncated = False
+    budget_spent = False
     used_chars = 0
     start_line = 0
     end_line = 0
@@ -37,9 +38,10 @@ def render_numbered_window(
         total_line_count = line_number
         if not (offset <= line_number < end_exclusive):
             continue
-        if truncated:
-            # Past the response budget — keep iterating only to finish counting
-            # total_line_count.
+        if budget_spent:
+            # The window's char budget is gone; keep iterating only to finish
+            # counting total_line_count. (A per-line cap does NOT stop here — the
+            # capped line is still emitted and shorter later lines can follow.)
             continue
         line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
         if line.endswith("\r"):
@@ -50,6 +52,7 @@ def render_numbered_window(
         entry = f"{line_number:6d}\t{line}"
         if used_chars + len(entry) > RESPONSE_CHAR_BUDGET:
             truncated = True
+            budget_spent = True
             continue
         rendered.append(entry)
         used_chars += len(entry) + 1
