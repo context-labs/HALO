@@ -4,10 +4,10 @@ import logging
 import os
 import shutil
 import subprocess
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 
-from engine.code._limits import RESPONSE_CHAR_BUDGET
+from engine.code._limits import BINARY_SNIFF_BYTES, RESPONSE_CHAR_BUDGET
 from engine.code._paths import confine_path
 from engine.code._subprocess import stream_subprocess_lines
 from engine.code._textwindow import render_numbered_window
@@ -91,6 +91,24 @@ def _canonical_iso(value: str) -> str:
     if value.endswith("Z"):
         return f"{value[:-1]}+00:00"
     return value
+
+
+def _reject_binary(lines: Iterable[str], path: str) -> Generator[str, None, None]:
+    """Pass ``lines`` through, raising like ``read_file`` if the head holds a NUL.
+
+    ``git show`` streams a blob decoded with ``errors="replace"``; a NUL byte is
+    valid UTF-8 (U+0000) so it survives as ``\\x00`` rather than a replacement
+    char. A NUL in the leading content marks a binary blob — rejecting it keeps
+    ``git_read_file`` consistent with ``CodeRepo.read``'s working-tree guard
+    instead of returning mojibake.
+    """
+    sniffed = 0
+    for line in lines:
+        if sniffed < BINARY_SNIFF_BYTES:
+            if "\x00" in line:
+                raise ValueError(f"binary file: {path!r}; git_read_file only supports text files")
+            sniffed += len(line)
+        yield line
 
 
 def _validated_ref(ref: str) -> str:
@@ -393,6 +411,8 @@ class GitRepo:
         rel = self._confined_rel(path)
         stream = self._git_stream(["show", "--end-of-options", f"{_validated_ref(ref)}:{rel}"])
         try:
-            return render_numbered_window(stream, path=rel, offset=offset, limit=limit)
+            return render_numbered_window(
+                _reject_binary(stream, rel), path=rel, offset=offset, limit=limit
+            )
         finally:
             stream.close()

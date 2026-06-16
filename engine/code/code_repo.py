@@ -7,6 +7,7 @@ import sysconfig
 from collections.abc import Generator
 from pathlib import Path
 
+from engine.code._limits import BINARY_SNIFF_BYTES
 from engine.code._paths import confine_path
 from engine.code._subprocess import stream_subprocess_lines
 from engine.code._textwindow import render_numbered_window
@@ -62,10 +63,6 @@ _EXCLUDED_DIRS = frozenset(
     }
 )
 
-# How many leading bytes to sniff for a NUL when deciding a file is binary
-# (read_file only — ripgrep does its own binary detection for glob/grep/tree).
-_BINARY_SNIFF_BYTES = 8192
-
 # Per-match line truncation, so one pathological minified line can't flood the
 # model's context with a single result.
 _GREP_LINE_TEXT_CAP_CHARS = 500
@@ -89,7 +86,7 @@ _RIPGREP_INSTALL_HINT = (
 
 def _looks_binary(blob: bytes) -> bool:
     """Heuristic: a NUL byte in the leading bytes means binary (matches ripgrep's default)."""
-    return b"\x00" in blob[:_BINARY_SNIFF_BYTES]
+    return b"\x00" in blob[:BINARY_SNIFF_BYTES]
 
 
 class CodeRepo:
@@ -331,7 +328,7 @@ class CodeRepo:
 
         # Sniff only the head for a NUL — avoid reading the whole file to classify it.
         with resolved.open("rb") as fh:
-            if _looks_binary(fh.read(_BINARY_SNIFF_BYTES)):
+            if _looks_binary(fh.read(BINARY_SNIFF_BYTES)):
                 raise ValueError(f"binary file: {path!r}; read_file only supports text files")
 
         # ``newline="\n"`` splits on ``\n`` only (matching ripgrep's line counting);

@@ -14,6 +14,7 @@ from tests.unit.git.git_fixture import (
     COMMIT_2,
     COMMIT_3,
     PICKAXE_TOKEN,
+    build_binary_git_repo,
     build_empty_git_repo,
     build_git_repo,
 )
@@ -321,6 +322,15 @@ def test_read_at_ref_bad_ref_raises(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     with pytest.raises(ValueError, match="git failed"):
         repo.read_at_ref(ref="no-such-ref", path="config.py", offset=1, limit=10)
+
+
+def test_read_at_ref_binary_file_raises(tmp_path: Path) -> None:
+    # A binary blob at a ref is rejected like read_file rejects the working-tree
+    # version, rather than returned as replacement-char / NUL text.
+    repo = GitRepo.open(build_binary_git_repo(tmp_path))
+    assert repo is not None
+    with pytest.raises(ValueError, match="binary file"):
+        repo.read_at_ref(ref="HEAD", path="blob.bin", offset=1, limit=10)
 
 
 # --- ref injection guard -----------------------------------------------------

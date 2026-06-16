@@ -323,22 +323,26 @@ def test_read_binary_file_raises(tmp_path: Path) -> None:
 
 
 def test_tree_excludes_special_dirs_and_symlinks(tmp_path: Path) -> None:
+    # The whole tree: dirs first then files (alphabetical), binaries listed, but
+    # no .git/__pycache__ (excluded) and no sub/escape_link (symlink, not followed).
     repo = CodeRepo.open(_build_repo(tmp_path))
-    tree = repo.tree
-    assert "engine/" in tree
-    assert "config.py" in tree
-    assert ".git" not in tree
-    assert "__pycache__" not in tree
-    assert "escape_link" not in tree
+    assert repo.tree == (
+        "repo/\n"
+        "  engine/\n"
+        "    tools/\n"
+        "      runner.py\n"
+        "    blob.bin\n"
+        "    config.py\n"
+        "    long.py\n"
+        "    main.py"
+    )
 
 
 def test_tree_honors_gitignore(tmp_path: Path) -> None:
+    # debug.log and ignored_dir/ are gitignored and absent; .gitignore itself is a
+    # real (hidden) file and is listed.
     repo = CodeRepo.open(_build_gitignore_repo(tmp_path))
-    tree = repo.tree
-    assert "src/" in tree
-    assert "keep.py" in tree
-    assert "ignored_dir" not in tree
-    assert "debug.log" not in tree
+    assert repo.tree == ("gi/\n  src/\n    app.py\n  .gitignore\n  keep.py")
 
 
 def test_tree_depth_cap_marker(tmp_path: Path) -> None:
@@ -347,16 +351,19 @@ def test_tree_depth_cap_marker(tmp_path: Path) -> None:
     deep.mkdir(parents=True)
     (deep / "buried.py").write_text("x = 1\n")
     repo = CodeRepo.open(root)
-    assert "depth cap reached" in repo.tree
+    assert repo.tree == ("deep/\n  a/\n    b/\n      c/\n        ... (depth cap reached)")
 
 
-def test_tree_entry_cap_marker(tmp_path: Path) -> None:
-    root = tmp_path / "wide"
+def test_tree_entry_cap_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import engine.code.code_repo as code_repo_module
+
+    monkeypatch.setattr(code_repo_module, "_TREE_MAX_ENTRIES", 2)
+    root = tmp_path / "ec"
     root.mkdir()
-    for i in range(600):
-        (root / f"f{i:04d}.txt").write_text("x\n")
+    for name in ("a.py", "b.py", "c.py"):
+        (root / name).write_text("x\n")
     repo = CodeRepo.open(root)
-    assert "entry cap of 500 reached" in repo.tree
+    assert repo.tree == ("ec/\n  a.py\n  b.py\n  ... (entry cap of 2 reached)")
 
 
 def test_tree_caps_input_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -369,11 +376,8 @@ def test_tree_caps_input_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     for name in ("a.py", "b.py", "c.py", "d.py"):
         (root / name).write_text("x\n")
     repo = CodeRepo.open(root)
-    tree = repo.tree
-    assert "a.py" in tree
-    assert "b.py" in tree
-    assert "c.py" not in tree
-    assert "d.py" not in tree
+    # Only the two lexicographically-first paths are read, so c.py/d.py never appear.
+    assert repo.tree == ("many/\n  a.py\n  b.py")
 
 
 def test_tree_is_cached(tmp_path: Path) -> None:

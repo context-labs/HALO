@@ -17,3 +17,7 @@ READ_LIMIT_MAX = 2000
 # rendering file windows (read_file / git_read_file) and git diff/show bodies.
 LINE_CHAR_CAP = 2000
 RESPONSE_CHAR_BUDGET = 150_000
+
+# Leading bytes/chars sniffed for a NUL when classifying a file as binary —
+# shared by read_file (working-tree bytes) and git_read_file (git-show stream).
+BINARY_SNIFF_BYTES = 8192

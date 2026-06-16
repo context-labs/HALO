@@ -135,3 +135,20 @@ def build_empty_git_repo(tmp_path: Path) -> Path:
         env=_git_env(),
     )
     return root
+
+
+def build_binary_git_repo(tmp_path: Path) -> Path:
+    """Create a git work tree with one committed binary file (NUL bytes) and return its root."""
+    root = tmp_path / "bingit"
+    root.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_git_env(),
+    )
+    (root / "blob.bin").write_bytes(b"\x00\x01binary\x00data\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "Add binary blob", date=COMMIT_1_DATE)
+    return root
