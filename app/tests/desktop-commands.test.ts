@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  commandLabel,
   desktopCommandForShortcut,
   filterCommandPaletteItems,
   routeForCommand,
@@ -13,7 +12,6 @@ describe("desktop command helpers", () => {
     expect(routeForCommand("navigate-analysis")).toBe("analysis");
     expect(routeForCommand("navigate-settings")).toBe("settings");
     expect(routeForCommand("preferences")).toBe("settings");
-    expect(routeForCommand("copy-ingest-url")).toBeUndefined();
   });
 
   test("maps keyboard shortcuts to app commands", () => {
@@ -24,7 +22,7 @@ describe("desktop command helpers", () => {
     expect(desktopCommandForShortcut("3")).toBe("navigate-analysis");
     expect(desktopCommandForShortcut("4")).toBe("navigate-settings");
     expect(desktopCommandForShortcut("r")).toBe("refresh");
-    expect(desktopCommandForShortcut("c", true)).toBe("copy-ingest-url");
+    expect(desktopCommandForShortcut("c", true)).toBeUndefined();
     expect(desktopCommandForShortcut("i", true)).toBe("import-data");
     expect(desktopCommandForShortcut("l", true)).toBe("toggle-follow-latest");
     expect(desktopCommandForShortcut("c")).toBeUndefined();
@@ -37,6 +35,8 @@ describe("desktop command helpers", () => {
     expect(filterCommandPaletteItems("provider").map((item) => item.command)).toContain(
       "preferences",
     );
-    expect(commandLabel("copy-ingest-url")).toBe("Copy Ingest URL");
+    expect(filterCommandPaletteItems("ingest").map((item) => item.command)).not.toContain(
+      "copy-ingest-url",
+    );
   });
 });

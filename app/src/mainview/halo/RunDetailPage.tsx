@@ -560,16 +560,12 @@ function Shell({
   title: string;
 }) {
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <AppHeader
-        actions={actions}
-        icon={<BrainCircuit className="h-4 w-4 text-detail-brand" />}
-        title={title}
-      />
+    <main className="h-screen overflow-hidden bg-background text-foreground">
+      <AppHeader actions={actions} title={title} />
       {/* Fixed-height shell: each pane scrolls itself, the nav rail stays put. */}
-      <div className="grid h-screen grid-cols-[14rem_minmax(0,1fr)] pt-14">
+      <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)] pt-14">
         <WorkspaceNav active="analysis" />
-        <section className="flex min-w-0 flex-col overflow-hidden">{children}</section>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">{children}</section>
       </div>
     </main>
   );

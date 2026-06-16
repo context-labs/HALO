@@ -134,14 +134,11 @@ export function ImportsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <AppHeader
-        icon={<DownloadCloud className="h-4 w-4 text-detail-brand" />}
-        title="Imports"
-      />
-      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-[14rem_minmax(0,1fr)] pt-14">
+    <main className="h-screen overflow-hidden bg-background text-foreground">
+      <AppHeader title="Imports" />
+      <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)] pt-14">
         <WorkspaceNav active="imports" />
-        <section className="min-w-0 overflow-auto">
+        <section className="min-h-0 min-w-0 overflow-y-auto">
           <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>

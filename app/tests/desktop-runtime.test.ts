@@ -7,12 +7,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
   configureDesktopRuntimeEnv,
   defaultAppDataDir,
+  normalizeExecutablePath,
 } from "../src/bun/desktopRuntime";
 
 describe("desktop runtime paths", () => {
@@ -50,6 +51,22 @@ describe("desktop runtime paths", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
+  });
+
+  test("keeps existing PATH entries while adding common desktop executable paths", () => {
+    const env = {
+      HOME: "/Users/alice",
+      PATH: ["/custom/bin", "/usr/bin"].join(delimiter),
+    } as NodeJS.ProcessEnv;
+
+    const normalized = normalizeExecutablePath(env);
+    const entries = normalized.split(delimiter);
+
+    expect(entries.slice(0, 2)).toEqual(["/custom/bin", "/usr/bin"]);
+    expect(entries.filter((entry) => entry === "/usr/bin")).toHaveLength(1);
+    expect(entries).toContain("/opt/homebrew/bin");
+    expect(entries).toContain("/Users/alice/.local/bin");
+    expect(env.PATH).toBe(normalized);
   });
 
   test("migrates legacy bundle data into app support", () => {

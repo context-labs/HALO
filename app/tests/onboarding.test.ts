@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDatabase, ensureSchema } from "../src/server/db/client";
-import { installOrUpdateHaloEngine } from "../src/server/halo/engine";
+import { installOrUpdateHaloEngine, runCommand } from "../src/server/halo/engine";
 import {
   getHaloEngineSettings,
   saveHaloEngineSettings,
@@ -125,5 +125,11 @@ describe("engine install", () => {
     } finally {
       rmSync(installDir, { force: true, recursive: true });
     }
+  });
+
+  test("missing command errors are actionable", async () => {
+    await expect(runCommand(["uv-command-that-does-not-exist-for-halo-test"])).rejects.toThrow(
+      "uv-command-that-does-not-exist-for-halo-test was not found",
+    );
   });
 });

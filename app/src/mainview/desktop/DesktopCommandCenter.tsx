@@ -34,7 +34,6 @@ import {
   APP_DOCS_URL,
   APP_NAME,
   APP_RELEASE_URL,
-  DEFAULT_INGEST_URL,
   commandLabel,
   desktopCommandForShortcut,
   filterCommandPaletteItems,
@@ -85,12 +84,12 @@ export function DesktopCommandCenter() {
       bundleId: APP_BUNDLE_ID,
       channel: import.meta.env.DEV ? "dev" : "stable",
       dbPath: infoQuery.data?.dbPath ?? "Unavailable",
-      ingestUrl: infoQuery.data?.ingestUrl ?? DEFAULT_INGEST_URL,
+      ingestUrl: "Hidden outside Local Agent setup",
       liveUrl: infoQuery.data?.liveUrl ?? "Unavailable",
       releaseUrl: APP_RELEASE_URL,
       version: import.meta.env.DEV ? "dev" : "unknown",
     }),
-    [infoQuery.data?.dbPath, infoQuery.data?.ingestUrl, infoQuery.data?.liveUrl],
+    [infoQuery.data?.dbPath, infoQuery.data?.liveUrl],
   );
   const appMetadata = metadata ?? fallbackMetadata;
 
@@ -146,15 +145,6 @@ export function DesktopCommandCenter() {
     [navigate, path],
   );
 
-  const copyIngestUrl = useCallback(async () => {
-    const ingestUrl = infoQuery.data?.ingestUrl ?? appMetadata.ingestUrl;
-    await navigator.clipboard.writeText(ingestUrl);
-    toast.success({
-      title: "Ingest URL copied",
-      description: "Paste it into your local agent telemetry config.",
-    });
-  }, [appMetadata.ingestUrl, infoQuery.data?.ingestUrl]);
-
   const copyDiagnostics = useCallback(async () => {
     const diagnostics = diagnosticsText(appMetadata);
     await navigator.clipboard.writeText(diagnostics);
@@ -197,16 +187,13 @@ export function DesktopCommandCenter() {
           await checkForUpdates();
           break;
         case "clear-data":
-          dispatchTraceCommand({ type: "open-clear-data" });
+          void navigate({ to: "/settings" } as NavigateOptions);
           break;
         case "command-palette":
           setPaletteOpen(true);
           break;
         case "copy-diagnostics":
           await copyDiagnostics();
-          break;
-        case "copy-ingest-url":
-          await copyIngestUrl();
           break;
         case "import-data":
           void navigate({ to: "/import-data" } as NavigateOptions);
@@ -276,7 +263,6 @@ export function DesktopCommandCenter() {
       appMetadata,
       checkForUpdates,
       copyDiagnostics,
-      copyIngestUrl,
       dispatchTraceCommand,
       loadMetadata,
       navigate,
@@ -579,7 +565,6 @@ function AboutHaloDialog({
           </div>
           <Separator />
           <div className="space-y-2">
-            <AboutPathRow icon={Clipboard} label="Ingest URL" value={metadata.ingestUrl} />
             <AboutPathRow icon={Sparkles} label="Live socket" value={metadata.liveUrl} />
             <AboutPathRow icon={FolderOpen} label="App data" value={metadata.appDataDir} />
             <AboutPathRow icon={Database} label="Database" value={metadata.dbPath} />
@@ -672,12 +657,13 @@ function showNativeStatus(status: DesktopNativeStatus) {
 }
 
 function diagnosticsText(metadata: DesktopAppMetadata) {
+  const { ingestUrl: _ingestUrl, ...safeMetadata } = metadata;
   return JSON.stringify(
     {
       app: APP_NAME,
       generatedAt: new Date().toISOString(),
       location: typeof window === "undefined" ? null : window.location.href,
-      metadata,
+      metadata: safeMetadata,
       userAgent: typeof navigator === "undefined" ? null : navigator.userAgent,
     },
     null,

@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Copy,
+  Database,
   DownloadCloud,
+  FolderOpen,
   Loader2,
   Palette,
+  RefreshCcw,
   Save,
-  Settings,
   Trash2,
 } from "lucide-react";
 
@@ -23,6 +25,12 @@ import { WorkspaceNav } from "~/workspace/WorkspaceNav";
 import { AppHeader } from "~/components/AppHeader";
 import { FilterSelect } from "~/components/FilterSelect";
 import { StatusBadge } from "~/components/StatusBadge";
+import { getDesktopAppMetadata } from "../desktop/desktopBridge";
+import {
+  APP_BUNDLE_ID,
+  APP_RELEASE_URL,
+  type DesktopAppMetadata,
+} from "../../desktop/commands";
 
 export function SettingsPage() {
   const utils = trpc.useUtils();
@@ -38,6 +46,49 @@ export function SettingsPage() {
   const [providerPendingDelete, setProviderPendingDelete] = useState<
     { id: string; name: string } | null
   >(null);
+  const [clearTelemetryOpen, setClearTelemetryOpen] = useState(false);
+  const [factoryResetOpen, setFactoryResetOpen] = useState(false);
+  const [factoryResetText, setFactoryResetText] = useState("");
+  const [desktopMetadata, setDesktopMetadata] =
+    useState<DesktopAppMetadata | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getDesktopAppMetadata().then((metadata) => {
+      if (!cancelled) setDesktopMetadata(metadata);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const invalidateWorkspaceData = useCallback(async () => {
+    await Promise.all([
+      utils.telemetry.info.invalidate(),
+      utils.traces.facets.invalidate(),
+      utils.traces.list.invalidate(),
+      utils.traces.search.invalidate(),
+      utils.traces.get.invalidate(),
+      utils.traces.getSpans.invalidate(),
+      utils.spans.list.invalidate(),
+      utils.spans.facets.invalidate(),
+      utils.sessions.facets.invalidate(),
+      utils.sessions.list.invalidate(),
+      utils.sessions.search.invalidate(),
+      utils.sessions.get.invalidate(),
+      utils.sessions.getSpans.invalidate(),
+      utils.sessions.getTraces.invalidate(),
+      utils.halo.engine.status.invalidate(),
+      utils.halo.providers.list.invalidate(),
+      utils.halo.runs.list.invalidate(),
+      utils.langfuse.connections.list.invalidate(),
+      utils.langfuse.imports.list.invalidate(),
+      utils.phoenix.connections.list.invalidate(),
+      utils.phoenix.imports.list.invalidate(),
+      utils.fileImport.imports.list.invalidate(),
+      utils.onboarding.get.invalidate(),
+    ]);
+  }, [utils]);
 
   const installMutation = trpc.halo.engine.installOrUpdate.useMutation({
     async onSuccess() {
@@ -79,20 +130,64 @@ export function SettingsPage() {
       await utils.halo.providers.list.invalidate();
     },
   });
+  const clearTelemetryMutation = trpc.telemetry.clearData.useMutation({
+    onError(error) {
+      toast.error({
+        title: "Could not clear telemetry data",
+        description: error.message,
+      });
+    },
+    async onSuccess(result) {
+      setClearTelemetryOpen(false);
+      await invalidateWorkspaceData();
+      toast.success({
+        title: "Telemetry data cleared",
+        description: `${result.traceCount} traces and ${result.spanCount} spans removed.`,
+      });
+    },
+  });
+  const factoryResetMutation = trpc.telemetry.factoryReset.useMutation({
+    onError(error) {
+      toast.error({
+        title: "Factory reset failed",
+        description: error.message,
+      });
+    },
+    async onSuccess(result) {
+      setFactoryResetOpen(false);
+      setFactoryResetText("");
+      if (typeof window !== "undefined") {
+        window.localStorage.clear();
+      }
+      await invalidateWorkspaceData();
+      toast.success({
+        title: "Factory reset complete",
+        description: `${result.telemetry.traceCount} traces, ${result.haloRunCount} runs, and ${result.haloProviderCount} providers removed.`,
+      });
+      void navigate({ to: "/welcome" });
+    },
+  });
 
   const providers = providersQuery.data ?? [];
   const status = engineQuery.data;
   const telemetryInfo = telemetryInfoQuery.data;
+  const metadata = desktopMetadata ?? {
+    appDataDir: "Desktop shell unavailable in browser preview",
+    bundleId: APP_BUNDLE_ID,
+    channel: import.meta.env.DEV ? "dev" : "unknown",
+    dbPath: telemetryInfo?.dbPath ?? "data/halo-canvas.sqlite",
+    ingestUrl: "",
+    liveUrl: "",
+    releaseUrl: APP_RELEASE_URL,
+    version: import.meta.env.DEV ? "dev" : "unknown",
+  };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <AppHeader
-        icon={<Settings className="h-4 w-4 text-detail-brand" />}
-        title="Settings"
-      />
-      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-[14rem_minmax(0,1fr)] pt-14">
+    <main className="h-screen overflow-hidden bg-background text-foreground">
+      <AppHeader title="Settings" />
+      <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)] pt-14">
         <WorkspaceNav active="settings" />
-        <section className="min-w-0 overflow-auto">
+        <section className="min-h-0 min-w-0 overflow-y-auto">
           <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
             <div>
               <h1 className="text-2xl tracking-normal">Settings</h1>
@@ -136,22 +231,66 @@ export function SettingsPage() {
                   <DefinitionRow
                     copyable
                     label="Database path"
-                    value={telemetryInfo?.dbPath ?? "data/halo-canvas.sqlite"}
-                  />
-                  <DefinitionRow
-                    copyable
-                    label="Ingest endpoint"
-                    value={telemetryInfo?.ingestUrl ?? "http://127.0.0.1:8799/v1/traces"}
-                  />
-                  <DefinitionRow
-                    copyable
-                    label="Live socket"
-                    value={telemetryInfo?.liveUrl ?? "ws://127.0.0.1:8800"}
+                    value={metadata.dbPath}
                   />
                   <DefinitionRow
                     label="Stored telemetry"
                     value={`${telemetryInfo?.traceCount ?? 0} traces · ${telemetryInfo?.spanCount ?? 0} spans`}
                   />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-subtle bg-card">
+                <div className="flex items-start gap-3 border-b border-subtle p-5">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-subtle bg-background-muted">
+                    <Database className="h-4 w-4 text-detail-brand" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold">Data management</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Remove local telemetry or reset HALO back to a clean setup.
+                    </p>
+                  </div>
+                </div>
+                <div className="divide-y divide-subtle">
+                  <div className="flex items-center justify-between gap-4 p-5">
+                    <div className="min-w-0">
+                      <p className="font-medium">Clear telemetry data</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Removes traces, spans, search rows, ingest batches, and live telemetry history.
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Current database: {telemetryInfo?.traceCount ?? 0} traces ·{" "}
+                        {telemetryInfo?.spanCount ?? 0} spans
+                      </p>
+                    </div>
+                    <Button
+                      disabled={clearTelemetryMutation.isPending}
+                      onClick={() => setClearTelemetryOpen(true)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Clear telemetry
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 p-5">
+                    <div className="min-w-0">
+                      <p className="font-medium text-destructive">Factory reset</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Removes telemetry, providers, import credentials, HALO runs, engine install data, and app settings.
+                      </p>
+                    </div>
+                    <Button
+                      disabled={factoryResetMutation.isPending}
+                      onClick={() => setFactoryResetOpen(true)}
+                      size="sm"
+                      variant="destructive"
+                    >
+                      <RefreshCcw className="mr-2 h-4 w-4" />
+                      Factory reset
+                    </Button>
+                  </div>
                 </div>
               </section>
 
@@ -265,6 +404,35 @@ export function SettingsPage() {
                       </div>
                     ))
                   )}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-subtle bg-card">
+                <div className="flex items-start gap-3 border-b border-subtle p-5">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-subtle bg-background-muted">
+                    <FolderOpen className="h-4 w-4 text-detail-brand" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold">Desktop app</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Version and local paths for support and diagnostics.
+                    </p>
+                  </div>
+                </div>
+                <div className="divide-y divide-subtle px-5">
+                  <DefinitionRow label="Version" value={metadata.version} />
+                  <DefinitionRow label="Channel" value={metadata.channel} />
+                  <DefinitionRow label="Bundle ID" value={metadata.bundleId} />
+                  <DefinitionRow
+                    copyable
+                    label="Release URL"
+                    value={metadata.releaseUrl}
+                  />
+                  <DefinitionRow
+                    copyable
+                    label="App data folder"
+                    value={metadata.appDataDir}
+                  />
                 </div>
               </section>
             </div>
@@ -381,6 +549,60 @@ export function SettingsPage() {
         }}
         open={Boolean(providerPendingDelete)}
       />
+      <Dialog
+        cancelTitle="Cancel"
+        className="sm:!max-w-[520px] md:!w-[520px]"
+        confirmButtonVariant="destructive"
+        confirmTitle="Clear telemetry"
+        dialogDescription="This removes local traces, spans, search rows, ingest batches, and live telemetry history. Saved providers, import credentials, and HALO runs stay intact."
+        dialogTitle="Clear local telemetry data?"
+        disabled={clearTelemetryMutation.isPending}
+        loading={clearTelemetryMutation.isPending}
+        onConfirm={() => clearTelemetryMutation.mutate()}
+        onOpenChange={setClearTelemetryOpen}
+        open={clearTelemetryOpen}
+      >
+        <div className="rounded-md border border-destructive-border bg-destructive/5 p-4 text-sm">
+          <p className="font-medium text-foreground">This cannot be undone.</p>
+          <p className="mt-1 text-muted-foreground">
+            Current local database contains {telemetryInfo?.traceCount ?? 0} traces and{" "}
+            {telemetryInfo?.spanCount ?? 0} spans.
+          </p>
+        </div>
+      </Dialog>
+      <Dialog
+        cancelTitle="Cancel"
+        className="sm:!max-w-[540px] md:!w-[540px]"
+        confirmButtonVariant="destructive"
+        confirmTitle="Factory reset"
+        dialogDescription="This removes all local HALO data, including telemetry, providers, import credentials, analysis runs, engine install data, and app settings."
+        dialogTitle="Factory reset HALO?"
+        disabled={
+          factoryResetMutation.isPending || factoryResetText.trim() !== "HALO"
+        }
+        loading={factoryResetMutation.isPending}
+        onConfirm={() => factoryResetMutation.mutate()}
+        onOpenChange={(open) => {
+          setFactoryResetOpen(open);
+          if (!open) setFactoryResetText("");
+        }}
+        open={factoryResetOpen}
+      >
+        <div className="space-y-4">
+          <div className="rounded-md border border-destructive-border bg-destructive/5 p-4 text-sm">
+            <p className="font-medium text-foreground">This cannot be undone.</p>
+            <p className="mt-1 text-muted-foreground">
+              Saved API keys, import credentials, HALO runs, local traces, and app-owned files will be removed.
+            </p>
+          </div>
+          <Input
+            label='Type "HALO" to confirm'
+            onChange={(event) => setFactoryResetText(event.currentTarget.value)}
+            placeholder="HALO"
+            value={factoryResetText}
+          />
+        </div>
+      </Dialog>
     </main>
   );
 }

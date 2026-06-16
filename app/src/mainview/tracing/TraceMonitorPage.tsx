@@ -11,25 +11,20 @@ import { Link } from "@tanstack/react-router";
 import {
   Activity,
   ArrowUpDown,
-  Clipboard,
   DownloadCloud,
   MoreHorizontal,
   RefreshCcw,
   Search,
-  Trash2,
 } from "lucide-react";
 
 import {
   Button,
-  Dialog,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
   cn,
-  toast,
 } from "~/lib/ui";
 import { trpc } from "~/trpc";
 import { WorkspaceNav } from "~/workspace/WorkspaceNav";
@@ -107,7 +102,6 @@ export function TraceMonitorPage({
   const [traceSortBy, setTraceSortBy] = useState<TraceSortKey>("start_time");
   const [sessionSortBy, setSessionSortBy] =
     useState<SessionSortKey>("last_activity");
-  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [phoenixDialogOpen, setPhoenixDialogOpen] = useState(false);
   const [fileDialogOpen, setFileDialogOpen] = useState(false);
@@ -126,44 +120,6 @@ export function TraceMonitorPage({
   const selectedTraceIdRef = useRef<string | undefined>(selectedTraceId);
   const viewModeRef = useRef(viewMode);
   const utils = trpc.useUtils();
-
-  const clearDataMutation = trpc.telemetry.clearData.useMutation({
-    onError(error) {
-      toast.error({
-        title: "Could not clear telemetry data",
-        description: error.message,
-      });
-    },
-    async onSuccess(result) {
-      setClearDialogOpen(false);
-      setRecentTraceIds(new Set());
-      setRecentSessionIds(new Set());
-      setSearchText("");
-      onFollowLatestChange(false);
-      onSelectTrace(null);
-      onSelectSession(null);
-      await Promise.all([
-        utils.telemetry.info.invalidate(),
-        utils.traces.facets.invalidate(),
-        utils.traces.list.invalidate(),
-        utils.traces.search.invalidate(),
-        utils.traces.get.invalidate(),
-        utils.traces.getSpans.invalidate(),
-        utils.spans.list.invalidate(),
-        utils.spans.facets.invalidate(),
-        utils.sessions.facets.invalidate(),
-        utils.sessions.list.invalidate(),
-        utils.sessions.search.invalidate(),
-        utils.sessions.get.invalidate(),
-        utils.sessions.getSpans.invalidate(),
-        utils.sessions.getTraces.invalidate(),
-      ]);
-      toast.success({
-        title: "Telemetry data cleared",
-        description: `${result.traceCount} traces and ${result.spanCount} spans removed.`,
-      });
-    },
-  });
 
   useEffect(() => {
     followLatestRef.current = followLatest;
@@ -437,25 +393,6 @@ export function TraceMonitorPage({
     [traces],
   );
 
-  const copyText = async (
-    value: string,
-    title: string,
-    description: string,
-  ) => {
-    await navigator.clipboard.writeText(value);
-    toast.success({
-      title,
-      description,
-    });
-  };
-
-  const copyIngestUrl = () =>
-    copyText(
-      ingestUrl,
-      "Ingest URL copied",
-      "Paste it into your local agent telemetry config.",
-    );
-
   const refresh = () => {
     void infoQuery.refetch();
     if (isTracesMode) {
@@ -485,12 +422,6 @@ export function TraceMonitorPage({
       event: WindowEventMap[typeof TRACE_PAGE_COMMAND_EVENT],
     ) => {
       switch (event.detail.type) {
-        case "copy-ingest-url":
-          void copyIngestUrl();
-          break;
-        case "open-clear-data":
-          setClearDialogOpen(true);
-          break;
         case "open-import":
           onOpenImportData();
           break;
@@ -509,12 +440,11 @@ export function TraceMonitorPage({
     return () => {
       window.removeEventListener(TRACE_PAGE_COMMAND_EVENT, onPageCommand);
     };
-  }, [copyIngestUrl, handleFollowLatestChange, isTracesMode, onOpenImportData, refresh]);
+  }, [handleFollowLatestChange, isTracesMode, onOpenImportData, refresh]);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="h-screen overflow-hidden bg-background text-foreground">
       <AppHeader
-        icon={<Activity className="h-4 w-4 text-detail-brand" />}
         status={
           <LiveStatusBadge
             health={infoQuery.data?.lastBatch?.status ?? "waiting"}
@@ -566,18 +496,6 @@ export function TraceMonitorPage({
                   />
                   Refresh
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void copyIngestUrl()}>
-                  <Clipboard className="mr-2 h-4 w-4" />
-                  Copy ingest URL
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onClick={() => setClearDialogOpen(true)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Clear data…
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </>
@@ -586,7 +504,7 @@ export function TraceMonitorPage({
 
       <div
         className={cn(
-          "grid min-h-[calc(100vh-3.5rem)] pt-14",
+          "grid h-full min-h-0 pt-14",
           isTelemetryEmpty
             ? "grid-cols-[14rem_minmax(0,1fr)]"
             : "grid-cols-[14rem_300px_minmax(0,1fr)]",
@@ -623,17 +541,16 @@ export function TraceMonitorPage({
           />
         )}
 
-        <section className="min-w-0 overflow-hidden">
+        <section className="min-h-0 min-w-0 overflow-hidden">
           {isTelemetryEmpty ? (
             <ImportDataScreen
-              ingestUrl={ingestUrl}
               onConnectLocalAgent={() => setLocalAgentSetupOpen(true)}
               onImportJsonl={() => setFileDialogOpen(true)}
               onImportLangfuse={() => setImportDialogOpen(true)}
               onImportPhoenix={() => setPhoenixDialogOpen(true)}
             />
           ) : (
-            <div className="flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
+            <div className="flex h-full min-h-0 flex-col">
               <TelemetryStatStrip
                 errorCount={
                   isTracesMode ? traceMetrics.errorCount : sessionMetrics.errorCount
@@ -798,34 +715,6 @@ export function TraceMonitorPage({
         onOpenChange={setLocalAgentSetupOpen}
         open={localAgentSetupOpen}
       />
-      <Dialog
-        cancelTitle="Cancel"
-        className="sm:!max-w-[520px] md:!w-[520px]"
-        confirmButtonVariant="destructive"
-        confirmTitle="Clear data"
-        dialogDescription="This removes local traces, spans, search rows, ingest batches, and live telemetry history. Saved Langfuse and Phoenix connections stay intact."
-        dialogTitle="Clear local telemetry data?"
-        disabled={clearDataMutation.isPending}
-        loading={clearDataMutation.isPending}
-        onConfirm={() => clearDataMutation.mutate()}
-        onOpenChange={setClearDialogOpen}
-        open={clearDialogOpen}
-      >
-        <div className="rounded-md border border-destructive-border bg-destructive/5 p-4 text-sm">
-          <div className="flex items-start gap-3">
-            <Trash2 className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <div className="space-y-1">
-              <p className="font-medium text-foreground">
-                This cannot be undone.
-              </p>
-              <p className="text-muted-foreground">
-                Current local database contains {infoQuery.data?.traceCount ?? 0}{" "}
-                traces and {infoQuery.data?.spanCount ?? 0} spans.
-              </p>
-            </div>
-          </div>
-        </div>
-      </Dialog>
     </main>
   );
 }

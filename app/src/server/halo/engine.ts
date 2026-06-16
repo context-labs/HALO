@@ -159,22 +159,34 @@ export async function runCommand(
   command: string[],
   options: { cwd?: string; timeoutMs?: number } = {},
 ) {
+  const commandName = command[0];
+  if (!commandName) {
+    throw new Error("Cannot run an empty command.");
+  }
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
     options.timeoutMs ?? COMMAND_TIMEOUT_MS,
   );
   try {
-    const proc = Bun.spawn(command, {
-      cwd: options.cwd,
-      stderr: "pipe",
-      stdout: "pipe",
-      signal: controller.signal,
-    });
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(command, {
+        cwd: options.cwd,
+        stderr: "pipe",
+        stdout: "pipe",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (isCommandNotFoundError(error)) {
+        throw new Error(commandNotFoundMessage(commandName));
+      }
+      throw error;
+    }
     const [exitCode, stdout, stderr] = await Promise.all([
       proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+      streamText(proc.stdout),
+      streamText(proc.stderr),
     ]);
     if (exitCode !== 0) {
       throw new Error(
@@ -185,6 +197,34 @@ export async function runCommand(
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function streamText(
+  stream: ReadableStream<Uint8Array<ArrayBuffer>> | number | undefined,
+) {
+  return stream instanceof ReadableStream ? new Response(stream).text() : "";
+}
+
+function isCommandNotFoundError(error: unknown) {
+  const code =
+    typeof error === "object" && error && "code" in error
+      ? (error as { code?: unknown }).code
+      : null;
+  if (code === "ENOENT") return true;
+  return error instanceof Error && /ENOENT|not found/i.test(error.message);
+}
+
+function commandNotFoundMessage(commandName: string) {
+  if (commandName === "uv") {
+    return "uv was not found. Install uv from https://docs.astral.sh/uv/getting-started/installation/ or make sure it is on PATH.";
+  }
+  if (commandName === "git") {
+    return "git was not found. Install git from https://git-scm.com or make sure it is on PATH.";
+  }
+  if (commandName === "python3.12" || commandName === "python3" || commandName === "python") {
+    return "Python 3.12 was not found. Install Python 3.12 or make sure it is on PATH.";
+  }
+  return `${commandName} was not found. Install it or make sure it is on PATH.`;
 }
 
 async function commandVersion(command: string[]) {

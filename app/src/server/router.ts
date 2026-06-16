@@ -66,6 +66,7 @@ import {
   searchSessions,
   searchTraces,
 } from "./telemetry/storage";
+import { factoryResetLocalData } from "./telemetry/reset";
 import {
   OBSERVATION_KINDS,
   TRACE_SOURCES,
@@ -234,6 +235,9 @@ export const appRouter = t.router({
     ),
     clearData: t.procedure.mutation(({ ctx }) =>
       clearTelemetryData(ctx.database.sqlite),
+    ),
+    factoryReset: t.procedure.mutation(({ ctx }) =>
+      factoryResetLocalData(ctx.database),
     ),
   }),
 

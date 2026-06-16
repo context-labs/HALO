@@ -1,12 +1,7 @@
 import {
   Activity,
-  Boxes,
-  Code2,
-  DownloadCloud,
   Filter,
-  ListTree,
   MessageSquare,
-  Server,
 } from "lucide-react";
 
 import { Button, Tabs, TabsList, TabsTrigger } from "~/lib/ui";
@@ -74,7 +69,6 @@ export function FilterSidebar({
           {viewMode && onViewModeChange ? (
             <div className="space-y-2">
               <span className="flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
-                <ListTree className="h-4 w-4" />
                 View
               </span>
               <Tabs
@@ -105,7 +99,6 @@ export function FilterSidebar({
             </div>
           ) : null}
           <FilterSelect
-            icon={<Activity className="h-4 w-4" />}
             label="Status"
             onChange={(value) => onStatusChange(value as StatusFilter)}
             options={[
@@ -116,7 +109,6 @@ export function FilterSidebar({
             value={status}
           />
           <FilterSelect
-            icon={<ListTree className="h-4 w-4" />}
             label="Scope"
             onChange={(value) => onScopeChange(value as ScopeFilter)}
             options={[
@@ -127,7 +119,6 @@ export function FilterSidebar({
             value={scope}
           />
           <FilterSelect
-            icon={<DownloadCloud className="h-4 w-4" />}
             label="Source"
             onChange={(value) => onSourceChange(value as SourceFilter)}
             options={toFacetOptions(facets.source, "Any source").map((option) => ({
@@ -137,21 +128,18 @@ export function FilterSidebar({
             value={source}
           />
           <FilterSelect
-            icon={<Server className="h-4 w-4" />}
             label="Service"
             onChange={onServiceNameChange}
             options={toFacetOptions(facets.service_name, "Any service")}
             value={serviceName}
           />
           <FilterSelect
-            icon={<Boxes className="h-4 w-4" />}
             label="Agent"
             onChange={onAgentNameChange}
             options={toFacetOptions(facets.agent_name, "Any agent")}
             value={agentName}
           />
           <FilterSelect
-            icon={<Code2 className="h-4 w-4" />}
             label="Model"
             onChange={onModelNameChange}
             options={toFacetOptions(facets.llm_model_name, "Any model")}

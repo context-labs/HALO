@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { BrainCircuit, Filter, Play, Trash2 } from "lucide-react";
+import { Filter, Play, Trash2 } from "lucide-react";
 
 import { Button, Dialog, EmptyState, cn, toast } from "~/lib/ui";
 import { trpc } from "~/trpc";
@@ -121,14 +121,11 @@ export function AnalysisPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <AppHeader
-        icon={<BrainCircuit className="h-4 w-4 text-detail-brand" />}
-        title="Analysis"
-      />
-      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-[14rem_minmax(0,1fr)] pt-14">
+    <main className="h-screen overflow-hidden bg-background text-foreground">
+      <AppHeader title="Analysis" />
+      <div className="grid h-full min-h-0 grid-cols-[14rem_minmax(0,1fr)] pt-14">
         <WorkspaceNav active="analysis" />
-        <section className="min-w-0 overflow-auto">
+        <section className="min-h-0 min-w-0 overflow-y-auto">
           <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -145,11 +142,11 @@ export function AnalysisPage() {
                 }}
               >
                 <Play className="mr-2 h-4 w-4" />
-        
-            <SetupNudgeBanner />
-        Run Analysis
+                Run Analysis
               </Button>
             </div>
+
+            <SetupNudgeBanner />
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">

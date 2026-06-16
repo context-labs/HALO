@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Activity,
   ArrowRight,
   BrainCircuit,
   CheckCircle2,
@@ -15,9 +14,11 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Button, CommandBlock, Input, cn, toast } from "~/lib/ui";
+import { Button, Input, cn, toast } from "~/lib/ui";
 import { trpc } from "~/trpc";
 import { LangfuseLogo, PhoenixLogo } from "~/tracing/ImportDataScreen";
+import { APP_CATALYST_URL } from "../../desktop/commands";
+import { openExternalUrl } from "../desktop/desktopBridge";
 
 type OnboardingStep = "welcome" | "model" | "engine" | "traces";
 
@@ -59,7 +60,6 @@ export function OnboardingPage() {
     refetchIntervalInBackground: true,
   });
   const providersQuery = trpc.halo.providers.list.useQuery();
-  const infoQuery = trpc.telemetry.info.useQuery();
 
   const installMutation = trpc.halo.engine.installOrUpdate.useMutation({
     async onSettled() {
@@ -128,10 +128,7 @@ export function OnboardingPage() {
             />
           ) : null}
           {step === "traces" ? (
-            <TracesStep
-              ingestUrl={infoQuery.data?.ingestUrl}
-              onFinish={(destination) => void finish(destination)}
-            />
+            <TracesStep onFinish={(destination) => void finish(destination)} />
           ) : null}
         </div>
       </div>
@@ -173,6 +170,18 @@ function WelcomeStep({ onContinue }: { onContinue: () => void }) {
           icon={<BrainCircuit className="h-5 w-5" />}
           title="Let HALO find issues"
         />
+      </div>
+
+      <div className="flex justify-center">
+        <Button
+          className="h-auto max-w-full whitespace-normal px-4 py-3 text-center leading-5"
+          onClick={() => void openExternalUrl(APP_CATALYST_URL)}
+          size="lg"
+          type="button"
+          variant="secondary"
+        >
+          Run HALO on Catalyst with $250 in free credits -&gt; Try now
+        </Button>
       </div>
 
       <div className="rounded-xl border border-dashed border-border/60 p-5">
@@ -534,10 +543,8 @@ function PrerequisiteList({
 }
 
 function TracesStep({
-  ingestUrl,
   onFinish,
 }: {
-  ingestUrl: string | undefined;
   onFinish: (destination: "home" | "import-data") => void;
 }) {
   return (
@@ -565,27 +572,6 @@ function TracesStep({
           onClick={() => onFinish("import-data")}
         />
       </div>
-
-      {ingestUrl ? (
-        <div className="rounded-xl border border-dashed border-border/60 p-5">
-          <div className="flex items-start gap-3">
-            <Activity className="mt-0.5 h-4 w-4 shrink-0 text-detail-brand" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">Have an agent running already?</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Point its OTLP or Catalyst exporter at this endpoint and traces
-                stream in live.
-              </p>
-              <CommandBlock
-                className="mt-3 bg-background"
-                cmd={ingestUrl}
-                toastDescription="Paste it into your agent's telemetry config."
-                wrap={false}
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <div className="flex justify-center">
         <Button onClick={() => onFinish("home")} size="lg">

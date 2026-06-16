@@ -1,6 +1,8 @@
 export const APP_NAME = "HALO";
 export const APP_BUNDLE_ID = "net.inference.halo";
-export const APP_DOCS_URL = "https://github.com/context-labs/halo";
+export const APP_DOCS_URL = "https://docs.inference.net/introduction";
+export const APP_GITHUB_URL = "https://github.com/context-labs/HALO";
+export const APP_CATALYST_URL = "https://inference.net";
 export const APP_RELEASE_URL = "https://inference.net/halo/releases";
 export const APP_GITHUB_RELEASES_URL =
   "https://github.com/context-labs/HALO/releases";
@@ -19,7 +21,6 @@ export type DesktopCommandName =
   | "clear-data"
   | "command-palette"
   | "copy-diagnostics"
-  | "copy-ingest-url"
   | "import-data"
   | "navigate-analysis"
   | "navigate-sessions"
@@ -236,14 +237,6 @@ export const commandPaletteItems: CommandPaletteItem[] = [
     shortcut: "⌘R",
   },
   {
-    command: "copy-ingest-url",
-    description: "Copy the local OTLP endpoint.",
-    group: "Data",
-    keywords: ["copy", "otlp", "endpoint", "ingest"],
-    label: "Copy Ingest URL",
-    shortcut: "⇧⌘C",
-  },
-  {
     command: "import-data",
     description: "Import historical traces from Langfuse or Phoenix.",
     group: "Data",
@@ -253,10 +246,10 @@ export const commandPaletteItems: CommandPaletteItem[] = [
   },
   {
     command: "clear-data",
-    description: "Open the telemetry clear confirmation.",
+    description: "Open Settings data management.",
     group: "Data",
-    keywords: ["clear", "delete", "telemetry"],
-    label: "Clear Telemetry Data",
+    keywords: ["clear", "delete", "telemetry", "factory", "reset"],
+    label: "Data Management",
   },
   {
     command: "toggle-follow-latest",
@@ -372,7 +365,6 @@ export function desktopCommandForShortcut(
   if (normalizedKey === "3" && !shiftKey) return "navigate-analysis";
   if (normalizedKey === "4" && !shiftKey) return "navigate-settings";
   if (normalizedKey === "r" && !shiftKey) return "refresh";
-  if (normalizedKey === "c" && shiftKey) return "copy-ingest-url";
   if (normalizedKey === "i" && shiftKey) return "import-data";
   if (normalizedKey === "l" && shiftKey) return "toggle-follow-latest";
   return undefined;

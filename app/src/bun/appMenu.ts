@@ -81,16 +81,11 @@ export function buildApplicationMenu(): ApplicationMenuItemConfig[] {
       label: "File",
       submenu: [
         {
-          accelerator: "CommandOrControl+Shift+C",
-          label: "Copy Ingest URL",
-          action: "copy-ingest-url",
-        },
-        {
           accelerator: "CommandOrControl+Shift+I",
           label: "Import Data...",
           action: "import-data",
         },
-        { label: "Clear Telemetry Data...", action: "clear-data" },
+        { label: "Data Management...", action: "clear-data" },
         { type: "separator" },
         { label: "Close Window", role: "close" },
       ],

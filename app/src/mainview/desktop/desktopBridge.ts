@@ -61,8 +61,6 @@ declare global {
 }
 
 export type TracePageCommand =
-  | { type: "copy-ingest-url" }
-  | { type: "open-clear-data" }
   | { type: "open-import" }
   | { type: "refresh" }
   | { type: "toggle-follow-latest" };
@@ -117,6 +115,16 @@ export function initializeDesktopBridge() {
 
 export async function getDesktopRpc() {
   return initializeDesktopBridge();
+}
+
+export async function getDesktopAppMetadata() {
+  const rpc = await getDesktopRpc();
+  if (!rpc) return null;
+  try {
+    return await rpc.request.getAppMetadata();
+  } catch {
+    return null;
+  }
 }
 
 export function dispatchTracePageCommand(command: TracePageCommand) {

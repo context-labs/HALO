@@ -8,7 +8,7 @@ import {
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 
 const APP_IDENTIFIER = "net.inference.halo";
@@ -46,6 +46,7 @@ export function configureDesktopRuntimeEnv(
   env.HALO_APP_DATA_DIR = appDataDir;
   env.HALO_DB_PATH = dbPath;
   env.HALO_LEGACY_DATA_DIR = legacyDataDir;
+  normalizeExecutablePath(env);
 
   return {
     appDataDir,
@@ -54,6 +55,26 @@ export function configureDesktopRuntimeEnv(
     legacyDataDirs,
     migratedLegacyFiles,
   };
+}
+
+export function normalizeExecutablePath(env: NodeJS.ProcessEnv = process.env) {
+  const homeDir = env.HOME?.trim() || homedir();
+  const commonExecutableDirs = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    join(homeDir, ".local", "bin"),
+    join(homeDir, ".cargo", "bin"),
+    join(homeDir, ".pyenv", "shims"),
+  ];
+  env.PATH = uniquePathEntries([
+    ...(env.PATH ?? "").split(delimiter),
+    ...commonExecutableDirs,
+  ]).join(delimiter);
+  return env.PATH;
 }
 
 export function defaultAppDataDir(
@@ -166,6 +187,20 @@ function uniqueResolvedPaths(paths: Array<string | undefined>) {
     if (seen.has(resolved)) continue;
     seen.add(resolved);
     result.push(resolved);
+  }
+
+  return result;
+}
+
+function uniquePathEntries(paths: Array<string | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const path of paths) {
+    const trimmed = path?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
   }
 
   return result;

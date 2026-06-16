@@ -11,13 +11,11 @@ import {
 } from "~/lib/ui";
 
 export function ImportDataScreen({
-  ingestUrl,
   onConnectLocalAgent,
   onImportJsonl,
   onImportLangfuse,
   onImportPhoenix,
 }: {
-  ingestUrl?: string;
   onConnectLocalAgent: () => void;
   onImportJsonl: () => void;
   onImportLangfuse: () => void;
@@ -86,21 +84,6 @@ export function ImportDataScreen({
             title="Connect Local Agent"
           />
         </div>
-        {ingestUrl ? (
-          <div className="mt-8 rounded-xl border border-dashed border-border/60 p-5">
-            <p className="text-sm font-medium">Already have an agent running?</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Point its OTLP exporter at this endpoint and the monitor switches
-              on with the first accepted span.
-            </p>
-            <CommandBlock
-              className="mt-3 bg-background"
-              cmd={ingestUrl}
-              toastDescription="Paste it into your local agent telemetry config."
-              wrap={false}
-            />
-          </div>
-        ) : null}
       </div>
     </div>
   );
