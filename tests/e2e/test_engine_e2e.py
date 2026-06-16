@@ -3,27 +3,37 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
 
 from engine.agents.agent_config import AgentConfig
+from engine.code.code_repo import find_ripgrep
 from engine.engine_config import EngineConfig
+from engine.git.git_repo import find_git
 from engine.main import run_engine_async, stream_engine_async
 from engine.model_config import ModelConfig
 from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
+from tests.integration.tool_isolation_kit import git_init_repo
 
 E2E_MODEL = os.environ.get("HALO_E2E_MODEL", "gpt-5.4-mini")
 E2E_TIMEOUT_SECONDS = float(os.environ.get("HALO_E2E_TIMEOUT", "60"))
 
+_CODE_TOOL_NAMES = {"view_repo_tree", "glob_files", "grep_files", "read_file"}
+_GIT_TOOL_NAMES = {"git_log", "git_show", "git_diff", "git_blame", "git_read_file"}
 
-def _engine_config(*, maximum_depth: int = 0, maximum_turns: int = 6) -> EngineConfig:
+
+def _engine_config(
+    *, maximum_depth: int = 0, maximum_turns: int = 6, repo_path: Path | None = None
+) -> EngineConfig:
     """Live-model EngineConfig with the test's depth/turn knobs.
 
     All three model slots (root, synthesis, compaction) point at the same
-    cheap model so a single API key + provider is enough for e2e.
+    cheap model so a single API key + provider is enough for e2e. ``repo_path``
+    enables the read-only code tools (and the git tools, when it's a git checkout).
     """
     agent = AgentConfig(
         name="root",
@@ -37,6 +47,7 @@ def _engine_config(*, maximum_depth: int = 0, maximum_turns: int = 6) -> EngineC
         compaction_model=ModelConfig(name=E2E_MODEL),
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=2,
+        repo_path=repo_path,
     )
 
 
@@ -229,4 +240,90 @@ async def test_engine_run_code_executes_in_sandbox(tmp_path: Path, fixtures_dir:
         f"expected sandbox stdout to contain the printed count; got: {payload['stdout']!r}"
     )
 
+    assert any(item.final for item in results), "no AgentOutputItem with final=True emitted"
+
+
+@pytest.mark.asyncio
+async def test_engine_uses_code_tools(tmp_path: Path, fixtures_dir: Path) -> None:
+    """End-to-end: with ``--repo-path`` set, the agent reaches for the read-only code tools.
+
+    Proves the full LLM → code-tool dispatch → CodeRepo (ripgrep) chain: only
+    the SDK adapter and CodeRepo itself are covered elsewhere, never the live
+    model actually choosing to grep/read the source. Skips without ripgrep,
+    since ``--repo-path`` doesn't register the code tools without it.
+    """
+    if not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
+    if find_ripgrep() is None:
+        pytest.skip("ripgrep unavailable; code tools are not registered without rg")
+
+    trace_path = _trace_path(tmp_path, fixtures_dir)
+    repo_path = tmp_path / "src"
+    shutil.copytree(fixtures_dir / "tiny_repo", repo_path)
+    cfg = _engine_config(maximum_depth=0, maximum_turns=6, repo_path=repo_path)
+
+    messages = [
+        AgentMessage(
+            role="user",
+            content=(
+                "The source code for the agent that produced these traces is in the repository. "
+                "Use the code tools (e.g. grep_files then read_file) to find the value assigned to "
+                "MAX_RETRIES in the source, and report it. "
+                "End your final reply with a line containing only <final/>."
+            ),
+        )
+    ]
+
+    results = await asyncio.wait_for(
+        run_engine_async(messages, cfg, trace_path),
+        E2E_TIMEOUT_SECONDS * 2,
+    )
+
+    called = _tool_call_names(results)
+    assert _CODE_TOOL_NAMES.intersection(called), (
+        f"expected the agent to call a code tool; got tool calls: {called}"
+    )
+    assert any(item.final for item in results), "no AgentOutputItem with final=True emitted"
+
+
+@pytest.mark.asyncio
+async def test_engine_uses_git_tools(tmp_path: Path, fixtures_dir: Path) -> None:
+    """End-to-end: with a git checkout, the agent reaches for the read-only git tools.
+
+    Proves the full LLM → git-tool dispatch → GitRepo (system git) chain.
+    ``--repo-path`` also enables the code tools, so ripgrep is required; git is
+    required for GitRepo.open to register the git tools at all.
+    """
+    if not os.environ.get("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY not set; E2E requires real LLM access")
+    if find_ripgrep() is None:
+        pytest.skip("ripgrep unavailable; --repo-path requires rg for the code tools")
+    if find_git() is None:
+        pytest.skip("git unavailable; git tools are not registered without git")
+
+    trace_path = _trace_path(tmp_path, fixtures_dir)
+    repo_path = git_init_repo(tmp_path, fixtures_dir).root
+    cfg = _engine_config(maximum_depth=0, maximum_turns=6, repo_path=repo_path)
+
+    messages = [
+        AgentMessage(
+            role="user",
+            content=(
+                "The repository is a git checkout. Use the git tools (e.g. git_log, then "
+                "git_blame on agent/config.py) to report the most recent commit's short sha and "
+                "who last changed line 1 of that file. "
+                "End your final reply with a line containing only <final/>."
+            ),
+        )
+    ]
+
+    results = await asyncio.wait_for(
+        run_engine_async(messages, cfg, trace_path),
+        E2E_TIMEOUT_SECONDS * 2,
+    )
+
+    called = _tool_call_names(results)
+    assert _GIT_TOOL_NAMES.intersection(called), (
+        f"expected the agent to call a git tool; got tool calls: {called}"
+    )
     assert any(item.final for item in results), "no AgentOutputItem with final=True emitted"
