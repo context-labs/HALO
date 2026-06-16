@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from engine.agents.agent_execution import AgentExecution
     from engine.agents.engine_output_bus import EngineOutputBus
     from engine.agents.engine_run_state import EngineRunState
+    from engine.code.code_repo import CodeRepo
+    from engine.git.git_repo import GitRepo
     from engine.sandbox.sandbox import Sandbox
     from engine.traces.trace_store import TraceStore
 
@@ -19,9 +21,9 @@ class ToolContext(BaseModel):
     """Per-invocation context handed to every EngineTool's ``run``.
 
     Holds references to the run-wide singletons (TraceStore, RunState,
-    OutputBus, Sandbox) plus the calling agent's own AgentContext/Execution.
-    Tools call ``require_*`` accessors to assert presence, since not every tool
-    needs every dependency.
+    OutputBus, Sandbox, CodeRepo) plus the calling agent's own
+    AgentContext/Execution. Tools call ``require_*`` accessors to assert
+    presence, since not every tool needs every dependency.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
@@ -32,6 +34,8 @@ class ToolContext(BaseModel):
     agent_execution: "AgentExecution | None" = None
     output_bus: "EngineOutputBus | None" = None
     sandbox: "Sandbox | None" = None
+    code_repo: "CodeRepo | None" = None
+    git_repo: "GitRepo | None" = None
 
     def require_trace_store(self) -> "TraceStore":
         """Return the TraceStore or raise — every trace tool needs it."""
@@ -50,6 +54,18 @@ class ToolContext(BaseModel):
         if self.sandbox is None:
             raise RuntimeError("ToolContext.sandbox required")
         return self.sandbox
+
+    def require_code_repo(self) -> "CodeRepo":
+        """Return the run's CodeRepo or raise — needed by the code tools (``glob_files``/``grep_files``/``read_file``)."""
+        if self.code_repo is None:
+            raise RuntimeError("ToolContext.code_repo required")
+        return self.code_repo
+
+    def require_git_repo(self) -> "GitRepo":
+        """Return the run's GitRepo or raise — needed by the git tools (``git_log``/``git_show``/...)."""
+        if self.git_repo is None:
+            raise RuntimeError("ToolContext.git_repo required")
+        return self.git_repo
 
 
 @runtime_checkable

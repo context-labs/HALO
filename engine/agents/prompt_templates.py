@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from engine.code.code_repo import CodeRepo
+    from engine.git.git_repo import GitRepo
+
 FINAL_SENTINEL = "<final/>"
 
 SYSTEM_PROMPT = (
@@ -82,7 +88,7 @@ Output rules:
 
 Instructions:
 {system_prompt}
-"""
+{code_repo_section}{git_repo_section}"""
 
 SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """\
 You are a HALO subagent at depth={depth} of maximum_depth={maximum_depth}. You answer a
@@ -97,6 +103,49 @@ sentinel is reserved for the root agent.
 
 Instructions:
 {system_prompt}
+{code_repo_section}{git_repo_section}"""
+
+CODE_REPO_PROMPT_SECTION_TEMPLATE = """\
+
+Code repository:
+- A read-only checkout of the agent/harness source code that produced these
+  traces is available at {repo_root}. Use the code tools (discovery honors
+  .gitignore) to explain why the agent behaved as the traces show.
+- Protect your own context. Reading files and scanning matches consumes context
+  fast. When you can spawn subagents (depth < maximum_depth), DELEGATE code
+  exploration: have a subagent search the repo and report back the relevant
+  `path:line` locations plus a short summary, instead of reading files into your
+  own context. Spawn separate subagents for independent questions. Reserve
+  direct reads for quick, targeted lookups you need inline.
+- Reporting:
+  - Cite every code-level claim as `path:line` (1-based, exactly as shown by the
+    read/grep tools). Never invent code, paths, or line numbers — if something is
+    not in the repository, say so.
+  - Propose fixes as prose plus fenced code blocks. You have read-only access —
+    never claim to have changed any file.
+"""
+
+GIT_REPO_PROMPT_SECTION_TEMPLATE = """\
+
+Git history:
+- The repository at {repo_root} is a git checkout, so the read-only git tools
+  are available. They are strictly read-only — never claim to have committed,
+  checked out, or changed anything.
+- Protect your own context. When you can spawn subagents (depth < maximum_depth),
+  DELEGATE git exploration: have a subagent run the log/blame/diff hunt and report
+  back the relevant short shas plus a short summary, instead of pulling history
+  into your own context. Same as code exploration.
+- Regression workflow:
+  - Window by trace time: pass a trace's start/end timestamps as `git_log`
+    `since`/`until` to see what shipped during the period the traces cover.
+  - Find an origin: use `git_log` pickaxe (`pickaxe_string`/`pickaxe_regex`) to
+    find the commit that introduced or removed a prompt fragment, tool name, or
+    error string seen in the traces.
+  - Localize: `git_blame` a suspicious `path:line` to the commit that last
+    touched it.
+  - Inspect: `git_show` (or `git_diff` across a good..bad range) to confirm the
+    change; `git_read_file` to read a suspect file at the traced commit.
+  - Cite commits by short sha.
 """
 
 COMPACTION_SYSTEM_PROMPT = """\
@@ -112,16 +161,48 @@ patterns, model names, and token counts when available.
 """
 
 
+def _render_code_repo_section(code_repo: "CodeRepo | None") -> str:
+    """Render the code-repository prompt section, or empty string when no repo is configured.
+
+    The directory overview is intentionally NOT embedded here — it is served on
+    demand by the ``view_repo_tree`` tool to keep the prompt lean.
+    """
+    if code_repo is None:
+        return ""
+    return CODE_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=code_repo.root)
+
+
+def _render_git_repo_section(git_repo: "GitRepo | None") -> str:
+    """Render the git-history prompt section, or empty string when the repo is not a git work tree.
+
+    Live git context (branch, HEAD, recent commits) is intentionally NOT embedded
+    here — HALO analyzes historical traces, so the relevant commits come from the
+    trace timeframe, not HEAD. The agent orients via ``git_log`` on demand.
+    """
+    if git_repo is None:
+        return ""
+    return GIT_REPO_PROMPT_SECTION_TEMPLATE.format(repo_root=git_repo.root)
+
+
 def render_root_system_prompt(
     *,
     maximum_depth: int,
     maximum_parallel_subagents: int,
+    code_repo: "CodeRepo | None",
+    git_repo: "GitRepo | None",
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract."""
+    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
+
+    Includes the code-repository section (guidance, not the tree itself) when
+    ``code_repo`` is set, and the git-history section when ``git_repo`` is set;
+    each renders empty otherwise.
+    """
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
+        code_repo_section=_render_code_repo_section(code_repo),
+        git_repo_section=_render_git_repo_section(git_repo),
     )
 
 
@@ -130,11 +211,20 @@ def render_subagent_system_prompt(
     depth: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
+    code_repo: "CodeRepo | None",
+    git_repo: "GitRepo | None",
 ) -> str:
-    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root."""
+    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
+
+    Includes the code-repository section (guidance, not the tree itself) when
+    ``code_repo`` is set, and the git-history section when ``git_repo`` is set;
+    each renders empty otherwise.
+    """
     return SUBAGENT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
         depth=depth,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
+        code_repo_section=_render_code_repo_section(code_repo),
+        git_repo_section=_render_git_repo_section(git_repo),
     )

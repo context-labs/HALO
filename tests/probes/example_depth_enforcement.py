@@ -64,6 +64,8 @@ async def _build_run_state(cfg) -> EngineRunState:
         output_bus=EngineOutputBus(),
         config=cfg,
         sandbox=None,
+        code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 

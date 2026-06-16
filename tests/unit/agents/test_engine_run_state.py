@@ -44,6 +44,8 @@ async def test_run_state_holds_registries(tmp_path: Path, fixtures_dir: Path) ->
         output_bus=EngineOutputBus(),
         config=_cfg(),
         sandbox=None,
+        code_repo=None,
+        git_repo=None,
         openai_client=AsyncOpenAI(api_key="test"),
     )
 

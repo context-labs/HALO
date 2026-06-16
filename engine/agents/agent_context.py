@@ -11,7 +11,9 @@ from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
 
 if TYPE_CHECKING:
+    from engine.code.code_repo import CodeRepo
     from engine.engine_config import EngineConfig
+    from engine.git.git_repo import GitRepo
 
 
 class AgentContext:
@@ -42,11 +44,15 @@ class AgentContext:
         cls,
         messages: list[AgentMessage],
         engine_config: "EngineConfig",
+        code_repo: "CodeRepo | None",
+        git_repo: "GitRepo | None",
     ) -> "AgentContext":
         """Build a root AgentContext from caller-supplied messages.
 
         Two cases:
-          1. No system message at front: prepend the engine-rendered system prompt.
+          1. No system message at front: prepend the engine-rendered system prompt
+             (including the code-repository section when ``code_repo`` is set and
+             the git-history section when ``git_repo`` is set).
           2. Front message is already a system message: pass through unchanged.
              The caller is responsible for whatever it contains. This supports
              continuations and lets users supply their own system prompts.
@@ -64,6 +70,8 @@ class AgentContext:
             rendered = render_root_system_prompt(
                 maximum_depth=engine_config.maximum_depth,
                 maximum_parallel_subagents=engine_config.maximum_parallel_subagents,
+                code_repo=code_repo,
+                git_repo=git_repo,
             )
             sys_item = AgentContextItem(item_id="sys-0", role="system", content=rendered)
             body = messages

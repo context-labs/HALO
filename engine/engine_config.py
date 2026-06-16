@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from engine.agents.agent_config import AgentConfig
@@ -20,6 +22,13 @@ class EngineConfig(BaseModel):
     Both roles are plain summarization, so a small, cheap model the
     configured provider serves (e.g. ``gpt-4.1-nano`` on OpenAI) is
     recommended over the agents' analysis model.
+
+    ``repo_path`` is the local source checkout that produced the traces. When
+    set, the engine opens it at run start and registers the read-only code
+    tools (``glob_files``/``grep_files``/``read_file``) so agents can cross-
+    reference findings with the implementation and cite ``file:line``. ``None``
+    means the feature is off — the code tools are never registered. The path is
+    validated at run start (like ``trace_path``), not at config-parse time.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -34,3 +43,4 @@ class EngineConfig(BaseModel):
     tool_call_compaction_keep_last_turns: int = Field(default=3, ge=0)
     maximum_depth: int = Field(default=2, ge=0)
     maximum_parallel_subagents: int = Field(default=4, gt=0)
+    repo_path: Path | None = None

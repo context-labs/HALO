@@ -34,6 +34,20 @@ def test_engine_config_defaults() -> None:
     assert cfg.model_provider.base_url is None
     assert cfg.model_provider.api_key is None
     assert cfg.model_provider.default_headers is None
+    assert cfg.repo_path is None
+
+
+def test_engine_config_accepts_repo_path() -> None:
+    from pathlib import Path
+
+    cfg = EngineConfig(
+        root_agent=_agent("root"),
+        subagent=_agent("sub"),
+        synthesis_model=ModelConfig(name="claude-haiku-4-5"),
+        compaction_model=ModelConfig(name="claude-haiku-4-5"),
+        repo_path=Path("/some/repo"),
+    )
+    assert cfg.repo_path == Path("/some/repo")
 
 
 def test_engine_config_requires_synthesis_and_compaction_models() -> None:
