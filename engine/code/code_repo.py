@@ -52,7 +52,6 @@ _EXCLUDED_DIRS = frozenset(
         ".svn",
         "node_modules",
         ".venv",
-        "venv",
         "__pycache__",
         ".mypy_cache",
         ".pytest_cache",
