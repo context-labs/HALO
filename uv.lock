@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "catalyst-tracing"
-version = "0.1.4"
+version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "opentelemetry-api" },
@@ -80,9 +80,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/14/05c4b25a6405f1381d07feffb2e2afe85ebaeda338a5832f5ca942488523/catalyst_tracing-0.1.4.tar.gz", hash = "sha256:4b975bfe0ee2c0f98b8d7082a447d460274eae58ac2bc106bf79a515780b3a40", size = 49033, upload-time = "2026-06-17T02:47:10.42Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/80/9867ee5bc91a18e0c6c71a212ba8e69c63a500f7934ec9f3ffab30e35de0/catalyst_tracing-0.1.5.tar.gz", hash = "sha256:9f64272ae5610e09811001b6b1e8b2a6e6914e8abe9d22747362d823cb24cca0", size = 49397, upload-time = "2026-06-17T06:17:26.187Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/6b/bd19bbd3e4e981fc83062f5d4def7600d9a1bac58e85c9a6391a16902126/catalyst_tracing-0.1.4-py3-none-any.whl", hash = "sha256:e3220d4cc5a1b86da49cc208a0b60fe2a9b3d021f3679fbd5bca7068b5ff57d0", size = 69996, upload-time = "2026-06-17T02:47:11.302Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/3f/f6e6711d17fa411c3e409f51a8ce2fe7f2e79ffd407cfd381bda594ca799/catalyst_tracing-0.1.5-py3-none-any.whl", hash = "sha256:31a2627e8753cd809429c022a402a9a9af14b9085bad76cdcd41eb7fce18ca23", size = 70449, upload-time = "2026-06-17T06:17:27.206Z" },
 ]
 
 [package.optional-dependencies]
@@ -448,7 +448,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "deno", specifier = "==2.7.14" },
-    { name = "inference-catalyst-tracing", extras = ["openai-agents"], specifier = "==0.1.4" },
+    { name = "inference-catalyst-tracing", extras = ["openai-agents"], specifier = "==0.1.5" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "openai", specifier = "==2.32.0" },
     { name = "openai-agents", specifier = "==0.14.7" },
@@ -527,14 +527,14 @@ wheels = [
 
 [[package]]
 name = "inference-catalyst-tracing"
-version = "0.1.4"
+version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "catalyst-tracing" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/a7/c2808b88f74d5c586157f10bfdc34645b9f7f51f574556f1c0be62d32608/inference_catalyst_tracing-0.1.4.tar.gz", hash = "sha256:bf0926f715197cc1bc6a408af0ac6373551c9b79ff2dcc665f60a493c0a55eba", size = 2707, upload-time = "2026-06-17T02:48:45.841Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/48/43da73cd6b61207abdde3ed3d26f4f15cbde2016c737131f2e3073677762/inference_catalyst_tracing-0.1.5.tar.gz", hash = "sha256:2d0f6d0a94f2340e8fc51460547503249452aa7bebf3fd99ef77823d4a3e4b2e", size = 2708, upload-time = "2026-06-17T06:19:02.337Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/bb/99e13c24f71cb65f668eba5b656a5b07b2b010eb28a8444c30af52ebcc86/inference_catalyst_tracing-0.1.4-py3-none-any.whl", hash = "sha256:d95decd796908f967b92d903b08a4a1d93cd5cfb4e6471b7691af5280a622bfb", size = 3134, upload-time = "2026-06-17T02:48:44.942Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/30/4b7c2d0bb4d3ddc65215638ed15428a28f787c12b5b2f89f44819709642b/inference_catalyst_tracing-0.1.5-py3-none-any.whl", hash = "sha256:4f916d1a16e1a2a26492e227d0449c6c40e86dab4e21dfb7e31fc7e34bac3422", size = 3137, upload-time = "2026-06-17T06:19:03.027Z" },
 ]
 
 [package.optional-dependencies]
