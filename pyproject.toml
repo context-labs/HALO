@@ -30,7 +30,7 @@ dependencies = [
     # by ``CATALYST_OTLP_TOKEN``. When the token is unset and the local
     # JSONL backend is in use, OTel's proxy tracer makes the wrapper a
     # no-op without any extra branching in engine code.
-    "inference-catalyst-tracing[openai-agents]==0.1.3",
+    "inference-catalyst-tracing[openai-agents]==0.1.4",
 ]
 
 [project.scripts]
