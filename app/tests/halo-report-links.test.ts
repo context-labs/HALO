@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  dashboardLinkLabel,
   linkifyDashboardTags,
   parseDashboardLink,
 } from "../src/mainview/halo/reportLinks";
+import { RunReportView } from "../src/mainview/halo/RunReportView";
 
 describe("halo report dashboard links", () => {
   test("linkifies bracket-only trace and span tags before markdown parsing", () => {
@@ -14,8 +18,8 @@ describe("halo report dashboard links", () => {
 
     expect(linkifyDashboardTags(markdown)).toBe(
       [
-        "See [trace:0123456789abcdef0123456789abcdef](#halo-trace-0123456789abcdef0123456789abcdef).",
-        "Open [span:0123456789abcdef0123456789abcdef:fedcba9876543210](#halo-span-0123456789abcdef0123456789abcdef-fedcba9876543210), then inspect.",
+        "See [halo-trace-0123456789abcdef0123456789abcdef](#halo-trace-0123456789abcdef0123456789abcdef).",
+        "Open [halo-span-0123456789abcdef0123456789abcdef-fedcba9876543210](#halo-span-0123456789abcdef0123456789abcdef-fedcba9876543210), then inspect.",
       ].join("\n"),
     );
   });
@@ -24,8 +28,19 @@ describe("halo report dashboard links", () => {
     const markdown = "Check [TRACE:ABCDEF] and [SPAN:ABCDEF:123ABC].";
 
     expect(linkifyDashboardTags(markdown)).toBe(
-      "Check [trace:abcdef](#halo-trace-abcdef) and [span:abcdef:123abc](#halo-span-abcdef-123abc).",
+      "Check [halo-trace-abcdef](#halo-trace-abcdef) and [halo-span-abcdef-123abc](#halo-span-abcdef-123abc).",
     );
+  });
+
+  test("does not link bare ids or malformed trace and span text", () => {
+    const markdown = [
+      "Bare 0123456789abcdef0123456789abcdef stays text.",
+      "Missing bracket trace:0123456789abcdef stays text.",
+      "Incomplete [span:0123456789abcdef] stays text.",
+      "Non-hex [trace:not-a-trace] stays text.",
+    ].join("\n");
+
+    expect(linkifyDashboardTags(markdown)).toBe(markdown);
   });
 
   test("handles code spans and fences without corrupting markdown", () => {
@@ -39,7 +54,7 @@ describe("halo report dashboard links", () => {
 
     expect(linkifyDashboardTags(markdown)).toBe(
       [
-        "Exact inline code [trace:abcdef](#halo-trace-abcdef) links.",
+        "Exact inline code [halo-trace-abcdef](#halo-trace-abcdef) links.",
         "Mixed inline code `look at [trace:ABCDEF]` stays code.",
         "```",
         "[trace:ABCDEF]",
@@ -65,5 +80,41 @@ describe("halo report dashboard links", () => {
       traceId: "abcdef",
     });
     expect(parseDashboardLink("https://example.test")).toBeNull();
+  });
+
+  test("formats dashboard link labels as the original model tag markings", () => {
+    expect(dashboardLinkLabel({ kind: "trace", traceId: "abcdef" })).toBe(
+      "[trace:abcdef]",
+    );
+    expect(
+      dashboardLinkLabel({
+        kind: "span",
+        spanId: "123abc",
+        traceId: "abcdef",
+      }),
+    ).toBe("[span:abcdef:123abc]");
+  });
+
+  test("renders report tags as clickable buttons with tag labels", () => {
+    const html = renderToStaticMarkup(
+      createElement(RunReportView, {
+        markdown: [
+          "See [trace:ABCDEF].",
+          "Open `[span:ABCDEF:123ABC]`.",
+          "Bare 0123456789abcdef should not link.",
+        ].join("\n"),
+        onOpenSpanLink: () => {},
+        onOpenTraceLink: () => {},
+      }),
+    );
+
+    expect(html).toContain('data-halo-report-link="trace"');
+    expect(html).toContain('data-trace-id="abcdef"');
+    expect(html).toContain("[trace:abcdef]");
+    expect(html).toContain('data-halo-report-link="span"');
+    expect(html).toContain('data-span-id="123abc"');
+    expect(html).toContain("[span:abcdef:123abc]");
+    expect(html).not.toContain("halo-trace-abcdef");
+    expect(html).toContain("Bare 0123456789abcdef should not link.");
   });
 });

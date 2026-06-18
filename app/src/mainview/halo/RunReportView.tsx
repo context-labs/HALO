@@ -3,7 +3,11 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Badge, cn } from "~/lib/ui";
-import { linkifyDashboardTags, parseDashboardLink } from "./reportLinks";
+import {
+  dashboardLinkLabel,
+  linkifyDashboardTags,
+  parseDashboardLink,
+} from "./reportLinks";
 
 /**
  * Renders a completed run's markdown report with jump-chips for its section
@@ -82,10 +86,12 @@ export function RunReportView({
                 return (
                   <button
                     className="inline rounded bg-detail-brand/10 px-1 py-0.5 font-mono text-[0.85em] tracking-normal text-link transition hover:bg-detail-brand/15 hover:underline"
+                    data-halo-report-link="trace"
+                    data-trace-id={dashboardLink.traceId}
                     onClick={() => onOpenTraceLink?.(dashboardLink.traceId)}
                     type="button"
                   >
-                    {children}
+                    {dashboardLinkLabel(dashboardLink)}
                   </button>
                 );
               }
@@ -93,12 +99,15 @@ export function RunReportView({
                 return (
                   <button
                     className="inline rounded bg-detail-brand/10 px-1 py-0.5 font-mono text-[0.85em] tracking-normal text-link transition hover:bg-detail-brand/15 hover:underline"
+                    data-halo-report-link="span"
+                    data-span-id={dashboardLink.spanId}
+                    data-trace-id={dashboardLink.traceId}
                     onClick={() =>
                       onOpenSpanLink?.(dashboardLink.traceId, dashboardLink.spanId)
                     }
                     type="button"
                   >
-                    {children}
+                    {dashboardLinkLabel(dashboardLink)}
                   </button>
                 );
               }

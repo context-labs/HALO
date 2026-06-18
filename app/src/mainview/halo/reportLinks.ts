@@ -90,9 +90,14 @@ function parseDashboardTag(text: string): DashboardLink | null {
 
 function dashboardLinkMarkdown(tag: DashboardLink) {
   if (tag.kind === "trace") {
-    return `[trace:${tag.traceId}](#halo-trace-${tag.traceId})`;
+    return `[halo-trace-${tag.traceId}](#halo-trace-${tag.traceId})`;
   }
-  return `[span:${tag.traceId}:${tag.spanId}](#halo-span-${tag.traceId}-${tag.spanId})`;
+  return `[halo-span-${tag.traceId}-${tag.spanId}](#halo-span-${tag.traceId}-${tag.spanId})`;
+}
+
+export function dashboardLinkLabel(tag: DashboardLink) {
+  if (tag.kind === "trace") return `[trace:${tag.traceId}]`;
+  return `[span:${tag.traceId}:${tag.spanId}]`;
 }
 
 function endOfCodeSpan(line: string, tickStart: number) {
