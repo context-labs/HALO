@@ -25,14 +25,18 @@ from tests.probes.probe_kit import FakeRunner, run_with_fake
 
 @pytest.mark.asyncio
 async def test_non_retriable_error_propagates_without_deadlock() -> None:
-    """A 400-class SDK error raised inside the driver must surface as itself
-    to the stream consumer. If the engine forgets to close the output bus on
-    the failure path, ``run_with_fake`` times out instead — that's the bug
+    """A non-retriable (terminal-code) 400 raised inside the driver must surface
+    as itself to the stream consumer. If the engine forgets to close the output
+    bus on the failure path, ``run_with_fake`` times out instead — that's the bug
     this test guards against."""
     request = httpx.Request("POST", "https://api.openai.com/v1/responses")
     response = httpx.Response(400, request=request)
     runner = FakeRunner(
-        BadRequestError(message="bad", response=response, body={"error": {"message": "bad"}}),
+        BadRequestError(
+            message="too many tokens",
+            response=response,
+            body={"message": "too many tokens", "code": "context_length_exceeded"},
+        ),
     )
 
     result = await run_with_fake(runner, timeout_seconds=3.0)

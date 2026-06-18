@@ -123,12 +123,16 @@ async def probe_circuit_breaker_exhaustion() -> None:
 
 
 async def probe_non_retriable_propagates() -> None:
-    """A non-retriable error (BadRequestError → 400) should propagate
+    """A non-retriable error (terminal-code 400) should propagate
     immediately without retry."""
     fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
     fake_response = httpx.Response(400, request=fake_request)
     runner = FakeRunner(
-        BadRequestError(message="bad", response=fake_response, body={"error": {"message": "bad"}}),
+        BadRequestError(
+            message="too many tokens",
+            response=fake_response,
+            body={"message": "too many tokens", "code": "context_length_exceeded"},
+        ),
     )
     result = await run_with_fake(runner)
 

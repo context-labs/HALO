@@ -126,7 +126,11 @@ async def probe_non_retriable_error_does_not_deadlock() -> None:
     fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
     fake_response = httpx.Response(400, request=fake_request)
     runner = FakeRunner(
-        BadRequestError(message="bad", response=fake_response, body={"error": {"message": "bad"}}),
+        BadRequestError(
+            message="too many tokens",
+            response=fake_response,
+            body={"message": "too many tokens", "code": "context_length_exceeded"},
+        ),
     )
     result = await run_with_fake(runner, timeout_seconds=3.0)
 
