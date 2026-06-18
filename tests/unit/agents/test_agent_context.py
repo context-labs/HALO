@@ -311,10 +311,10 @@ def test_trim_incomplete_tool_turn_respects_min_items() -> None:
     assert [i.item_id for i in ctx.items] == ["a1"]
 
 
-def test_trim_drops_turn_with_trailing_orphan_tool_rows() -> None:
-    """A complete tool turn followed by a ``role=tool`` row referencing some
-    OTHER call id is still inconsistent — the orphan would render an invalid
-    message array, so the whole trailing turn is rerun."""
+def test_trim_drops_trailing_orphan_tool_row_keeping_complete_turns() -> None:
+    """A ``role=tool`` row referencing some OTHER call id is an orphan that
+    would render an invalid message array. Only the orphan (and anything after
+    it) is dropped — the complete turns before it are kept."""
     ctx = _ctx()
     ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
     ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
@@ -327,8 +327,8 @@ def test_trim_drops_turn_with_trailing_orphan_tool_rows() -> None:
 
     removed = ctx.trim_incomplete_tool_turn()
 
-    assert [i.item_id for i in removed] == ["a2", "t2", "t3"]
-    assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1"]
+    assert [i.item_id for i in removed] == ["t3"]
+    assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1", "a2", "t2"]
     with pytest.raises(KeyError):
         ctx.get_item("t3")
 
