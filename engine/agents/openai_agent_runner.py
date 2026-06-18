@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 from engine.agents.agent_context import AgentContext
 from engine.agents.agent_execution import AgentExecution
@@ -157,13 +157,23 @@ class OpenAiAgentRunner:
                     )
                 last_exc = exc
                 agent_execution.record_llm_failure()
+                status_error = exc if isinstance(exc, APIStatusError) else None
                 logger.warning(
-                    "llm call failed for agent_id=%s with %s (failure %s of %s)",
+                    "llm call failed for agent_id=%s with %s (status=%s code=%s) "
+                    "(failure %s of %s)",
                     agent_execution.agent_id,
                     type(exc).__name__,
+                    status_error.status_code if status_error else None,
+                    status_error.code if status_error else None,
                     agent_execution.consecutive_llm_failures,
                     MAX_CONSECUTIVE_LLM_FAILURES,
                 )
+                if status_error is not None:
+                    logger.debug(
+                        "llm status-error body for agent_id=%s: %s",
+                        agent_execution.agent_id,
+                        status_error.body,
+                    )
                 await asyncio.sleep(
                     backoff_delay(
                         agent_execution.consecutive_llm_failures,

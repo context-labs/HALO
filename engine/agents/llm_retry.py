@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import re
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -23,30 +22,23 @@ _T = TypeVar("_T")
 DEFAULT_BACKOFF_BASE_SECONDS = 0.5
 DEFAULT_BACKOFF_CAP_SECONDS = 30.0
 
-# 400s that reference server-side response state are retriable for HALO
-# (INF-3308): the engine rebuilds every request from the local
-# ``AgentContext`` conversation history, so a rerun does not replay the
-# payload that embedded the stale state. The usual culprit is the OpenAI
-# Agents SDK re-sending Responses-API reasoning items (``rs_…`` ids)
-# accumulated within one streamed run — when the provider/proxy chain
-# (LiteLLM → Azure Foundry) no longer recognizes them, the next internal
-# turn 400s. Plain 400s (bad fields, validation errors) stay
-# non-retriable: an identical replay would deterministically fail again.
-_STALE_RESPONSE_STATE_RE = re.compile(
-    r"previous_response"
-    r"|\brs_[A-Za-z0-9]"
-    r"|required following item"
-    r"|item with id",
-    re.IGNORECASE,
+# A 400 normally means "deterministically bad request". But HALO rebuilds every
+# request from the local ``AgentContext`` history, so the common Responses-API
+# culprits (stale ``rs_*`` reasoning-item ids, ``previous_response`` chains,
+# broken item pairing) are fixed by a clean rerun (INF-3308). The usual trigger
+# is the provider/proxy chain (eg LiteLLM → Azure Foundry) no longer recognizing
+# server-side state minted on an earlier hop. So we treat 400s as retriable
+# *except* the small, stable set below that a clean rerun cannot fix — keyed off
+# the SDK's structured error ``code`` rather than matching error prose. A 400
+# whose ``code`` the proxy dropped (``None``) is retried: bounded waste, capped
+# by the runner circuit breaker, beats crashing a run on a recoverable error.
+_TERMINAL_400_CODES = frozenset(
+    {
+        "context_length_exceeded",
+        "content_filter",
+        "string_above_max_length",
+    }
 )
-
-
-def is_stale_response_state_error(exc: BaseException) -> bool:
-    """True for 400s caused by stale server-side Responses state (``rs_*`` ids,
-    ``previous_response`` chains, broken item pairing)."""
-    if not isinstance(exc, APIStatusError) or exc.status_code != 400:
-        return False
-    return bool(_STALE_RESPONSE_STATE_RE.search(str(exc)))
 
 
 def is_retriable_llm_error(exc: BaseException) -> bool:
@@ -60,13 +52,17 @@ def is_retriable_llm_error(exc: BaseException) -> bool:
       - rate limits and provider 5xx
       - generic ``APIError`` (provider stream errors such as
         "The model produced invalid content")
-      - 400s referencing stale server-side response state — see
-        :func:`is_stale_response_state_error` (INF-3308)
+      - 400s except the terminal codes in ``_TERMINAL_400_CODES`` — a clean
+        rerun from local history fixes stale server-side state (INF-3308)
     """
     if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
         return True
     if isinstance(exc, APIStatusError):
-        return exc.status_code >= 500 or is_stale_response_state_error(exc)
+        if exc.status_code >= 500:
+            return True
+        if exc.status_code == 400:
+            return exc.code not in _TERMINAL_400_CODES
+        return False
     if isinstance(exc, APIError):
         return True
     if isinstance(exc, (httpx.HTTPError, TimeoutError)):

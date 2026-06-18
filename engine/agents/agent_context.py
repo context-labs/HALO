@@ -206,8 +206,8 @@ class AgentContext:
                 # Compaction is an optimization — a failed summarization call
                 # (after its own retries) must never take down the run. Leave
                 # the item uncompacted; the next turn's pass retries it.
-                logger.warning(
-                    "compaction failed for item %s; leaving uncompacted",
+                logger.error(
+                    "Compaction failed for item %s; leaving uncompacted",
                     item.item_id,
                     exc_info=True,
                 )

@@ -370,7 +370,7 @@ async def test_runner_circuit_breaker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_does_not_retry_on_bad_request() -> None:
+async def test_runner_does_not_retry_on_terminal_400() -> None:
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
@@ -389,9 +389,9 @@ async def test_runner_does_not_retry_on_bad_request() -> None:
         nonlocal call_count
         call_count += 1
         raise BadRequestError(
-            message="bad field",
+            message="too many tokens",
             response=fake_response,
-            body={"error": {"message": "bad field"}},
+            body={"message": "too many tokens", "code": "context_length_exceeded"},
         )
 
     runner = OpenAiAgentRunner(
@@ -563,9 +563,9 @@ async def test_runner_propagates_non_retriable_stream_iteration_error() -> None:
         call_count += 1
         return _RaisingStream(
             BadRequestError(
-                message="bad field",
+                message="too many tokens",
                 response=fake_response,
-                body={"error": {"message": "bad field"}},
+                body={"message": "too many tokens", "code": "context_length_exceeded"},
             )
         )
 
@@ -749,9 +749,9 @@ async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_propagates_plain_400_mid_stream() -> None:
-    """Plain validation 400s mid-stream stay non-retriable — an identical replay
-    would deterministically fail again."""
+async def test_runner_propagates_terminal_400_mid_stream() -> None:
+    """Terminal-code 400s mid-stream stay non-retriable — no clean rerun fixes
+    e.g. an over-budget context, so an identical replay would fail again."""
     bus = EngineOutputBus()
     ctx = _context()
     execution = AgentExecution(
@@ -772,9 +772,9 @@ async def test_runner_propagates_plain_400_mid_stream() -> None:
         return _StreamYieldsThenRaises(
             [_assistant_event("partial")],
             BadRequestError(
-                message="bad field",
+                message="too many tokens",
                 response=fake_response,
-                body={"error": {"message": "bad field"}},
+                body={"message": "too many tokens", "code": "context_length_exceeded"},
             ),
         )
 
