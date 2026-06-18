@@ -48,6 +48,9 @@ async def test_query_traces_tool(ctx: ToolContext) -> None:
     assert result.result.total == 3
     # raw_jsonl_bytes is on every summary so the agent can size traces.
     assert all(t.raw_jsonl_bytes > 0 for t in result.result.traces)
+    by_id = {t.trace_id: t for t in result.result.traces}
+    assert by_id["t-bbbb"].otel_error_span_count == 2
+    assert by_id["t-bbbb"].missing_parent_count == 0
 
 
 @pytest.mark.asyncio
@@ -136,6 +139,8 @@ async def test_overview_tool(ctx: ToolContext) -> None:
     result = await tool.run(ctx, DatasetOverviewArguments(filters=TraceFilters()))
     assert result.result.total_traces == 3
     assert result.result.raw_jsonl_bytes > 0
+    assert result.result.otel_error_span_count == 2
+    assert result.result.missing_parent_count == 0
 
 
 @pytest.mark.asyncio

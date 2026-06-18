@@ -71,7 +71,7 @@ async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path)
     assert meta_path.exists()
 
     meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
-    assert meta.schema_version == 1
+    assert meta.schema_version == 2
     assert meta.trace_count == 3
     expected_size, expected_mtime_ns = TraceIndexBuilder._fingerprint_trace_file(trace_path)
     assert meta.source_size == expected_size
@@ -85,6 +85,10 @@ async def test_build_index_from_tiny_fixture(tmp_path: Path, fixtures_dir: Path)
 
     bb = rows_by_id["t-bbbb"]
     assert bb.has_errors is True
+    assert bb.otel_error_span_count == 2
+    assert bb.missing_parent_count == 0
+    assert bb.missing_agent_identity_count == 0
+    assert bb.project_id_mismatch_count == 0
     assert "gpt-5.4" in bb.model_names
     assert bb.total_input_tokens == 200
     assert bb.total_output_tokens == 40
@@ -115,11 +119,11 @@ async def test_ensure_index_rebuilds_on_schema_mismatch(tmp_path: Path, fixtures
 
     result_path = await TraceIndexBuilder.ensure_index_exists(
         trace_path=trace_path,
-        config=TraceIndexConfig(schema_version=1),
+        config=TraceIndexConfig(),
     )
     assert result_path == index_path
     rebuilt_meta = TraceIndexMeta.model_validate_json(meta_path.read_text())
-    assert rebuilt_meta.schema_version == 1
+    assert rebuilt_meta.schema_version == 2
     assert rebuilt_meta.trace_count == 3
 
 
@@ -527,6 +531,8 @@ async def test_merge_rollups_across_chunks(tmp_path: Path, monkeypatch: pytest.M
     assert set(split.model_names) == {"model-1", "model-2", "model-3"}
     assert split.total_input_tokens == 10 + 20 + 30
     assert split.total_output_tokens == 5 + 10 + 15
+    assert split.missing_parent_count == 0
+    assert split.otel_error_span_count == 1
     assert split.byte_offsets == sorted(split.byte_offsets)
 
 

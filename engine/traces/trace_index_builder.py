@@ -84,6 +84,8 @@ def _merge_accumulators(
                 merged[trace_id] = acc
             else:
                 existing.merge_in(acc)
+    for acc in merged.values():
+        acc.finalize_validation()
     return merged
 
 
@@ -141,6 +143,8 @@ def _process_chunk(trace_path: Path, chunk: list[tuple[int, int]]) -> dict[str, 
             span = SpanRecord.model_validate_json(stripped)
             acc = rows.setdefault(span.trace_id, _RowAccumulator(trace_id=span.trace_id))
             acc.absorb(span=span, byte_offset=byte_offset, byte_length=len(stripped))
+    for acc in rows.values():
+        acc.finalize_validation()
     return rows
 
 
@@ -158,15 +162,27 @@ class _RowAccumulator:
     service_names: set[str] = field(default_factory=set)
     model_names: set[str] = field(default_factory=set)
     agent_names: set[str] = field(default_factory=set)
+    agent_ids: set[str] = field(default_factory=set)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     project_id: str | None = None
+    project_ids: set[str] = field(default_factory=set)
+    span_ids: set[str] = field(default_factory=set)
+    parent_span_ids: set[str] = field(default_factory=set)
+    missing_agent_identity_count: int = 0
+    otel_error_span_count: int = 0
+    tool_error_span_count: int = 0
+    missing_parent_count: int = 0
+    project_id_mismatch_count: int = 0
 
     def absorb(self, *, span: SpanRecord, byte_offset: int, byte_length: int) -> None:
         """Fold one span into the accumulator: record its byte slice and update rollup fields."""
         self.byte_offsets.append(byte_offset)
         self.byte_lengths.append(byte_length)
         self.span_count += 1
+        self.span_ids.add(span.span_id)
+        if span.parent_span_id:
+            self.parent_span_ids.add(span.parent_span_id)
 
         if not self.start_time or span.start_time < self.start_time:
             self.start_time = span.start_time
@@ -175,6 +191,7 @@ class _RowAccumulator:
 
         if span.status.code == "STATUS_CODE_ERROR":
             self.has_errors = True
+            self.otel_error_span_count += 1
 
         svc = span.resource.attributes.get("service.name")
         if isinstance(svc, str):
@@ -189,6 +206,11 @@ class _RowAccumulator:
         agent = span.attributes.get("inference.agent_name")
         if isinstance(agent, str) and agent:
             self.agent_names.add(agent)
+        agent_id = span.attributes.get("inference.agent_id") or span.attributes.get("agent.id")
+        if isinstance(agent_id, str) and agent_id:
+            self.agent_ids.add(agent_id)
+        elif not (isinstance(agent, str) and agent):
+            self.missing_agent_identity_count += 1
 
         input_tokens = span.attributes.get("inference.llm.input_tokens")
         if isinstance(input_tokens, int):
@@ -198,8 +220,14 @@ class _RowAccumulator:
             self.total_output_tokens += output_tokens
 
         proj = span.attributes.get("inference.project_id")
-        if isinstance(proj, str) and self.project_id is None:
-            self.project_id = proj
+        if isinstance(proj, str) and proj:
+            self.project_ids.add(proj)
+            if self.project_id is None:
+                self.project_id = proj
+
+        span_kind = span.attributes.get("openinference.span.kind")
+        if span.status.code == "STATUS_CODE_ERROR" and span_kind == "TOOL":
+            self.tool_error_span_count += 1
 
     def merge_in(self, other: _RowAccumulator) -> None:
         """Fold ``other`` into ``self`` for the same trace_id; caller iterates partials in file order."""
@@ -218,12 +246,25 @@ class _RowAccumulator:
         self.service_names |= other.service_names
         self.model_names |= other.model_names
         self.agent_names |= other.agent_names
+        self.agent_ids |= other.agent_ids
 
         self.total_input_tokens += other.total_input_tokens
         self.total_output_tokens += other.total_output_tokens
 
         if self.project_id is None:
             self.project_id = other.project_id
+        self.project_ids |= other.project_ids
+        self.span_ids |= other.span_ids
+        self.parent_span_ids |= other.parent_span_ids
+        self.missing_agent_identity_count += other.missing_agent_identity_count
+        self.otel_error_span_count += other.otel_error_span_count
+        self.tool_error_span_count += other.tool_error_span_count
+
+    def finalize_validation(self) -> None:
+        self.missing_parent_count = sum(
+            1 for parent in self.parent_span_ids if parent not in self.span_ids
+        )
+        self.project_id_mismatch_count = max(0, len(self.project_ids) - 1)
 
     def finalize(self) -> TraceIndexRow:
         """Snapshot the accumulated state into the immutable TraceIndexRow that gets written to the sidecar."""
@@ -241,6 +282,12 @@ class _RowAccumulator:
             total_output_tokens=self.total_output_tokens,
             project_id=self.project_id,
             agent_names=sorted(self.agent_names),
+            agent_ids=sorted(self.agent_ids),
+            missing_parent_count=self.missing_parent_count,
+            missing_agent_identity_count=self.missing_agent_identity_count,
+            project_id_mismatch_count=self.project_id_mismatch_count,
+            otel_error_span_count=self.otel_error_span_count,
+            tool_error_span_count=self.tool_error_span_count,
         )
 
 
@@ -329,7 +376,7 @@ class TraceIndexBuilder:
         the event loop is not blocked while serializing/writing potentially
         large index files.
         """
-        if schema_version != 1:
+        if schema_version != 2:
             raise ValueError(f"unsupported trace index schema_version={schema_version}")
 
         if source_size is None or source_mtime_ns is None:
