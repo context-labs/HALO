@@ -363,6 +363,69 @@ def test_trim_keeps_tool_rows_completing_protected_prior_turn() -> None:
     assert [i.item_id for i in ctx.items] == ["u1", "a1", "t1"]
 
 
+def test_trim_drops_all_rows_of_parallel_turn_with_no_results() -> None:
+    """The mapper emits one assistant row per parallel tool call. A mid-stream
+    failure before any result must trim EVERY row of the turn — leaving an
+    earlier row behind would render an assistant tool_call with no matching
+    result and 400 again on rerun."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="a2", role="assistant", tool_calls=[_tool_call("call_2")]))
+
+    removed = ctx.trim_incomplete_tool_turn()
+
+    assert [i.item_id for i in removed] == ["a1", "a2"]
+    assert [i.item_id for i in ctx.items] == ["u1"]
+    with pytest.raises(KeyError):
+        ctx.get_item("a1")
+
+
+def test_trim_drops_all_rows_of_parallel_turn_with_partial_results() -> None:
+    """One assistant row per parallel call, only some results in. The whole
+    turn (all assistant rows and the partial result) is trimmed together."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="a2", role="assistant", tool_calls=[_tool_call("call_2")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="result", tool_call_id="call_1"))
+
+    removed = ctx.trim_incomplete_tool_turn()
+
+    assert [i.item_id for i in removed] == ["a1", "a2", "t1"]
+    assert [i.item_id for i in ctx.items] == ["u1"]
+
+
+def test_trim_keeps_complete_parallel_turn_split_across_rows() -> None:
+    """A complete parallel turn (one assistant row per call, all results in)
+    is consistent and left intact."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="u1", role="user", content="question"))
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="a2", role="assistant", tool_calls=[_tool_call("call_2")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="r1", tool_call_id="call_1"))
+    ctx.append(AgentContextItem(item_id="t2", role="tool", content="r2", tool_call_id="call_2"))
+
+    assert ctx.trim_incomplete_tool_turn() == []
+    assert [i.item_id for i in ctx.items] == ["u1", "a1", "a2", "t1", "t2"]
+
+
+def test_trim_keeps_complete_parallel_turn_and_drops_incomplete_next() -> None:
+    """A completed split parallel turn is preserved; only the incomplete
+    following turn is trimmed."""
+    ctx = _ctx()
+    ctx.append(AgentContextItem(item_id="a1", role="assistant", tool_calls=[_tool_call("call_1")]))
+    ctx.append(AgentContextItem(item_id="a2", role="assistant", tool_calls=[_tool_call("call_2")]))
+    ctx.append(AgentContextItem(item_id="t1", role="tool", content="r1", tool_call_id="call_1"))
+    ctx.append(AgentContextItem(item_id="t2", role="tool", content="r2", tool_call_id="call_2"))
+    ctx.append(AgentContextItem(item_id="a3", role="assistant", tool_calls=[_tool_call("call_3")]))
+
+    removed = ctx.trim_incomplete_tool_turn()
+
+    assert [i.item_id for i in removed] == ["a3"]
+    assert [i.item_id for i in ctx.items] == ["a1", "a2", "t1", "t2"]
+
+
 @pytest.mark.asyncio
 async def test_compact_old_items_survives_compaction_failure(
     monkeypatch: pytest.MonkeyPatch,

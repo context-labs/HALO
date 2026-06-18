@@ -116,12 +116,14 @@ class AgentContext:
         """Drop a trailing inconsistent tool turn so the rendered message array
         stays valid for the LLM API after a mid-stream failure.
 
-        Scans backwards for the last non-compacted assistant item carrying
-        ``tool_calls`` and validates the tail after it both ways: every call
-        id needs a matching ``role=tool`` result, AND every trailing ``tool``
-        row must reference one of that turn's call ids. A missing result OR an
-        orphan tool row (referencing a call id from a previously trimmed
-        attempt) removes the whole turn — the next attempt regenerates it.
+        Scans backwards for the trailing tool turn — the contiguous block of
+        non-compacted assistant ``tool_calls`` rows (a parallel-tool-call turn
+        spans several, one per call) plus the ``role=tool`` results after them —
+        and validates it both ways: every call id across the block needs a
+        matching result, AND every trailing ``tool`` row must reference one of
+        the block's call ids. A missing result OR an orphan tool row
+        (referencing a call id from a previously trimmed attempt) removes the
+        whole turn — the next attempt regenerates it.
         If no assistant tool-call turn exists in the mutable range, trailing
         ``tool`` rows that don't belong to the nearest preceding tool-call
         turn are orphans and are trimmed from the first one onward. Earlier
@@ -145,14 +147,30 @@ class AgentContext:
         for idx in range(len(self.items) - 1, floor - 1, -1):
             item = self.items[idx]
             if item.role == "assistant" and item.tool_calls and not item.is_compacted:
-                call_ids = {tc.id for tc in item.tool_calls}
+                # A parallel-tool-call turn is emitted as several consecutive
+                # assistant rows (one per ``ToolCallItem``) before any result.
+                # Expand to the whole contiguous block so trimming can't leave
+                # an earlier row of the same turn behind with no matching
+                # result — which would still violate the chat API on rerun.
+                start = idx
+                while start - 1 >= floor:
+                    prev = self.items[start - 1]
+                    if prev.role == "assistant" and prev.tool_calls and not prev.is_compacted:
+                        start -= 1
+                    else:
+                        break
+                call_ids: set[str] = set()
+                for i in range(start, idx + 1):
+                    block_calls = self.items[i].tool_calls
+                    if block_calls:
+                        call_ids.update(tc.id for tc in block_calls)
                 result_ids = {
                     later.tool_call_id for later in self.items[idx + 1 :] if later.role == "tool"
                 }
                 # Incomplete (missing results) or polluted (orphan results
                 # for other call ids): rerun the whole turn.
                 if call_ids != result_ids:
-                    return idx
+                    return start
                 return None
         # No assistant tool-call turn in the mutable range. Tool rows at or
         # after ``floor`` are only valid if they belong to the nearest
