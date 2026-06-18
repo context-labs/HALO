@@ -380,6 +380,12 @@ class TraceStore:
                 total_input_tokens=row.total_input_tokens,
                 total_output_tokens=row.total_output_tokens,
                 agent_names=row.agent_names,
+                agent_ids=row.agent_ids,
+                missing_parent_count=row.missing_parent_count,
+                missing_agent_identity_count=row.missing_agent_identity_count,
+                project_id_mismatch_count=row.project_id_mismatch_count,
+                otel_error_span_count=row.otel_error_span_count,
+                tool_error_span_count=row.tool_error_span_count,
                 raw_jsonl_bytes=sum(row.byte_lengths),
             )
             for row in filtered[offset : offset + limit]
@@ -413,7 +419,13 @@ class TraceStore:
                 service_names=[],
                 model_names=[],
                 agent_names=[],
+                agent_ids=[],
                 error_trace_count=0,
+                missing_parent_count=0,
+                missing_agent_identity_count=0,
+                project_id_mismatch_count=0,
+                otel_error_span_count=0,
+                tool_error_span_count=0,
                 total_input_tokens=0,
                 total_output_tokens=0,
                 raw_jsonl_bytes=0,
@@ -422,10 +434,12 @@ class TraceStore:
         services: set[str] = set()
         models: set[str] = set()
         agents: set[str] = set()
+        agent_ids: set[str] = set()
         for r in rows:
             services.update(r.service_names)
             models.update(r.model_names)
             agents.update(r.agent_names)
+            agent_ids.update(r.agent_ids)
 
         return DatasetOverview(
             total_traces=len(rows),
@@ -435,7 +449,13 @@ class TraceStore:
             service_names=sorted(services),
             model_names=sorted(models),
             agent_names=sorted(agents),
+            agent_ids=sorted(agent_ids),
             error_trace_count=sum(1 for r in rows if r.has_errors),
+            missing_parent_count=sum(r.missing_parent_count for r in rows),
+            missing_agent_identity_count=sum(r.missing_agent_identity_count for r in rows),
+            project_id_mismatch_count=sum(r.project_id_mismatch_count for r in rows),
+            otel_error_span_count=sum(r.otel_error_span_count for r in rows),
+            tool_error_span_count=sum(r.tool_error_span_count for r in rows),
             total_input_tokens=sum(r.total_input_tokens for r in rows),
             total_output_tokens=sum(r.total_output_tokens for r in rows),
             raw_jsonl_bytes=sum(sum(r.byte_lengths) for r in rows),

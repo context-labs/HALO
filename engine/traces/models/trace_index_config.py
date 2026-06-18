@@ -11,4 +11,4 @@ class TraceIndexConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     index_path: Path | None = None
-    schema_version: int = 1
+    schema_version: int = 2

@@ -26,6 +26,12 @@ class TraceIndexRow(BaseModel):
     total_output_tokens: int = Field(ge=0)
     project_id: str | None = None
     agent_names: list[str]
+    agent_ids: list[str] = Field(default_factory=list)
+    missing_parent_count: int = Field(default=0, ge=0)
+    missing_agent_identity_count: int = Field(default=0, ge=0)
+    project_id_mismatch_count: int = Field(default=0, ge=0)
+    otel_error_span_count: int = Field(default=0, ge=0)
+    tool_error_span_count: int = Field(default=0, ge=0)
 
 
 class TraceIndexMeta(BaseModel):
