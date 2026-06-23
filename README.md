@@ -39,7 +39,9 @@
 </p>
 
 <p align="center">
-  <video src="./assets/halo-social.mp4" controls muted playsinline width="100%"></video>
+  <img src="./assets/halo-social.gif" alt="HALO Desktop walkthrough" width="100%">
+  <br>
+  <a href="./assets/halo-social.mp4">Watch the full video</a>
 </p>
 
 ## What is this?
