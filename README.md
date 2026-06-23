@@ -38,11 +38,72 @@
   <a href="#contributing">Contributing</a>
 </p>
 
-<p align="center">
-  <img src="./assets/halo-social.gif" alt="HALO Desktop walkthrough" width="100%">
-  <br>
-  <a href="./assets/halo-social.mp4">Watch the full video</a>
-</p>
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./assets/import-traces-new.png" alt="Import agent traces">
+      <br>
+      <strong>Import agent traces</strong>
+      <br>
+      Bring in traces from Langfuse, Arize, JSONL, or a local agent.
+    </td>
+    <td width="50%">
+      <img src="./assets/view-traces.png" alt="Browse trace history">
+      <br>
+      <strong>Browse trace history</strong>
+      <br>
+      Search imported traces and understand the shape of a dataset.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./assets/run-halo.png" alt="Run HALO analysis">
+      <br>
+      <strong>Run HALO analysis</strong>
+      <br>
+      Launch reports over trace groups and follow each analysis step.
+    </td>
+    <td width="50%">
+      <img src="./assets/trace-timeline.png" alt="Review trace timelines">
+      <br>
+      <strong>Review trace timelines</strong>
+      <br>
+      Spot latency, retries, expensive spans, and branching behavior.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./assets/view-chat-session.png" alt="Inspect full sessions">
+      <br>
+      <strong>Inspect full sessions</strong>
+      <br>
+      Read conversations, tool calls, and model responses in context.
+    </td>
+    <td width="50%">
+      <img src="./assets/view-halo-report.png" alt="Read HALO reports">
+      <br>
+      <strong>Read HALO reports</strong>
+      <br>
+      Review ranked failures, bottlenecks, and concrete recommendations.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./assets/open-in-ai-agent-editor.png" alt="Ship fixes with an agent">
+      <br>
+      <strong>Ship fixes with an agent</strong>
+      <br>
+      Send HALO reports to Claude, Cursor, or Codex for implementation.
+    </td>
+    <td width="50%">
+      <img src="./assets/import-traces.png" alt="Import data sources">
+      <br>
+      <strong>Import data sources</strong>
+      <br>
+      Connect existing observability tools or upload trace exports.
+    </td>
+  </tr>
+</table>
 
 ## What is this?
 
