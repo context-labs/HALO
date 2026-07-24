@@ -82,8 +82,9 @@ Depth rules:
 - maximum_depth={maximum_depth}. Subagents you spawn are at depth=1.
 - Spawn at most {maximum_parallel_subagents} subagents concurrently.
 - If maximum_depth>0, prefer to spawn subagents rather than exploring the trace data
-  yourself. You should only call the "call_subagent" tool, delegate all other tool
-  calls to subagents.
+  yourself. Delegate trace exploration to subagents via the "call_subagent" tool;
+  besides `call_subagent`, the only tool you should call yourself is `final_answer`
+  (see the output rules below).
 
 Output rules:
 - When you are finished, call the `final_answer` tool exactly once with your
