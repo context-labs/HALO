@@ -35,30 +35,20 @@ def test_assistant_text_item_plain() -> None:
     assert mapped.output_item.item.content == "Done."
 
 
-def test_root_assistant_final_sentinel_strips_and_sets_final() -> None:
+def test_root_assistant_text_is_never_final() -> None:
+    """Plain root assistant text cannot finalize a run — only the
+    ``final_answer`` tool call can."""
     mapper = OpenAiEventMapper()
     mapped = mapper.to_mapped_event(
-        assistant_message_event(item_id="msg_2", text="Final answer.\n<final/>"),
+        assistant_message_event(item_id="msg_2", text="Final answer."),
         execution=_exec(),
         is_root=True,
     )
     assert mapped.output_item is not None
     assert mapped.context_item is not None
-    assert mapped.output_item.final is True
+    assert mapped.output_item.final is False
     assert mapped.output_item.item.content == "Final answer."
     assert mapped.context_item.content == "Final answer."
-
-
-def test_subagent_assistant_final_sentinel_ignored() -> None:
-    mapper = OpenAiEventMapper()
-    mapped = mapper.to_mapped_event(
-        assistant_message_event(item_id="msg_3", text="sub done <final/>"),
-        execution=_exec(depth=1, parent_tool_call_id="c1"),
-        is_root=False,
-    )
-    assert mapped.output_item is not None
-    assert mapped.output_item.final is False
-    assert "sub done" in (mapped.output_item.item.content or "")
 
 
 def test_structured_refusal_maps_without_output_or_context() -> None:
@@ -200,8 +190,7 @@ def test_tool_call_and_output_have_distinct_item_ids() -> None:
 
 def test_root_final_answer_call_becomes_final_assistant_message() -> None:
     """A root ``final_answer`` call is transformed: the ``answer`` argument
-    becomes a plain assistant message with ``final=True`` — byte-compatible
-    with what the legacy ``<final/>`` sentinel produced."""
+    becomes a plain assistant message with ``final=True``."""
     mapper = OpenAiEventMapper()
     mapped = mapper.to_mapped_event(
         tool_call_event(

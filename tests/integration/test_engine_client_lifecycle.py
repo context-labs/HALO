@@ -14,7 +14,7 @@ from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
 from tests._sdk_events import assistant_message_event
-from tests.probes.probe_kit import FakeRunner
+from tests.probes.probe_kit import FakeRunner, make_final_answer
 
 
 async def _noop_compact(
@@ -93,7 +93,7 @@ async def test_client_closed_on_normal_exit(
     stub_client = _install_stub_client(monkeypatch)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
-    runner = FakeRunner([_assistant_text("Final answer.\n<final/>")])
+    runner = FakeRunner([*make_final_answer("Final answer.")])
     monkeypatch.setattr("agents.Runner.run_streamed", runner.run_streamed)
 
     await engine_main.run_engine_async(
@@ -117,7 +117,7 @@ async def test_client_closed_on_early_consumer_break(
     stub_client = _install_stub_client(monkeypatch)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
-    runner = FakeRunner([_assistant_text("Final answer.\n<final/>")])
+    runner = FakeRunner([*make_final_answer("Final answer.")])
     monkeypatch.setattr("agents.Runner.run_streamed", runner.run_streamed)
 
     agen = engine_main.stream_engine_async(

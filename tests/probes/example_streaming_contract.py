@@ -25,6 +25,7 @@ from tests.probes.probe_kit import (
     make_assistant_text,
     make_default_config,
     make_default_messages,
+    make_final_answer,
     make_text_delta,
     run_with_fake,
 )
@@ -50,7 +51,7 @@ async def probe_delta_then_message_ordering() -> None:
             make_text_delta(item_id="m1", delta="hel"),
             make_text_delta(item_id="m1", delta="lo "),
             make_text_delta(item_id="m1", delta="world"),
-            make_assistant_text("hello world\n<final/>", item_id="m1"),
+            *make_final_answer("hello world"),
         ],
     )
     result = await run_with_fake(runner)
@@ -94,7 +95,7 @@ async def probe_run_engine_async_filters_deltas() -> None:
         [
             make_text_delta(item_id="m1", delta="streamed"),
             make_text_delta(item_id="m1", delta=" text"),
-            make_assistant_text("done\n<final/>", item_id="m1"),
+            *make_final_answer("done"),
         ],
     )
     cfg = make_default_config()

@@ -17,7 +17,7 @@ from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
 from engine.traces.models.trace_dataset_source import TraceDatasetSource
 from tests._sdk_events import assistant_message_event
-from tests.probes.probe_kit import FakeRunner
+from tests.probes.probe_kit import FakeRunner, make_final_answer
 
 
 async def _noop_compact(
@@ -174,7 +174,7 @@ async def test_engine_wires_configured_client_via_run_config(
     monkeypatch.setattr(engine_main, "AsyncOpenAI", _capture_client)
     monkeypatch.setattr(agent_context_module, "compact", _noop_compact)
 
-    runner = FakeRunner([_assistant_text("Final.\n<final/>")])
+    runner = FakeRunner([*make_final_answer("Final.")])
     monkeypatch.setattr("agents.Runner.run_streamed", runner.run_streamed)
 
     await engine_main.run_engine_async(

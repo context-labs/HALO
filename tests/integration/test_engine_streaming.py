@@ -19,6 +19,7 @@ from tests.probes.probe_kit import (
     make_assistant_text,
     make_default_config,
     make_default_messages,
+    make_final_answer,
     make_text_delta,
     run_with_fake,
 )
@@ -34,7 +35,7 @@ async def test_deltas_and_items_emitted_with_monotonic_sequences() -> None:
             make_text_delta(item_id="m1", delta="hel"),
             make_text_delta(item_id="m1", delta="lo "),
             make_text_delta(item_id="m1", delta="world"),
-            make_assistant_text("hello world\n<final/>", item_id="m1"),
+            *make_final_answer("hello world"),
         ],
     )
 
@@ -64,7 +65,7 @@ async def test_run_engine_async_filters_text_deltas() -> None:
         [
             make_text_delta(item_id="m1", delta="streamed"),
             make_text_delta(item_id="m1", delta=" text"),
-            make_assistant_text("done\n<final/>", item_id="m1"),
+            *make_final_answer("done"),
         ],
     )
 

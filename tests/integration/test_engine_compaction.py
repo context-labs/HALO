@@ -12,7 +12,7 @@ from engine.engine_config import EngineConfig
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
 from tests._sdk_events import assistant_message_event
-from tests.probes.probe_kit import FakeRunner
+from tests.probes.probe_kit import FakeRunner, make_final_answer
 
 
 def _assistant_text(text: str):
@@ -55,7 +55,7 @@ async def test_engine_compaction_uses_configured_compactor(
 
     monkeypatch.setattr(agent_context_module, "compact", fake_compact)
 
-    runner = FakeRunner([_assistant_text("Final answer.\n<final/>")])
+    runner = FakeRunner([*make_final_answer("Final answer.")])
     monkeypatch.setattr("agents.Runner.run_streamed", runner.run_streamed)
     results = await engine_main.run_engine_async(
         [AgentMessage(role="user", content="Summarize the dataset.")],
@@ -64,5 +64,5 @@ async def test_engine_compaction_uses_configured_compactor(
     )
 
     assert any(item.final for item in results)
-    assert compacted_items == [("in-0", "user"), ("msg-1", "assistant")]
+    assert compacted_items == [("in-0", "user"), ("final-answer-call-final", "assistant")]
     assert runner.calls[0]["max_turns"] == 4

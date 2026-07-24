@@ -21,10 +21,9 @@ from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
-# Transient user nudge appended when a root run ends without finalizing
-# (no ``final_answer`` call, no legacy ``<final/>`` sentinel). Mirrors the
-# refusal-retry "Continue." pattern: appended to the resent input only,
-# never stored in ``AgentContext``.
+# Transient user nudge appended when a root run ends without a
+# ``final_answer`` call. Mirrors the refusal-retry "Continue." pattern:
+# appended to the resent input only, never stored in ``AgentContext``.
 FINAL_ANSWER_REPROMPT_MESSAGE = (
     "[HALO: your run ended without calling the `final_answer` tool. "
     "Call `final_answer` now with your complete final answer.]"

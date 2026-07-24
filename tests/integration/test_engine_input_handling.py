@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from engine.models.messages import AgentMessage
-from tests.probes.probe_kit import FakeRunner, make_assistant_text, run_with_fake
+from tests.probes.probe_kit import FakeRunner, make_assistant_text, make_final_answer, run_with_fake
 
 
 def _first_input(runner: FakeRunner) -> list[dict]:
@@ -24,7 +24,7 @@ def _first_input(runner: FakeRunner) -> list[dict]:
 async def test_no_system_message_prepends_rendered_root_prompt() -> None:
     """User-only input → engine renders the root system prompt and prepends
     it as the first message in the SDK input."""
-    runner = FakeRunner([make_assistant_text("ok\n<final/>", item_id="m1")])
+    runner = FakeRunner([*make_final_answer("ok")])
 
     result = await run_with_fake(
         runner,
@@ -45,7 +45,7 @@ async def test_caller_supplied_system_message_passed_through_verbatim() -> None:
     """Caller's system message wins — engine does NOT replace it with its
     own rendered prompt."""
     custom_sys = "You are a custom system prompt; do exactly what I say."
-    runner = FakeRunner([make_assistant_text("ok\n<final/>", item_id="m1")])
+    runner = FakeRunner([*make_final_answer("ok")])
 
     result = await run_with_fake(
         runner,
@@ -69,7 +69,7 @@ async def test_multi_turn_continuation_preserves_role_and_content_order() -> Non
     """A continuation (sys + user + asst + user) hands through to the SDK
     with role and content order intact — no reordering, no dropped turns."""
     custom_sys = "Continuation system prompt."
-    runner = FakeRunner([make_assistant_text("final answer\n<final/>", item_id="m-new")])
+    runner = FakeRunner([*make_final_answer("final answer")])
 
     result = await run_with_fake(
         runner,

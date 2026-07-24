@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import json
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -178,9 +179,35 @@ def make_assistant_text(
     item_id: str = "msg-1",
 ) -> RunItemStreamEvent:
     """Build a ``message_output_item`` event yielding ``text`` as assistant
-    content. Use this for the model's natural-language replies, including
-    those carrying the ``<final/>`` sentinel for the root agent."""
+    content. Use this for the model's natural-language replies; to end a
+    scripted root run use ``make_final_answer``."""
     return assistant_message_event(item_id=item_id, text=text)
+
+
+def make_final_answer(
+    answer: str,
+    *,
+    call_id: str = "call-final",
+) -> list[RunItemStreamEvent]:
+    """Build the ``final_answer`` tool-call event pair that finalizes a root run.
+
+    Returns the call event plus its acknowledgement output, matching what the
+    real SDK emits under ``StopAtTools``. Splat it into a program:
+    ``[..., *make_final_answer("done")]``. The mapper transforms the pair into
+    one final-flagged assistant message carrying ``answer``."""
+    return [
+        tool_call_event(
+            call_id=call_id,
+            name="final_answer",
+            arguments=json.dumps({"answer": answer}),
+            raw_id=call_id,
+        ),
+        tool_output_event(
+            call_id=call_id,
+            output='{"acknowledged": true}',
+            raw_id=f"{call_id}-out",
+        ),
+    ]
 
 
 def make_refusal(

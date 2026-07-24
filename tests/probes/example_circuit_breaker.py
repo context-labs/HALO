@@ -35,6 +35,7 @@ from engine.errors import EngineAgentExhaustedError
 from tests.probes.probe_kit import (
     FakeRunner,
     make_assistant_text,
+    make_final_answer,
     run_with_fake,
 )
 
@@ -54,10 +55,10 @@ def _check(condition: bool, description: str, observed: str = "") -> None:
 
 
 async def probe_baseline_success() -> None:
-    """Sanity check: a single assistant message ending in <final/> produces
-    one output item with final=True. Confirms the kit wires into the engine."""
+    """Sanity check: a scripted ``final_answer`` call produces one output
+    item with final=True. Confirms the kit wires into the engine."""
     runner = FakeRunner(
-        [make_assistant_text("hello\n<final/>", item_id="m1")],
+        [*make_final_answer("hello")],
     )
     result = await run_with_fake(runner)
 
@@ -83,7 +84,7 @@ async def probe_retry_then_success() -> None:
     fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
     runner = FakeRunner(
         APIConnectionError(request=fake_request),
-        [make_assistant_text("recovered\n<final/>", item_id="m2")],
+        [*make_final_answer("recovered")],
     )
     result = await run_with_fake(runner)
 

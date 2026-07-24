@@ -19,6 +19,7 @@ from engine.models.messages import AgentMessage
 from tests.probes.probe_kit import (
     FakeRunner,
     make_assistant_text,
+    make_final_answer,
     run_with_fake,
 )
 
@@ -45,7 +46,7 @@ async def probe_no_system_message_prepends_default() -> None:
     """User-only input. Engine should render the root system prompt
     and put it as the first message in the input fed to the SDK."""
     runner = FakeRunner(
-        [make_assistant_text("ok\n<final/>", item_id="m1")],
+        [*make_final_answer("ok")],
     )
     result = await run_with_fake(
         runner,
@@ -86,7 +87,7 @@ async def probe_system_message_passed_through_unchanged() -> None:
     with its own rendered prompt — it should pass through verbatim."""
     custom_sys = "You are a custom system prompt; do exactly what I say."
     runner = FakeRunner(
-        [make_assistant_text("ok\n<final/>", item_id="m1")],
+        [*make_final_answer("ok")],
     )
     result = await run_with_fake(
         runner,
@@ -121,7 +122,7 @@ async def probe_multi_message_continuation_preserves_ids() -> None:
     array fed to ``run_streamed``."""
     custom_sys = "Continuation system prompt."
     runner = FakeRunner(
-        [make_assistant_text("final answer\n<final/>", item_id="m-new")],
+        [*make_final_answer("final answer")],
     )
     result = await run_with_fake(
         runner,
@@ -162,7 +163,7 @@ async def probe_only_system_message_no_user() -> None:
     """Edge case: caller passes ONLY a system message, no user content. What
     does the engine do? The SDK Runner usually requires a user message."""
     runner = FakeRunner(
-        [make_assistant_text("ok\n<final/>", item_id="m1")],
+        [*make_final_answer("ok")],
     )
     result = await run_with_fake(
         runner,

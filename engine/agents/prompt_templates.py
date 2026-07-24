@@ -6,12 +6,6 @@ if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
     from engine.git.git_repo import GitRepo
 
-# Legacy finalization sentinel. The primary protocol is now the root-only
-# ``final_answer`` tool call (see ``engine/tools/final_answer_tool.py``);
-# the mapper still honors this sentinel on root assistant text as a
-# backwards-compatible fallback for prompts/models that emit it.
-FINAL_SENTINEL = "<final/>"
-
 SYSTEM_PROMPT = (
     "You answer questions about an OTLP-shaped JSONL trace dataset using the provided "
     "trace tools.\n\n"

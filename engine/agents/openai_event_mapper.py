@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
-from engine.agents.prompt_templates import FINAL_SENTINEL
 from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage, AgentToolCall, AgentToolFunction
 from engine.tools.final_answer_tool import FINAL_ANSWER_TOOL_NAME, FinalAnswerArguments
@@ -34,9 +33,8 @@ class OpenAiEventMapper:
 
     Owns the boundary between the SDK's internal event shapes and the Engine's typed
     AgentContextItem / AgentOutputItem / AgentTextDelta. Detects root-agent
-    finalization — a ``final_answer`` tool call (the primary protocol) or the
-    legacy ``<final/>`` sentinel on assistant text — and marks the
-    corresponding output item ``final=True``.
+    finalization — a ``final_answer`` tool call — and marks the corresponding
+    output item ``final=True``.
 
     Stateful only across one agent's stream: holds the call_id→tool_name
     map so a ``ToolCallOutputItem`` can carry the function name through to
@@ -71,7 +69,7 @@ class OpenAiEventMapper:
         if isinstance(raw_event, RunItemStreamEvent):
             item = raw_event.item
             if isinstance(item, MessageOutputItem):
-                return self._map_assistant_message(item, execution=execution, is_root=is_root)
+                return self._map_assistant_message(item, execution=execution)
             if isinstance(item, ToolCallItem):
                 return self._map_tool_call(item, execution=execution, is_root=is_root)
             if isinstance(item, ToolCallOutputItem):
@@ -98,9 +96,13 @@ class OpenAiEventMapper:
         return MappedEvent(delta=delta)
 
     def _map_assistant_message(
-        self, item: MessageOutputItem, *, execution: AgentExecution, is_root: bool
+        self, item: MessageOutputItem, *, execution: AgentExecution
     ) -> MappedEvent:
-        """Build the assistant ``AgentMessage`` from a ``ResponseOutputMessage`` and detect ``<final/>``."""
+        """Build the assistant ``AgentMessage`` from a ``ResponseOutputMessage``.
+
+        Never final: root finalization only happens through the
+        ``final_answer`` tool call (see ``_map_final_answer_call``).
+        """
         raw_item = item.raw_item
         item_id = raw_item.id
         parts = raw_item.content
@@ -108,11 +110,6 @@ class OpenAiEventMapper:
         refusal_text = _extract_refusal_text(parts=parts, text=text)
         if refusal_text is not None:
             return MappedEvent(refusal_text=refusal_text)
-
-        final = False
-        if is_root and text and FINAL_SENTINEL in text:
-            final = True
-            text = text.replace(FINAL_SENTINEL, "").rstrip()
 
         content: str | None = text or None
         context_item = AgentContextItem(
@@ -132,7 +129,6 @@ class OpenAiEventMapper:
             agent_name=execution.agent_name,
             depth=execution.depth,
             item=AgentMessage(role="assistant", content=content, tool_calls=None),
-            final=final,
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
 
@@ -150,8 +146,7 @@ class OpenAiEventMapper:
         A root ``final_answer`` call with a parseable non-empty ``answer`` is
         transformed instead: the run-terminating protocol call becomes a plain
         final-flagged assistant message carrying the answer text (see
-        ``_map_final_answer_call``), byte-compatible with what the ``<final/>``
-        sentinel used to produce. A malformed/empty ``final_answer`` call falls
+        ``_map_final_answer_call``). A malformed/empty ``final_answer`` call falls
         through to normal tool-call mapping — no ``final`` flag is set, and the
         runner's finalization reprompt handles recovery.
         """
@@ -205,10 +200,10 @@ class OpenAiEventMapper:
         The tool call is the run-termination protocol, not real tool work: its
         ``answer`` argument IS the final answer. Emitting it as a plain
         assistant message with ``final=True`` keeps the engine's output
-        contract identical to the ``<final/>`` sentinel era, so consumers of
-        ``AgentOutputItem.final`` (runtime shims, transcript stores) need no
-        changes. The context item is the same plain message, so a rerun from
-        local history after a mid-stream failure resends a valid conversation.
+        contract a simple final-flagged message for consumers of
+        ``AgentOutputItem.final`` (runtime shims, transcript stores). The
+        context item is the same plain message, so a rerun from local history
+        after a mid-stream failure resends a valid conversation.
 
         Returns ``None`` when ``arguments`` don't parse or ``answer`` is
         empty/whitespace — the caller then maps the call normally (unflagged),

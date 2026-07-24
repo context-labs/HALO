@@ -30,6 +30,16 @@ def _refusal_event(text: str):
     return assistant_refusal_event(item_id="r1", refusal=text)
 
 
+def _final_answer_events() -> list:
+    """The ``final_answer`` call + acknowledgement pair that finalizes a root run."""
+    return [
+        tool_call_event(
+            call_id="call-final", name="final_answer", arguments='{"answer": "answer"}'
+        ),
+        tool_output_event(call_id="call-final", output='{"acknowledged": true}'),
+    ]
+
+
 class _FakeStream:
     def __init__(self, events: list) -> None:
         self._events = events
@@ -61,7 +71,7 @@ async def test_runner_emits_final_output_and_updates_context() -> None:
     )
 
     async def fake_run_streamed(*, agent, input, context):
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -101,7 +111,7 @@ async def test_runner_retries_refusal_without_emitting_refusal() -> None:
             return _FakeStream(
                 [_refusal_event("I'm sorry, but I cannot assist with that request.")]
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -155,7 +165,7 @@ async def test_runner_keeps_refusal_retry_prompt_after_transient_retry_call_fail
             )
         if len(calls) == 2:
             raise APIConnectionError(request=fake_request)
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -204,7 +214,7 @@ async def test_runner_does_not_retry_when_refusal_is_not_last_message() -> None:
         return _FakeStream(
             [
                 _refusal_event("I'm sorry, but I cannot assist with that request."),
-                _assistant_event("answer\n<final/>"),
+                *_final_answer_events(),
             ]
         )
 
@@ -290,7 +300,7 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
                     _refusal_event("I'm sorry, but I cannot assist with that request."),
                 ]
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -474,7 +484,7 @@ async def test_runner_retries_plain_api_error_from_backend() -> None:
                 request=fake_request,
                 body=None,
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fail_then_recover,
@@ -628,7 +638,7 @@ async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> No
                 [_assistant_event("partial answer")],
                 APIConnectionError(request=fake_request),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_that_partially_succeeds,
@@ -676,7 +686,7 @@ async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> No
                 [tool_call_event(call_id="call_1", name="query_traces", arguments='{"q":"x"}')],
                 APIConnectionError(request=fake_request),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_dies_mid_tool_turn,
@@ -729,7 +739,7 @@ async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
                     body={"error": {"message": "Item with id 'rs_0123abc' not found."}},
                 ),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_hits_stale_reasoning_item,
@@ -774,7 +784,7 @@ async def test_runner_retries_model_behavior_error_when_stream_has_no_final_resp
                 [_assistant_event("partial answer")],
                 ModelBehaviorError("Model did not produce a final response!"),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_truncates_without_final_response,

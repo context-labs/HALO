@@ -1,12 +1,10 @@
 """Engine ``final_answer`` tool-call finalization end-to-end.
 
-The root agent now completes the run by calling the ``final_answer`` tool
+The root agent completes the run by calling the ``final_answer`` tool
 (``StopAtTools`` on the root SDK agent); the mapper transforms that call
-into the same final-flagged assistant message the legacy ``<final/>``
-sentinel produced, and the runner reprompts once when a run ends without
-finalizing. These tests cover the engine-level contract with a scripted
-``FakeRunner``; ``tests/integration/test_engine_final_sentinel.py`` keeps
-covering the legacy sentinel fallback.
+into a final-flagged plain assistant message, and the runner reprompts
+once when a run ends without finalizing. These tests cover the
+engine-level contract with a scripted ``FakeRunner``.
 """
 
 from __future__ import annotations
@@ -19,6 +17,7 @@ from tests.probes.probe_kit import (
     FakeRunner,
     make_assistant_text,
     make_default_config,
+    make_final_answer,
     make_tool_call,
     make_tool_output,
     run_with_fake,
@@ -183,18 +182,24 @@ async def test_finalized_run_is_not_reprompted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_sentinel_still_finalizes_without_reprompt() -> None:
-    """The ``<final/>`` text sentinel keeps working as a fallback and counts
-    as finalization for the reprompt check."""
-    runner = FakeRunner([make_assistant_text("the answer\n<final/>", item_id="m1")])
+async def test_root_text_containing_a_final_marker_string_does_not_finalize() -> None:
+    """Text that merely *contains* a would-be sentinel string never finalizes —
+    HALO analyzes traces of other agent systems, so quoted markers like
+    ``<final/>`` must not terminate the run. Only the tool call can."""
+    runner = FakeRunner(
+        [make_assistant_text("the trace contains <final/> markers", item_id="m1")],
+        [*make_final_answer("done")],
+    )
 
     result = await run_with_fake(runner, config=_config_with_reprompts(1))
 
     assert result.error is None, type(result.error).__name__
-    assert len(runner.calls) == 1
-    assert len(result.output_items) == 1
-    assert result.output_items[0].final is True
-    assert result.output_items[0].item.content == "the answer"
+    assert len(runner.calls) == 2
+    finals = [item for item in result.output_items if item.final]
+    assert len(finals) == 1
+    assert finals[0].item.content == "done"
+    assert result.output_items[0].final is False
+    assert result.output_items[0].item.content == "the trace contains <final/> markers"
 
 
 @pytest.mark.asyncio

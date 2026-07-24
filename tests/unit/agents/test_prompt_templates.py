@@ -6,7 +6,6 @@ from engine.agents.prompt_templates import (
     CODE_REPO_PROMPT_SECTION_TEMPLATE,
     COMPACTION_SYSTEM_PROMPT,
     DATASET_CONTEXT_PROMPT_SECTION_TEMPLATE,
-    FINAL_SENTINEL,
     GIT_REPO_PROMPT_SECTION_TEMPLATE,
     SYNTHESIS_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -30,10 +29,6 @@ def _git_repo(tmp_path: Path) -> GitRepo:
     return repo
 
 
-def test_final_sentinel_constant() -> None:
-    assert FINAL_SENTINEL == "<final/>"
-
-
 def test_root_prompt_includes_final_answer_contract_system_prompt_and_caps() -> None:
     text = render_root_system_prompt(
         maximum_depth=2,
@@ -43,8 +38,7 @@ def test_root_prompt_includes_final_answer_contract_system_prompt_and_caps() -> 
         git_repo=None,
     )
     assert "`final_answer`" in text
-    # The legacy sentinel is no longer instructed anywhere in the prompt.
-    assert FINAL_SENTINEL not in text
+    assert "<final/>" not in text
     assert SYSTEM_PROMPT in text
     assert "maximum_depth=2" in text
     assert "Spawn at most 4 subagents concurrently." in text
@@ -110,7 +104,7 @@ def test_subagent_prompt_reports_depth_caps_and_system_prompt() -> None:
     assert "spawn at most 4" in text and "concurrently" in text
     assert SYSTEM_PROMPT in text
     assert "`final_answer` tool is reserved for the root agent" in text
-    assert FINAL_SENTINEL not in text
+    assert "<final/>" not in text
     assert "Code repository:" not in text
     assert "Git history:" not in text
 
