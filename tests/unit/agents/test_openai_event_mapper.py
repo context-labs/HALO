@@ -196,3 +196,38 @@ def test_tool_call_and_output_have_distinct_item_ids() -> None:
     assert output_mapped.context_item is not None
     assert call_mapped.context_item.item_id == "tool-call-call_xyz"
     assert output_mapped.context_item.item_id == "tool-result-call_xyz"
+
+
+def test_assistant_text_part_with_none_text_maps_as_empty() -> None:
+    """Gemini via the LiteLLM Responses translation emits ``output_text`` parts
+    with no ``text`` field on tool-calls-only turns; the SDK materializes them
+    leniently with ``text=None``. The mapper must treat those as empty instead
+    of raising ``TypeError: sequence item 0: expected str instance, NoneType
+    found`` (which failed whole HALO runs on gemini-3.6-flash).
+    """
+    from agents.items import MessageOutputItem
+    from agents.stream_events import RunItemStreamEvent
+    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+    from tests._sdk_events import SHARED_AGENT
+
+    raw = ResponseOutputMessage.model_construct(
+        id="msg_none_text",
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputText.model_construct(type="output_text", text=None, annotations=[])],
+    )
+    event = RunItemStreamEvent(
+        name="message_output_created",
+        item=MessageOutputItem(agent=SHARED_AGENT, raw_item=raw),
+    )
+
+    mapper = OpenAiEventMapper()
+    mapped = mapper.to_mapped_event(event, execution=_exec(), is_root=True)
+    assert mapped.refusal_text is None
+    assert mapped.context_item is not None
+    assert mapped.context_item.content is None
+    assert mapped.output_item is not None
+    assert mapped.output_item.final is False
+    assert mapped.output_item.item.content is None

@@ -93,7 +93,13 @@ class OpenAiEventMapper:
         raw_item = item.raw_item
         item_id = raw_item.id
         parts = raw_item.content
-        text = "".join(part.text for part in parts if isinstance(part, ResponseOutputText))
+        # ``part.text`` can be ``None`` on leniently-parsed provider payloads:
+        # Gemini (via the LiteLLM Responses translation) emits ``output_text``
+        # parts with no ``text`` field when a turn is tool-calls-only, and the
+        # SDK materializes those without validation. Joining ``None`` raises
+        # ``TypeError: sequence item 0: expected str instance, NoneType found``
+        # and kills the run (INF: analysis-smoke gemini-3.6-flash failures).
+        text = "".join(part.text or "" for part in parts if isinstance(part, ResponseOutputText))
         refusal_text = _extract_refusal_text(parts=parts, text=text)
         if refusal_text is not None:
             return MappedEvent(refusal_text=refusal_text)
