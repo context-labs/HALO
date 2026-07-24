@@ -80,10 +80,7 @@ async def test_engine_runs_on_tiny_fixture(tmp_path: Path, fixtures_dir: Path) -
     messages = [
         AgentMessage(
             role="user",
-            content=(
-                "Use get_dataset_overview to tell me how many traces are in the dataset. "
-                "Then end your reply with a line containing only <final/>."
-            ),
+            content=("Use get_dataset_overview to tell me how many traces are in the dataset."),
         )
     ]
 
@@ -132,8 +129,7 @@ async def test_engine_streams_subagent_chain(tmp_path: Path, fixtures_dir: Path)
                 "There is a trace with id 't-bbbb' that errored. "
                 "You MUST use the call_subagent tool to delegate the investigation: "
                 "ask a subagent to look up trace t-bbbb (using view_trace) and report what went wrong. "
-                "Wait for the subagent's reply, then summarize it in your own words. "
-                "End your final reply with a line containing only <final/>."
+                "Wait for the subagent's reply, then summarize it in your own words."
             ),
         )
     ]
@@ -196,8 +192,7 @@ async def test_engine_run_code_executes_in_sandbox(tmp_path: Path, fixtures_dir:
             content=(
                 "Use the run_code tool to compute the total number of traces in the dataset. "
                 "The sandbox preloads a `trace_store` variable with a `.trace_count` property — "
-                "call run_code with the exact code: print('total=', trace_store.trace_count) "
-                "Then end your final reply with a line containing only <final/>."
+                "call run_code with the exact code: print('total=', trace_store.trace_count)"
             ),
         )
     ]
@@ -268,8 +263,7 @@ async def test_engine_uses_code_tools(tmp_path: Path, fixtures_dir: Path) -> Non
             content=(
                 "The source code for the agent that produced these traces is in the repository. "
                 "Use the code tools (e.g. grep_files then read_file) to find the value assigned to "
-                "MAX_RETRIES in the source, and report it. "
-                "End your final reply with a line containing only <final/>."
+                "MAX_RETRIES in the source, and report it."
             ),
         )
     ]
@@ -311,8 +305,7 @@ async def test_engine_uses_git_tools(tmp_path: Path, fixtures_dir: Path) -> None
             content=(
                 "The repository is a git checkout. Use the git tools (e.g. git_log, then "
                 "git_blame on agent/config.py) to report the most recent commit's short sha and "
-                "who last changed line 1 of that file. "
-                "End your final reply with a line containing only <final/>."
+                "who last changed line 1 of that file."
             ),
         )
     ]
