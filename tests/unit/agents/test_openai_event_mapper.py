@@ -206,16 +206,20 @@ def test_root_final_answer_call_becomes_final_assistant_message() -> None:
     assert mapped.output_item.item.role == "assistant"
     assert mapped.output_item.item.content == "## Summary\nAll good."
     assert mapped.output_item.item.tool_calls is None
+    # Context keeps the genuine tool call so resends stay valid even when
+    # the model batched final_answer with other parallel tool calls.
     assert mapped.context_item is not None
+    assert mapped.context_item.item_id == "tool-call-call_final"
     assert mapped.context_item.role == "assistant"
-    assert mapped.context_item.content == "## Summary\nAll good."
-    assert mapped.context_item.tool_calls is None
+    assert mapped.context_item.content is None
+    assert mapped.context_item.tool_calls is not None
+    assert mapped.context_item.tool_calls[0].function.name == "final_answer"
 
 
-def test_root_final_answer_tool_output_is_dropped() -> None:
+def test_root_final_answer_tool_output_is_context_only() -> None:
     """The SDK still executes ``final_answer`` (StopAtTools runs it, then
-    stops); its acknowledgement output must be swallowed — the call never
-    entered the context as a tool call, so a tool-role message would orphan."""
+    stops); its acknowledgement stays in context — pairing the tool call so
+    resends are valid — but is suppressed from the output bus."""
     mapper = OpenAiEventMapper()
     mapper.to_mapped_event(
         tool_call_event(
@@ -231,9 +235,41 @@ def test_root_final_answer_tool_output_is_dropped() -> None:
         execution=_exec(),
         is_root=True,
     )
-    assert mapped.context_item is None
     assert mapped.output_item is None
-    assert mapped.delta is None
+    assert mapped.context_item is not None
+    assert mapped.context_item.role == "tool"
+    assert mapped.context_item.tool_call_id == "call_final"
+    assert mapped.context_item.name == "final_answer"
+
+
+def test_parallel_batch_with_final_answer_keeps_context_pairs_valid() -> None:
+    """With parallel_tool_calls the model can batch ``final_answer`` with
+    real tool work in one turn. The context sequence must remain a valid
+    conversation — every tool call paired with a tool result, no plain
+    assistant message spliced between a call and its result."""
+    mapper = OpenAiEventMapper()
+    events = [
+        tool_call_event(call_id="call_q", name="query_traces", arguments='{"q": "x"}'),
+        tool_call_event(call_id="call_f", name="final_answer", arguments='{"answer": "done"}'),
+        tool_output_event(call_id="call_q", output="trace result"),
+        tool_output_event(call_id="call_f", output='{"acknowledged": true}'),
+    ]
+    mapped = [mapper.to_mapped_event(e, execution=_exec(), is_root=True) for e in events]
+
+    context = [m.context_item for m in mapped if m.context_item is not None]
+    assert [(c.item_id, c.role) for c in context] == [
+        ("tool-call-call_q", "assistant"),
+        ("tool-call-call_f", "assistant"),
+        ("tool-result-call_q", "tool"),
+        ("tool-result-call_f", "tool"),
+    ]
+    assert all(c.content is None for c in context if c.role == "assistant")
+
+    outputs = [m.output_item for m in mapped if m.output_item is not None]
+    finals = [o for o in outputs if o.final]
+    assert len(finals) == 1
+    assert finals[0].item.content == "done"
+    assert finals[0].item.tool_calls is None
 
 
 def test_root_final_answer_with_malformed_arguments_maps_as_plain_tool_call() -> None:

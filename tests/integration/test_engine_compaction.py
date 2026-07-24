@@ -64,5 +64,9 @@ async def test_engine_compaction_uses_configured_compactor(
     )
 
     assert any(item.final for item in results)
-    assert compacted_items == [("in-0", "user"), ("final-answer-call-final", "assistant")]
+    assert compacted_items == [
+        ("in-0", "user"),
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
     assert runner.calls[0]["max_turns"] == 4

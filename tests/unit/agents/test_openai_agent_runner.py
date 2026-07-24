@@ -140,7 +140,10 @@ async def test_runner_retries_refusal_without_emitting_refusal() -> None:
     assert len(events) == 1
     assert events[0].item.content == "answer"
     assert events[0].final is True
-    assert [item.content for item in ctx.items] == ["answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -238,7 +241,10 @@ async def test_runner_does_not_retry_when_refusal_is_not_last_message() -> None:
     assert len(events) == 1
     assert events[0].item.content == "answer"
     assert events[0].final is True
-    assert [item.content for item in ctx.items] == ["answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -657,7 +663,10 @@ async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> No
     assert len(calls) == 2
     # The retry replays the completed assistant message from local history.
     assert calls[1] == [{"role": "assistant", "content": "partial answer"}]
-    assert [item.content for item in ctx.items] == ["partial answer", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
     assert execution.consecutive_llm_failures == 0
 
 
@@ -705,7 +714,10 @@ async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> No
     assert len(calls) == 2
     # The orphan assistant tool-call item was trimmed before the retry.
     assert calls[1] == []
-    assert [item.content for item in ctx.items] == ["answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
     assert execution.tool_calls_made == 0
     assert execution.consecutive_llm_failures == 0
 
@@ -756,7 +768,10 @@ async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
     )
 
     assert len(calls) == 2
-    assert [item.content for item in ctx.items] == ["worked a bit", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
 
 
 @pytest.mark.asyncio
@@ -803,7 +818,10 @@ async def test_runner_retries_model_behavior_error_when_stream_has_no_final_resp
     assert len(calls) == 2
     # The retry replays the completed assistant message from local history.
     assert calls[1] == [{"role": "assistant", "content": "partial answer"}]
-    assert [item.content for item in ctx.items] == ["partial answer", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
     assert execution.consecutive_llm_failures == 0
 
 

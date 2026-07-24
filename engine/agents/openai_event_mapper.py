@@ -47,12 +47,12 @@ class OpenAiEventMapper:
 
     def __init__(self) -> None:
         self._tool_names_by_call_id: dict[str, str] = {}
-        # call_ids of root ``final_answer`` calls the mapper transformed into
-        # final-flagged assistant messages. The SDK still executes the tool
-        # (``StopAtTools`` runs it, then stops), so the matching
-        # ``ToolCallOutputItem`` must be swallowed — the call never entered
-        # the context as a tool call, and an orphan tool-role message would
-        # corrupt the rendered messages array on a retry/reprompt resend.
+        # call_ids of root ``final_answer`` calls whose *output* was emitted
+        # as a final-flagged assistant message. The SDK still executes the
+        # tool (``StopAtTools`` runs it, then stops); the matching
+        # ``ToolCallOutputItem`` is kept in context (the call/result pair
+        # must stay intact for resends) but suppressed from the output bus —
+        # the transformed final message already delivered the answer.
         self._final_answer_call_ids: set[str] = set()
 
     def to_mapped_event(
@@ -144,9 +144,10 @@ class OpenAiEventMapper:
         so it's read directly off ``raw_item`` with a single shape check.
 
         A root ``final_answer`` call with a parseable non-empty ``answer`` is
-        transformed instead: the run-terminating protocol call becomes a plain
-        final-flagged assistant message carrying the answer text (see
-        ``_map_final_answer_call``). A malformed/empty ``final_answer`` call falls
+        handled by ``_map_final_answer_call``: the *output* item becomes a plain
+        final-flagged assistant message carrying the answer text, while the
+        *context* item stays a genuine tool call so the rendered messages array
+        remains valid on resend. A malformed/empty ``final_answer`` call falls
         through to normal tool-call mapping — no ``final`` flag is set, and the
         runner's finalization reprompt handles recovery.
         """
@@ -195,15 +196,21 @@ class OpenAiEventMapper:
     def _map_final_answer_call(
         self, item: ToolCallItem, *, execution: AgentExecution, call_id: str
     ) -> MappedEvent | None:
-        """Transform a root ``final_answer`` call into a final-flagged assistant message.
+        """Map a root ``final_answer`` call: real tool call in context, final message on the bus.
 
         The tool call is the run-termination protocol, not real tool work: its
-        ``answer`` argument IS the final answer. Emitting it as a plain
-        assistant message with ``final=True`` keeps the engine's output
-        contract a simple final-flagged message for consumers of
-        ``AgentOutputItem.final`` (runtime shims, transcript stores). The
-        context item is the same plain message, so a rerun from local history
-        after a mid-stream failure resends a valid conversation.
+        ``answer`` argument IS the final answer. The *output* item is a plain
+        assistant message with ``final=True`` so consumers of
+        ``AgentOutputItem.final`` (runtime shims, transcript stores) receive
+        the answer as a simple final message.
+
+        The *context* item stays the genuine tool call, and ``_map_tool_output``
+        keeps its acknowledgement result in context too. With
+        ``parallel_tool_calls`` the model may batch ``final_answer`` with other
+        tool calls in one turn; splicing a plain assistant message between
+        another call and its result would corrupt the rendered messages array
+        on a mid-stream-failure resend. Keeping the call/result pair intact
+        makes every resend a valid conversation regardless of batch order.
 
         Returns ``None`` when ``arguments`` don't parse or ``answer`` is
         empty/whitespace — the caller then maps the call normally (unflagged),
@@ -219,12 +226,16 @@ class OpenAiEventMapper:
             return None
         if call_id:
             self._final_answer_call_ids.add(call_id)
-        item_id = f"final-answer-{call_id}" if call_id else "final-answer"
+            self._tool_names_by_call_id[call_id] = FINAL_ANSWER_TOOL_NAME
+        tc = AgentToolCall(
+            id=call_id,
+            function=AgentToolFunction(name=FINAL_ANSWER_TOOL_NAME, arguments=raw_arguments),
+        )
         context_item = AgentContextItem(
-            item_id=item_id,
+            item_id=f"tool-call-{call_id}",
             role="assistant",
-            content=answer,
-            tool_calls=None,
+            content=None,
+            tool_calls=[tc],
             agent_id=execution.agent_id,
             parent_agent_id=execution.parent_agent_id,
             parent_tool_call_id=execution.parent_tool_call_id,
@@ -253,12 +264,9 @@ class OpenAiEventMapper:
         and Chat-Completions replay both lose the function name.
         """
         call_id = item.call_id or ""
-        if call_id and call_id in self._final_answer_call_ids:
-            # The matching ``final_answer`` call was transformed into a plain
-            # final assistant message; its acknowledgement output has no
-            # tool-call to answer, so drop it entirely.
+        suppress_output = bool(call_id) and call_id in self._final_answer_call_ids
+        if suppress_output:
             self._final_answer_call_ids.discard(call_id)
-            return MappedEvent()
         content = "" if item.output is None else str(item.output)
         name = self._tool_names_by_call_id.pop(call_id, None) if call_id else None
         item_id = f"tool-result-{call_id}"
@@ -272,6 +280,11 @@ class OpenAiEventMapper:
             parent_agent_id=execution.parent_agent_id,
             parent_tool_call_id=execution.parent_tool_call_id,
         )
+        if suppress_output:
+            # The transformed final message already delivered the answer on
+            # the bus; the acknowledgement stays context-only so the resent
+            # messages array keeps the final_answer call/result pair intact.
+            return MappedEvent(context_item=context_item)
         output_item = AgentOutputItem(
             sequence=0,
             agent_id=execution.agent_id,
