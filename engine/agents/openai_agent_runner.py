@@ -144,6 +144,18 @@ class OpenAiAgentRunner:
                     if mapped.context_item is not None:
                         attempt_refusal_text = None
                         agent_context.append(mapped.context_item)
+                        # Count turns/tool-calls from the CONTEXT item — the
+                        # same source the mid-stream trim decrements from —
+                        # so the two stay symmetric. A ``final_answer`` call
+                        # counts as a tool call (its context shape), even
+                        # though its output item is a plain final message.
+                        if mapped.context_item.role == "assistant":
+                            if mapped.context_item.tool_calls:
+                                agent_execution.tool_calls_made += len(
+                                    mapped.context_item.tool_calls
+                                )
+                            else:
+                                agent_execution.turns_used += 1
                     if mapped.output_item is not None:
                         emitted = await output_bus.emit(mapped.output_item)
                         if mapped.output_item.final:
@@ -151,12 +163,6 @@ class OpenAiAgentRunner:
                         if agent_execution.output_start_sequence is None:
                             agent_execution.output_start_sequence = emitted.sequence
                         agent_execution.output_end_sequence = emitted.sequence
-                        item = mapped.output_item.item
-                        if item.role == "assistant":
-                            if item.tool_calls:
-                                agent_execution.tool_calls_made += len(item.tool_calls)
-                            else:
-                                agent_execution.turns_used += 1
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
             except Exception as exc:

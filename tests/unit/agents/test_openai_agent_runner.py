@@ -349,8 +349,10 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
     ]
     assert [event.item.role for event in events] == ["assistant", "tool", "assistant"]
     assert events[-1].item.content == "answer"
-    assert execution.tool_calls_made == 1
-    assert execution.turns_used == 1
+    # query_traces + final_answer: the finalizing call counts as a tool call
+    # (its context shape), not a text turn.
+    assert execution.tool_calls_made == 2
+    assert execution.turns_used == 0
 
 
 @pytest.mark.asyncio
@@ -671,6 +673,61 @@ async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> No
 
 
 @pytest.mark.asyncio
+async def test_counters_survive_a_failure_between_final_answer_call_and_ack() -> None:
+    """A mid-stream failure after the ``final_answer`` call but before its
+    acknowledgement trims the unpaired call; because increments and trim
+    decrements both read the context item, the counters return to zero
+    instead of going negative (tool_calls_made) or staying inflated
+    (turns_used)."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_dies_between_final_call_and_ack(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [_final_answer_events()[0]],
+                APIConnectionError(request=fake_request),
+            )
+        return _FakeStream(_final_answer_events())
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_dies_between_final_call_and_ack,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    # The orphan final_answer call was trimmed, so the retry starts clean.
+    assert calls[1] == []
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
+    # +1 (first call) -1 (trim) +1 (retry's completed call) — never negative.
+    assert execution.tool_calls_made == 1
+    assert execution.turns_used == 0
+
+
+@pytest.mark.asyncio
 async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> None:
     """When the stream dies after the model emitted tool_calls but before the
     matching results landed, the orphan tool-call turn is trimmed so the retried
@@ -718,7 +775,8 @@ async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> No
         ("tool-call-call-final", "assistant"),
         ("tool-result-call-final", "tool"),
     ]
-    assert execution.tool_calls_made == 0
+    # query_traces was trimmed (+1/-1); the retry's final_answer call is +1.
+    assert execution.tool_calls_made == 1
     assert execution.consecutive_llm_failures == 0
 
 
