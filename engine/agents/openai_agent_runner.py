@@ -123,13 +123,16 @@ class OpenAiAgentRunner:
                 # Sometimes gpt 5.5 randomly refuses requests. We simply need to reprompt it to continue.
                 messages.append({"role": "user", "content": "Continue."})
             if pending_final_reprompt:
-                pending_final_reprompt = False
                 messages.append({"role": "user", "content": FINAL_ANSWER_REPROMPT_MESSAGE})
             try:
                 stream = await self._run_streamed(
                     agent=sdk_agent, input=messages, context=run_context
                 )
+                # Like the refusal retry, the pending nudge stays set until the
+                # stream starts successfully so a transient failure on the
+                # nudged attempt re-sends it instead of silently dropping it.
                 pending_refusal_retry = False
+                pending_final_reprompt = False
                 async for raw_event in stream.stream_events():
                     events_seen += 1
                     mapped = self._mapper.to_mapped_event(

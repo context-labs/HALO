@@ -11,7 +11,9 @@ covering the legacy sentinel fallback.
 
 from __future__ import annotations
 
+import httpx
 import pytest
+from openai import APIConnectionError
 
 from tests.probes.probe_kit import (
     FakeRunner,
@@ -193,3 +195,37 @@ async def test_legacy_sentinel_still_finalizes_without_reprompt() -> None:
     assert len(result.output_items) == 1
     assert result.output_items[0].final is True
     assert result.output_items[0].item.content == "the answer"
+
+
+@pytest.mark.asyncio
+async def test_reprompt_nudge_survives_a_transient_failure() -> None:
+    """A retriable failure on the nudged attempt must not burn the only
+    nudge: like the refusal retry, the pending reprompt stays set until the
+    stream starts successfully, so the retry re-sends the nudge instead of
+    rerunning without it."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    runner = FakeRunner(
+        [make_assistant_text("no tool call", item_id="m1")],
+        APIConnectionError(request=request),
+        [
+            make_tool_call(
+                name="final_answer",
+                arguments='{"answer": "recovered"}',
+                call_id="call-final",
+            ),
+            make_tool_output(call_id="call-final", output='{"acknowledged": true}'),
+        ],
+    )
+
+    result = await run_with_fake(runner, config=_config_with_reprompts(1))
+
+    assert result.error is None, type(result.error).__name__
+    assert len(runner.calls) == 3
+    # Both the failed nudged attempt and its retry carry the nudge message.
+    for call in runner.calls[1:]:
+        nudge = call["input"][-1]
+        assert nudge["role"] == "user"
+        assert "final_answer" in nudge["content"]
+    finals = [item for item in result.output_items if item.final]
+    assert len(finals) == 1
+    assert finals[0].item.content == "recovered"
