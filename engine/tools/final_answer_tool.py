@@ -36,9 +36,9 @@ class FinalAnswerTool:
 
     The tool body is a no-op acknowledgement: the stop semantics live in the
     root agent's ``tool_use_behavior``, and ``OpenAiEventMapper`` transforms
-    the *call* (whose ``answer`` argument carries the final text) into the
-    same final-flagged assistant message the sentinel used to produce, so
-    downstream consumers of ``AgentOutputItem.final`` are unchanged.
+    the *call* (whose ``answer`` argument carries the final text) into a
+    final-flagged plain assistant message for downstream consumers of
+    ``AgentOutputItem.final``.
 
     Registered on the root agent only — subagents return their answers as
     plain messages to their parent.
@@ -48,7 +48,9 @@ class FinalAnswerTool:
     description = (
         "Deliver your complete final answer and end the run. Call this "
         "exactly once, when your analysis is finished, with the entire "
-        "final answer in `answer`. This is the only way to complete the run."
+        "final answer in `answer`, formatted as markdown (headings, bold, "
+        "lists) exactly as you would write it in a chat reply. This is the "
+        "only way to complete the run."
     )
     arguments_model = FinalAnswerArguments
     result_model = FinalAnswerResult
