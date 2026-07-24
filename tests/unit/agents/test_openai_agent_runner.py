@@ -30,6 +30,16 @@ def _refusal_event(text: str):
     return assistant_refusal_event(item_id="r1", refusal=text)
 
 
+def _final_answer_events() -> list:
+    """The ``final_answer`` call + acknowledgement pair that finalizes a root run."""
+    return [
+        tool_call_event(
+            call_id="call-final", name="final_answer", arguments='{"answer": "answer"}'
+        ),
+        tool_output_event(call_id="call-final", output='{"acknowledged": true}'),
+    ]
+
+
 class _FakeStream:
     def __init__(self, events: list) -> None:
         self._events = events
@@ -61,7 +71,7 @@ async def test_runner_emits_final_output_and_updates_context() -> None:
     )
 
     async def fake_run_streamed(*, agent, input, context):
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -101,7 +111,7 @@ async def test_runner_retries_refusal_without_emitting_refusal() -> None:
             return _FakeStream(
                 [_refusal_event("I'm sorry, but I cannot assist with that request.")]
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -130,7 +140,10 @@ async def test_runner_retries_refusal_without_emitting_refusal() -> None:
     assert len(events) == 1
     assert events[0].item.content == "answer"
     assert events[0].final is True
-    assert [item.content for item in ctx.items] == ["answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -155,7 +168,7 @@ async def test_runner_keeps_refusal_retry_prompt_after_transient_retry_call_fail
             )
         if len(calls) == 2:
             raise APIConnectionError(request=fake_request)
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -204,7 +217,7 @@ async def test_runner_does_not_retry_when_refusal_is_not_last_message() -> None:
         return _FakeStream(
             [
                 _refusal_event("I'm sorry, but I cannot assist with that request."),
-                _assistant_event("answer\n<final/>"),
+                *_final_answer_events(),
             ]
         )
 
@@ -228,7 +241,10 @@ async def test_runner_does_not_retry_when_refusal_is_not_last_message() -> None:
     assert len(events) == 1
     assert events[0].item.content == "answer"
     assert events[0].final is True
-    assert [item.content for item in ctx.items] == ["answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -290,7 +306,7 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
                     _refusal_event("I'm sorry, but I cannot assist with that request."),
                 ]
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fake_run_streamed,
@@ -333,8 +349,10 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
     ]
     assert [event.item.role for event in events] == ["assistant", "tool", "assistant"]
     assert events[-1].item.content == "answer"
-    assert execution.tool_calls_made == 1
-    assert execution.turns_used == 1
+    # query_traces + final_answer: the finalizing call counts as a tool call
+    # (its context shape), not a text turn.
+    assert execution.tool_calls_made == 2
+    assert execution.turns_used == 0
 
 
 @pytest.mark.asyncio
@@ -474,7 +492,7 @@ async def test_runner_retries_plain_api_error_from_backend() -> None:
                 request=fake_request,
                 body=None,
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=fail_then_recover,
@@ -628,7 +646,7 @@ async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> No
                 [_assistant_event("partial answer")],
                 APIConnectionError(request=fake_request),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_that_partially_succeeds,
@@ -647,8 +665,66 @@ async def test_runner_reruns_from_local_history_after_mid_stream_failure() -> No
     assert len(calls) == 2
     # The retry replays the completed assistant message from local history.
     assert calls[1] == [{"role": "assistant", "content": "partial answer"}]
-    assert [item.content for item in ctx.items] == ["partial answer", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
     assert execution.consecutive_llm_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_counters_survive_a_failure_between_final_answer_call_and_ack() -> None:
+    """A mid-stream failure after the ``final_answer`` call but before its
+    acknowledgement trims the unpaired call; because increments and trim
+    decrements both read the context item, the counters return to zero
+    instead of going negative (tool_calls_made) or staying inflated
+    (turns_used)."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_dies_between_final_call_and_ack(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [_final_answer_events()[0]],
+                APIConnectionError(request=fake_request),
+            )
+        return _FakeStream(_final_answer_events())
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_dies_between_final_call_and_ack,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    # The orphan final_answer call was trimmed, so the retry starts clean.
+    assert calls[1] == []
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
+    # +1 (first call) -1 (trim) +1 (retry's completed call) — never negative.
+    assert execution.tool_calls_made == 1
+    assert execution.turns_used == 0
 
 
 @pytest.mark.asyncio
@@ -676,7 +752,7 @@ async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> No
                 [tool_call_event(call_id="call_1", name="query_traces", arguments='{"q":"x"}')],
                 APIConnectionError(request=fake_request),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_dies_mid_tool_turn,
@@ -695,8 +771,12 @@ async def test_runner_trims_incomplete_tool_turn_before_mid_stream_retry() -> No
     assert len(calls) == 2
     # The orphan assistant tool-call item was trimmed before the retry.
     assert calls[1] == []
-    assert [item.content for item in ctx.items] == ["answer"]
-    assert execution.tool_calls_made == 0
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("tool-call-call-final", "assistant"),
+        ("tool-result-call-final", "tool"),
+    ]
+    # query_traces was trimmed (+1/-1); the retry's final_answer call is +1.
+    assert execution.tool_calls_made == 1
     assert execution.consecutive_llm_failures == 0
 
 
@@ -729,7 +809,7 @@ async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
                     body={"error": {"message": "Item with id 'rs_0123abc' not found."}},
                 ),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_hits_stale_reasoning_item,
@@ -746,7 +826,10 @@ async def test_runner_retries_stale_response_state_400_mid_stream() -> None:
     )
 
     assert len(calls) == 2
-    assert [item.content for item in ctx.items] == ["worked a bit", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
 
 
 @pytest.mark.asyncio
@@ -774,7 +857,7 @@ async def test_runner_retries_model_behavior_error_when_stream_has_no_final_resp
                 [_assistant_event("partial answer")],
                 ModelBehaviorError("Model did not produce a final response!"),
             )
-        return _FakeStream([_assistant_event("answer\n<final/>")])
+        return _FakeStream(_final_answer_events())
 
     runner = OpenAiAgentRunner(
         run_streamed=stream_truncates_without_final_response,
@@ -793,7 +876,10 @@ async def test_runner_retries_model_behavior_error_when_stream_has_no_final_resp
     assert len(calls) == 2
     # The retry replays the completed assistant message from local history.
     assert calls[1] == [{"role": "assistant", "content": "partial answer"}]
-    assert [item.content for item in ctx.items] == ["partial answer", "answer"]
+    assert [(item.item_id, item.role) for item in ctx.items] == [
+        ("m1", "assistant"),
+        *[("tool-call-call-final", "assistant"), ("tool-result-call-final", "tool")],
+    ]
     assert execution.consecutive_llm_failures == 0
 
 

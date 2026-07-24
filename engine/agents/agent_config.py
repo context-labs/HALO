@@ -19,3 +19,8 @@ class AgentConfig(BaseModel):
     model: ModelConfig
     maximum_turns: int = Field(gt=0)
     refusal_retries: int = Field(default=0, ge=0)
+    # Root-only: how many times to reprompt when the SDK run ends without
+    # a ``final_answer`` call. Models that narrate a plan without calling a
+    # tool silently end the SDK run; one nudge recovers most of those.
+    # Ignored for subagents (their runner is constructed without it).
+    final_answer_reprompts: int = Field(default=1, ge=0)

@@ -27,6 +27,7 @@ from tests.probes.probe_kit import (
     install_fake_runner,
     make_assistant_text,
     make_default_config,
+    make_final_answer,
     make_run_state,
     run_with_fake,
 )
@@ -36,7 +37,7 @@ from tests.probes.probe_kit import (
 async def test_root_agent_run_config_has_turn_counter_filter() -> None:
     """The engine must pass a RunConfig whose call_model_input_filter is a
     TurnCounterInputFilter sized to root_agent.maximum_turns."""
-    runner = FakeRunner([make_assistant_text("done\n<final/>", item_id="m1")])
+    runner = FakeRunner([*make_final_answer("done")])
     result = await run_with_fake(runner)
 
     assert result.error is None, type(result.error).__name__
@@ -111,7 +112,7 @@ async def test_root_and_subagent_filters_are_distinct_instances() -> None:
     filter instance — a parent's counter must not leak into a child."""
     cfg = make_default_config(maximum_depth=1)
 
-    root_runner = FakeRunner([make_assistant_text("root done\n<final/>", item_id="m1")])
+    root_runner = FakeRunner([*make_final_answer("root done")])
     root_result = await run_with_fake(root_runner, config=cfg)
     assert root_result.error is None, type(root_result.error).__name__
     root_filter = root_runner.calls[0]["run_config"].call_model_input_filter

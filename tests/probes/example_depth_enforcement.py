@@ -35,6 +35,7 @@ from tests.probes.probe_kit import (
     isolated_trace_copy,
     make_assistant_text,
     make_default_config,
+    make_final_answer,
     make_root_context,
     run_with_fake,
 )
@@ -206,7 +207,7 @@ async def probe_end_to_end_depth_zero_run() -> None:
     is absent at runtime (not just in unit-construction)."""
     cfg = make_default_config(maximum_depth=0)
     runner = FakeRunner(
-        [make_assistant_text("done\n<final/>", item_id="m1")],
+        [*make_final_answer("done")],
     )
     result = await run_with_fake(runner, config=cfg)
     _check(

@@ -6,8 +6,6 @@ if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
     from engine.git.git_repo import GitRepo
 
-FINAL_SENTINEL = "<final/>"
-
 SYSTEM_PROMPT = (
     "You answer questions about an OTLP-shaped JSONL trace dataset using the provided "
     "trace tools.\n\n"
@@ -78,13 +76,15 @@ Depth rules:
 - maximum_depth={maximum_depth}. Subagents you spawn are at depth=1.
 - Spawn at most {maximum_parallel_subagents} subagents concurrently.
 - If maximum_depth>0, prefer to spawn subagents rather than exploring the trace data
-  yourself. You should only call the "call_subagent" tool, delegate all other tool
-  calls to subagents.
+  yourself. Delegate trace exploration to subagents via the "call_subagent" tool;
+  besides `call_subagent`, the only tool you should call yourself is `final_answer`
+  (see the output rules below).
 
 Output rules:
-- When you are finished and have produced your final answer, end that
-  assistant message with a single line containing only: <final/>
-- Do not emit <final/> in intermediate messages.
+- When you are finished, call the `final_answer` tool exactly once with your
+  complete final answer in its `answer` argument. That call ends the run.
+- Do not end the run with a plain assistant message — the run only completes
+  through the `final_answer` tool. Do not call it before your analysis is done.
 
 Instructions:
 {system_prompt}
@@ -98,8 +98,8 @@ provides.
 If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
 concurrently — this cap is shared across the whole run.
 
-When finished, return a concise answer. Do not emit <final/> — that
-sentinel is reserved for the root agent.
+When finished, return a concise answer as a normal message. The
+`final_answer` tool is reserved for the root agent — you do not have it.
 
 Instructions:
 {system_prompt}
@@ -205,7 +205,7 @@ def render_root_system_prompt(
     code_repo: "CodeRepo | None",
     git_repo: "GitRepo | None",
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
+    """Build the root agent's system prompt: depth/parallelism caps + ``final_answer`` contract.
 
     Includes the caller-supplied dataset-context section when
     ``dataset_context`` is set, the code-repository section (guidance, not
@@ -231,7 +231,7 @@ def render_subagent_system_prompt(
     code_repo: "CodeRepo | None",
     git_repo: "GitRepo | None",
 ) -> str:
-    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
+    """Build a subagent's system prompt at a specific depth; ``final_answer`` is reserved for root.
 
     Includes the caller-supplied dataset-context section when
     ``dataset_context`` is set, the code-repository section (guidance, not

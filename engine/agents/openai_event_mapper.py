@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from agents.items import MessageOutputItem, ToolCallItem, ToolCallOutputItem
 from agents.stream_events import RawResponsesStreamEvent, RunItemStreamEvent, StreamEvent
 from openai.types.responses import ResponseOutputRefusal, ResponseOutputText
+from pydantic import ValidationError
 
 from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.agent_execution import AgentExecution
-from engine.agents.prompt_templates import FINAL_SENTINEL
 from engine.models.engine_output import AgentOutputItem, AgentTextDelta
 from engine.models.messages import AgentMessage, AgentToolCall, AgentToolFunction
+from engine.tools.final_answer_tool import FINAL_ANSWER_TOOL_NAME, FinalAnswerArguments
 
 
 @dataclass
@@ -31,8 +32,9 @@ class OpenAiEventMapper:
     """Normalizes OpenAI Agents SDK stream events into Engine context/output/delta items.
 
     Owns the boundary between the SDK's internal event shapes and the Engine's typed
-    AgentContextItem / AgentOutputItem / AgentTextDelta. Detects the ``<final/>``
-    sentinel on root-agent assistant text and marks the corresponding output item.
+    AgentContextItem / AgentOutputItem / AgentTextDelta. Detects root-agent
+    finalization — a ``final_answer`` tool call — and marks the corresponding
+    output item ``final=True``.
 
     Stateful only across one agent's stream: holds the call_id→tool_name
     map so a ``ToolCallOutputItem`` can carry the function name through to
@@ -45,6 +47,13 @@ class OpenAiEventMapper:
 
     def __init__(self) -> None:
         self._tool_names_by_call_id: dict[str, str] = {}
+        # call_ids of root ``final_answer`` calls whose *output* was emitted
+        # as a final-flagged assistant message. The SDK still executes the
+        # tool (``StopAtTools`` runs it, then stops); the matching
+        # ``ToolCallOutputItem`` is kept in context (the call/result pair
+        # must stay intact for resends) but suppressed from the output bus —
+        # the transformed final message already delivered the answer.
+        self._final_answer_call_ids: set[str] = set()
 
     def to_mapped_event(
         self,
@@ -60,9 +69,9 @@ class OpenAiEventMapper:
         if isinstance(raw_event, RunItemStreamEvent):
             item = raw_event.item
             if isinstance(item, MessageOutputItem):
-                return self._map_assistant_message(item, execution=execution, is_root=is_root)
+                return self._map_assistant_message(item, execution=execution)
             if isinstance(item, ToolCallItem):
-                return self._map_tool_call(item, execution=execution)
+                return self._map_tool_call(item, execution=execution, is_root=is_root)
             if isinstance(item, ToolCallOutputItem):
                 return self._map_tool_output(item, execution=execution)
 
@@ -87,9 +96,13 @@ class OpenAiEventMapper:
         return MappedEvent(delta=delta)
 
     def _map_assistant_message(
-        self, item: MessageOutputItem, *, execution: AgentExecution, is_root: bool
+        self, item: MessageOutputItem, *, execution: AgentExecution
     ) -> MappedEvent:
-        """Build the assistant ``AgentMessage`` from a ``ResponseOutputMessage`` and detect ``<final/>``."""
+        """Build the assistant ``AgentMessage`` from a ``ResponseOutputMessage``.
+
+        Never final: root finalization only happens through the
+        ``final_answer`` tool call (see ``_map_final_answer_call``).
+        """
         raw_item = item.raw_item
         item_id = raw_item.id
         parts = raw_item.content
@@ -97,11 +110,6 @@ class OpenAiEventMapper:
         refusal_text = _extract_refusal_text(parts=parts, text=text)
         if refusal_text is not None:
             return MappedEvent(refusal_text=refusal_text)
-
-        final = False
-        if is_root and text and FINAL_SENTINEL in text:
-            final = True
-            text = text.replace(FINAL_SENTINEL, "").rstrip()
 
         content: str | None = text or None
         context_item = AgentContextItem(
@@ -121,11 +129,12 @@ class OpenAiEventMapper:
             agent_name=execution.agent_name,
             depth=execution.depth,
             item=AgentMessage(role="assistant", content=content, tool_calls=None),
-            final=final,
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
 
-    def _map_tool_call(self, item: ToolCallItem, *, execution: AgentExecution) -> MappedEvent:
+    def _map_tool_call(
+        self, item: ToolCallItem, *, execution: AgentExecution, is_root: bool
+    ) -> MappedEvent:
         """Project a ``ToolCallItem`` into the engine's assistant-with-tool_calls shape.
 
         Uses the SDK's ``call_id`` / ``tool_name`` properties (added in 0.14.6),
@@ -133,9 +142,21 @@ class OpenAiEventMapper:
         ``raw_item`` so the mapper does not need its own normalization step.
         ``arguments`` is the only field the SDK doesn't expose as a property,
         so it's read directly off ``raw_item`` with a single shape check.
+
+        A root ``final_answer`` call with a parseable non-empty ``answer`` is
+        handled by ``_map_final_answer_call``: the *output* item becomes a plain
+        final-flagged assistant message carrying the answer text, while the
+        *context* item stays a genuine tool call so the rendered messages array
+        remains valid on resend. A malformed/empty ``final_answer`` call falls
+        through to normal tool-call mapping — no ``final`` flag is set, and the
+        runner's finalization reprompt handles recovery.
         """
         call_id = item.call_id or ""
         name = item.tool_name or ""
+        if is_root and name == FINAL_ANSWER_TOOL_NAME:
+            mapped = self._map_final_answer_call(item, execution=execution, call_id=call_id)
+            if mapped is not None:
+                return mapped
         # Remember the name so the matching ``_map_tool_output`` can fill
         # in ``AgentContextItem.name``. Compactor and Chat-Completions
         # replay both read that field; the SDK doesn't surface it on the
@@ -172,6 +193,65 @@ class OpenAiEventMapper:
         )
         return MappedEvent(context_item=context_item, output_item=output_item)
 
+    def _map_final_answer_call(
+        self, item: ToolCallItem, *, execution: AgentExecution, call_id: str
+    ) -> MappedEvent | None:
+        """Map a root ``final_answer`` call: real tool call in context, final message on the bus.
+
+        The tool call is the run-termination protocol, not real tool work: its
+        ``answer`` argument IS the final answer. The *output* item is a plain
+        assistant message with ``final=True`` so consumers of
+        ``AgentOutputItem.final`` (runtime shims, transcript stores) receive
+        the answer as a simple final message.
+
+        The *context* item stays the genuine tool call, and ``_map_tool_output``
+        keeps its acknowledgement result in context too. With
+        ``parallel_tool_calls`` the model may batch ``final_answer`` with other
+        tool calls in one turn; splicing a plain assistant message between
+        another call and its result would corrupt the rendered messages array
+        on a mid-stream-failure resend. Keeping the call/result pair intact
+        makes every resend a valid conversation regardless of batch order.
+
+        Returns ``None`` when ``arguments`` don't parse or ``answer`` is
+        empty/whitespace — the caller then maps the call normally (unflagged),
+        leaving recovery to the runner's finalization reprompt.
+        """
+        raw_arguments = _read_arguments(item)
+        try:
+            parsed = FinalAnswerArguments.model_validate_json(raw_arguments or "{}")
+        except ValidationError:
+            return None
+        answer = parsed.answer.strip()
+        if not answer:
+            return None
+        if call_id:
+            self._final_answer_call_ids.add(call_id)
+            self._tool_names_by_call_id[call_id] = FINAL_ANSWER_TOOL_NAME
+        tc = AgentToolCall(
+            id=call_id,
+            function=AgentToolFunction(name=FINAL_ANSWER_TOOL_NAME, arguments=raw_arguments),
+        )
+        context_item = AgentContextItem(
+            item_id=f"tool-call-{call_id}",
+            role="assistant",
+            content=None,
+            tool_calls=[tc],
+            agent_id=execution.agent_id,
+            parent_agent_id=execution.parent_agent_id,
+            parent_tool_call_id=execution.parent_tool_call_id,
+        )
+        output_item = AgentOutputItem(
+            sequence=0,
+            agent_id=execution.agent_id,
+            parent_agent_id=execution.parent_agent_id,
+            parent_tool_call_id=execution.parent_tool_call_id,
+            agent_name=execution.agent_name,
+            depth=execution.depth,
+            item=AgentMessage(role="assistant", content=answer, tool_calls=None),
+            final=True,
+        )
+        return MappedEvent(context_item=context_item, output_item=output_item)
+
     def _map_tool_output(
         self, item: ToolCallOutputItem, *, execution: AgentExecution
     ) -> MappedEvent:
@@ -184,6 +264,9 @@ class OpenAiEventMapper:
         and Chat-Completions replay both lose the function name.
         """
         call_id = item.call_id or ""
+        suppress_output = bool(call_id) and call_id in self._final_answer_call_ids
+        if suppress_output:
+            self._final_answer_call_ids.discard(call_id)
         content = "" if item.output is None else str(item.output)
         name = self._tool_names_by_call_id.pop(call_id, None) if call_id else None
         item_id = f"tool-result-{call_id}"
@@ -197,6 +280,11 @@ class OpenAiEventMapper:
             parent_agent_id=execution.parent_agent_id,
             parent_tool_call_id=execution.parent_tool_call_id,
         )
+        if suppress_output:
+            # The transformed final message already delivered the answer on
+            # the bus; the acknowledgement stays context-only so the resent
+            # messages array keeps the final_answer call/result pair intact.
+            return MappedEvent(context_item=context_item)
         output_item = AgentOutputItem(
             sequence=0,
             agent_id=execution.agent_id,

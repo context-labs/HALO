@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import json
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -178,9 +179,35 @@ def make_assistant_text(
     item_id: str = "msg-1",
 ) -> RunItemStreamEvent:
     """Build a ``message_output_item`` event yielding ``text`` as assistant
-    content. Use this for the model's natural-language replies, including
-    those carrying the ``<final/>`` sentinel for the root agent."""
+    content. Use this for the model's natural-language replies; to end a
+    scripted root run use ``make_final_answer``."""
     return assistant_message_event(item_id=item_id, text=text)
+
+
+def make_final_answer(
+    answer: str,
+    *,
+    call_id: str = "call-final",
+) -> list[RunItemStreamEvent]:
+    """Build the ``final_answer`` tool-call event pair that finalizes a root run.
+
+    Returns the call event plus its acknowledgement output, matching what the
+    real SDK emits under ``StopAtTools``. Splat it into a program:
+    ``[..., *make_final_answer("done")]``. The mapper transforms the pair into
+    one final-flagged assistant message carrying ``answer``."""
+    return [
+        tool_call_event(
+            call_id=call_id,
+            name="final_answer",
+            arguments=json.dumps({"answer": answer}),
+            raw_id=call_id,
+        ),
+        tool_output_event(
+            call_id=call_id,
+            output='{"acknowledged": true}',
+            raw_id=f"{call_id}-out",
+        ),
+    ]
 
 
 def make_refusal(
@@ -260,10 +287,15 @@ def make_default_config(
     the ``run_with_fake`` timeout budget (a 10-failure exhaustion probe would
     otherwise sleep minutes through full-jitter backoff and surface as a bogus
     ``TimeoutError``)."""
+    # ``final_answer_reprompts=0``: most probes script a single FakeRunner
+    # program that ends without finalizing; the production default (1) would
+    # trigger a second ``run_streamed`` call and exhaust the FakeRunner.
+    # Reprompt-specific tests opt back in with an explicit config override.
     agent = AgentConfig(
         name="root",
         model=ModelConfig(name=model),
         maximum_turns=4,
+        final_answer_reprompts=0,
     )
     return EngineConfig(
         root_agent=agent,
