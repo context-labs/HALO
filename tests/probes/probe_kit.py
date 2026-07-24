@@ -260,10 +260,15 @@ def make_default_config(
     the ``run_with_fake`` timeout budget (a 10-failure exhaustion probe would
     otherwise sleep minutes through full-jitter backoff and surface as a bogus
     ``TimeoutError``)."""
+    # ``final_answer_reprompts=0``: most probes script a single FakeRunner
+    # program that ends without finalizing; the production default (1) would
+    # trigger a second ``run_streamed`` call and exhaust the FakeRunner.
+    # Reprompt-specific tests opt back in with an explicit config override.
     agent = AgentConfig(
         name="root",
         model=ModelConfig(name=model),
         maximum_turns=4,
+        final_answer_reprompts=0,
     )
     return EngineConfig(
         root_agent=agent,

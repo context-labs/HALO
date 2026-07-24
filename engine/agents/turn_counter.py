@@ -33,7 +33,7 @@ def _render_nudge(*, current: int, maximum: int, is_root: bool) -> str:
         if is_root:
             return (
                 f"[HALO: turn {current} of {maximum} — last turn. "
-                f"Emit your final answer ending with <final/> now.]"
+                f"Call the `final_answer` tool with your complete final answer now.]"
             )
         return (
             f"[HALO: turn {current} of {maximum} — last turn. "

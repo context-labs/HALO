@@ -34,24 +34,24 @@ class TestRenderNudge:
             "[HALO: turn 9 of 10 — 2 turns left]"
         )
 
-    def test_last_turn_root_mentions_final_sentinel(self) -> None:
+    def test_last_turn_root_mentions_final_answer_tool(self) -> None:
         # remaining = 10 - 10 + 1 = 1
         text = _render_nudge(current=10, maximum=10, is_root=True)
         assert text.startswith("[HALO: turn 10 of 10 — last turn.")
-        assert "<final/>" in text
+        assert "`final_answer`" in text
         assert text.endswith("now.]")
 
-    def test_last_turn_subagent_does_not_mention_final_sentinel(self) -> None:
+    def test_last_turn_subagent_does_not_mention_final_answer_tool(self) -> None:
         # remaining = 4 - 4 + 1 = 1
         text = _render_nudge(current=4, maximum=4, is_root=False)
         assert text.startswith("[HALO: turn 4 of 4 — last turn.")
-        assert "<final/>" not in text
+        assert "final_answer" not in text
         assert "concise" in text
 
     def test_max_one_first_turn_is_last_turn_root(self) -> None:
         text = _render_nudge(current=1, maximum=1, is_root=True)
         assert text.startswith("[HALO: turn 1 of 1 — last turn.")
-        assert "<final/>" in text
+        assert "`final_answer`" in text
 
     def test_over_budget_defensive_fallback(self) -> None:
         # current > maximum: shouldn't happen (SDK raises MaxTurnsExceeded
@@ -123,7 +123,7 @@ class TestTurnCounterInputFilter:
         result = f(_make_call_data([{"role": "user", "content": "x"}]))
         text = cast(str, cast(dict, result.input[-1])["content"])
         assert "concise" in text
-        assert "<final/>" not in text
+        assert "final_answer" not in text
 
     def test_appended_item_is_user_role(self) -> None:
         f = TurnCounterInputFilter(max_turns=10, is_root=True)

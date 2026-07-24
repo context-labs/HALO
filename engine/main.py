@@ -206,6 +206,7 @@ async def stream_engine_async(
                         run_streamed=_run_streamed,
                         client=run_state.openai_client,
                         refusal_retries=engine_config.root_agent.refusal_retries,
+                        final_reprompts=engine_config.root_agent.final_answer_reprompts,
                     )
                     try:
                         await agent_runner.run(

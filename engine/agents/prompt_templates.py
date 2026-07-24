@@ -6,6 +6,10 @@ if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
     from engine.git.git_repo import GitRepo
 
+# Legacy finalization sentinel. The primary protocol is now the root-only
+# ``final_answer`` tool call (see ``engine/tools/final_answer_tool.py``);
+# the mapper still honors this sentinel on root assistant text as a
+# backwards-compatible fallback for prompts/models that emit it.
 FINAL_SENTINEL = "<final/>"
 
 SYSTEM_PROMPT = (
@@ -82,9 +86,10 @@ Depth rules:
   calls to subagents.
 
 Output rules:
-- When you are finished and have produced your final answer, end that
-  assistant message with a single line containing only: <final/>
-- Do not emit <final/> in intermediate messages.
+- When you are finished, call the `final_answer` tool exactly once with your
+  complete final answer in its `answer` argument. That call ends the run.
+- Do not end the run with a plain assistant message — the run only completes
+  through the `final_answer` tool. Do not call it before your analysis is done.
 
 Instructions:
 {system_prompt}
@@ -98,8 +103,8 @@ provides.
 If you spawn subagents yourself, spawn at most {maximum_parallel_subagents}
 concurrently — this cap is shared across the whole run.
 
-When finished, return a concise answer. Do not emit <final/> — that
-sentinel is reserved for the root agent.
+When finished, return a concise answer as a normal message. The
+`final_answer` tool is reserved for the root agent — you do not have it.
 
 Instructions:
 {system_prompt}
@@ -205,7 +210,7 @@ def render_root_system_prompt(
     code_repo: "CodeRepo | None",
     git_repo: "GitRepo | None",
 ) -> str:
-    """Build the root agent's system prompt: depth/parallelism caps + ``<final/>`` contract.
+    """Build the root agent's system prompt: depth/parallelism caps + ``final_answer`` contract.
 
     Includes the caller-supplied dataset-context section when
     ``dataset_context`` is set, the code-repository section (guidance, not
@@ -231,7 +236,7 @@ def render_subagent_system_prompt(
     code_repo: "CodeRepo | None",
     git_repo: "GitRepo | None",
 ) -> str:
-    """Build a subagent's system prompt at a specific depth; ``<final/>`` is reserved for root.
+    """Build a subagent's system prompt at a specific depth; ``final_answer`` is reserved for root.
 
     Includes the caller-supplied dataset-context section when
     ``dataset_context`` is set, the code-repository section (guidance, not

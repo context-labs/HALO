@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from agents import Agent, FunctionTool, RunConfig, RunContextWrapper, Runner, Tool
+from agents.agent import StopAtTools
 from agents.agent_tool_input import AgentAsToolInput
 from agents.models.openai_provider import OpenAIProvider
 from agents.tool_context import ToolContext as SdkToolContext
@@ -26,6 +27,7 @@ from engine.tools.code_tools import (
     ReadFileTool,
     ViewRepoTreeTool,
 )
+from engine.tools.final_answer_tool import FINAL_ANSWER_TOOL_NAME, FinalAnswerTool
 from engine.tools.git_tools import (
     GitBlameTool,
     GitDiffTool,
@@ -57,7 +59,8 @@ def build_root_sdk_agent(
     agent_execution: AgentExecution,
     agent_context: AgentContext,
 ) -> Agent[EngineRunState]:
-    """Construct the root SDK Agent wired with all leaf tools plus a depth-aware ``call_subagent``.
+    """Construct the root SDK Agent wired with all leaf tools, a depth-aware ``call_subagent``,
+    and the run-terminating ``final_answer`` tool (root-only, stops the run via ``StopAtTools``).
 
     Subagent spawning is gated by a *per-depth* ``asyncio.Semaphore`` sized to
     ``maximum_parallel_subagents``. Each depth has its own pool, so a parent
@@ -78,12 +81,25 @@ def build_root_sdk_agent(
         parent_context=agent_context,
     )
 
+    # Root-only run-termination tool: the SDK ends the run when it is called
+    # (``StopAtTools``), and the mapper turns the call into the final-flagged
+    # assistant message. Subagents never get it — they return plain messages
+    # to their parent (see ``_child_tools_for_depth``).
+    tools = [
+        *tools,
+        to_sdk_function_tool(
+            FinalAnswerTool(),
+            context_factory=lambda _wrapper: ToolContext.model_construct(run_state=run_state),
+        ),
+    ]
+
     return Agent[EngineRunState](
         name=engine_config.root_agent.name,
         instructions="",
         model=engine_config.root_agent.model.name,
         model_settings=engine_config.root_agent.model.to_sdk_model_settings(),
         tools=tools,
+        tool_use_behavior=StopAtTools(stop_at_tool_names=[FINAL_ANSWER_TOOL_NAME]),
     )
 
 

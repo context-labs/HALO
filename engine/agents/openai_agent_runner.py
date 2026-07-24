@@ -21,6 +21,15 @@ from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
+# Transient user nudge appended when a root run ends without finalizing
+# (no ``final_answer`` call, no legacy ``<final/>`` sentinel). Mirrors the
+# refusal-retry "Continue." pattern: appended to the resent input only,
+# never stored in ``AgentContext``.
+FINAL_ANSWER_REPROMPT_MESSAGE = (
+    "[HALO: your run ended without calling the `final_answer` tool. "
+    "Call `final_answer` now with your complete final answer.]"
+)
+
 RunStreamedCallable = Callable[..., Awaitable[Any]]
 logger = logging.getLogger(__name__)
 
@@ -41,18 +50,23 @@ class OpenAiAgentRunner:
         client: AsyncOpenAI,
         event_mapper: OpenAiEventMapper | None = None,
         refusal_retries: int = 0,
+        final_reprompts: int = 0,
         retry_backoff_base: float = DEFAULT_BACKOFF_BASE_SECONDS,
         retry_backoff_cap: float = DEFAULT_BACKOFF_CAP_SECONDS,
     ) -> None:
         """``run_streamed`` is injected so root and subagent paths can supply their own
         max_turns and starting agent. ``client`` is the per-run AsyncOpenAI used for
-        compaction calls. ``retry_backoff_base``/``retry_backoff_cap`` shape the
+        compaction calls. ``final_reprompts`` is how many times a run that ends
+        without a final-flagged item is re-nudged to call ``final_answer`` —
+        only meaningful with ``is_root=True`` (subagent paths leave it 0).
+        ``retry_backoff_base``/``retry_backoff_cap`` shape the
         full-jitter exponential backoff between LLM retries (base <= 0 disables
         sleeping; used by tests)."""
         self._run_streamed = run_streamed
         self._client = client
         self._mapper = event_mapper or OpenAiEventMapper()
         self._refusal_retries = refusal_retries
+        self._final_reprompts = final_reprompts
         self._retry_backoff_base = retry_backoff_base
         self._retry_backoff_cap = retry_backoff_cap
 
@@ -96,6 +110,9 @@ class OpenAiAgentRunner:
         refusal_attempts = 0
         pending_refusal_retry = False
         last_refusal_text: str | None = None
+        final_seen = False
+        final_reprompt_attempts = 0
+        pending_final_reprompt = False
 
         while agent_execution.consecutive_llm_failures < MAX_CONSECUTIVE_LLM_FAILURES:
             events_seen = 0
@@ -105,6 +122,9 @@ class OpenAiAgentRunner:
             if pending_refusal_retry:
                 # Sometimes gpt 5.5 randomly refuses requests. We simply need to reprompt it to continue.
                 messages.append({"role": "user", "content": "Continue."})
+            if pending_final_reprompt:
+                pending_final_reprompt = False
+                messages.append({"role": "user", "content": FINAL_ANSWER_REPROMPT_MESSAGE})
             try:
                 stream = await self._run_streamed(
                     agent=sdk_agent, input=messages, context=run_context
@@ -124,6 +144,8 @@ class OpenAiAgentRunner:
                         agent_context.append(mapped.context_item)
                     if mapped.output_item is not None:
                         emitted = await output_bus.emit(mapped.output_item)
+                        if mapped.output_item.final:
+                            final_seen = True
                         if agent_execution.output_start_sequence is None:
                             agent_execution.output_start_sequence = emitted.sequence
                         agent_execution.output_end_sequence = emitted.sequence
@@ -201,6 +223,23 @@ class OpenAiAgentRunner:
                     f"agent {agent_execution.agent_id} exhausted after "
                     f"{self._refusal_retries} model-refusal retries: {last_refusal_text}"
                 )
+
+            if is_root and not final_seen and final_reprompt_attempts < self._final_reprompts:
+                # The SDK run ended (a plain no-tool-call assistant turn, or a
+                # malformed ``final_answer`` call) without a final-flagged item.
+                # Nudge once and rerun from local history — the transient user
+                # message is only on the resent input, like the refusal retry.
+                final_reprompt_attempts += 1
+                pending_final_reprompt = True
+                agent_execution.record_llm_success()
+                logger.warning(
+                    "root run ended without finalizing for agent_id=%s; "
+                    "reprompting for final_answer (%s of %s)",
+                    agent_execution.agent_id,
+                    final_reprompt_attempts,
+                    self._final_reprompts,
+                )
+                continue
 
             agent_execution.record_llm_success()
             await agent_context.compact_old_items(self._client)
