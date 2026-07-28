@@ -327,20 +327,15 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
     assert len(calls) == 2
     assert calls[1] == [
         {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "query_traces", "arguments": '{"q":"x"}'},
-                }
-            ],
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "query_traces",
+            "arguments": '{"q":"x"}',
         },
         {
-            "role": "tool",
-            "content": "trace result",
-            "tool_call_id": "call_1",
-            "name": "query_traces",
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "trace result",
         },
         {
             "role": "user",

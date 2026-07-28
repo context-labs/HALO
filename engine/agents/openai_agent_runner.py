@@ -17,6 +17,7 @@ from engine.agents.llm_retry import (
     is_retriable_llm_error,
 )
 from engine.agents.openai_event_mapper import OpenAiEventMapper
+from engine.agents.responses_input import to_responses_input
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
@@ -117,7 +118,7 @@ class OpenAiAgentRunner:
             events_seen = 0
             items_before_attempt = len(agent_context.items)
             attempt_refusal_text: str | None = None
-            messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
+            messages = to_responses_input(agent_context.to_messages_array())
             if pending_refusal_retry:
                 # Sometimes gpt 5.5 randomly refuses requests. We simply need to reprompt it to continue.
                 messages.append({"role": "user", "content": "Continue."})
