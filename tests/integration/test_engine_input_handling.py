@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import pytest
 
+from engine.models.engine_output import RunCheckpoint
 from engine.models.messages import AgentMessage
 from tests.probes.probe_kit import (
     FakeRunner,
     item_text,
     make_assistant_text,
+    make_default_config,
     make_final_answer,
     run_with_fake,
 )
@@ -97,3 +99,32 @@ async def test_multi_turn_continuation_preserves_role_and_content_order() -> Non
         "prior reply",
         "follow-up",
     ]
+
+
+@pytest.mark.asyncio
+async def test_root_run_emits_a_resumable_checkpoint_when_enabled() -> None:
+    """With checkpoints on, a completed root run leaves state to resume from.
+
+    The checkpoint is emitted after compaction, so it carries the smaller
+    history a resumed run would actually replay rather than the raw one.
+    """
+    fake = FakeRunner([[make_assistant_text("looking"), make_final_answer("done")]])
+    result = await run_with_fake(fake, config=make_default_config(emit_run_checkpoints=True))
+
+    assert result.error is None
+    checkpoints = [e for e in result.all_events if isinstance(e, RunCheckpoint)]
+    assert len(checkpoints) == 1
+    # It must be usable as-is: same shape `from_input_messages` consumes.
+    assert checkpoints[0].messages
+    assert checkpoints[0].messages[0].role == "system"
+
+
+@pytest.mark.asyncio
+async def test_no_checkpoints_by_default() -> None:
+    """Off by default: widening the event union must not reach a host pinned to
+    an engine that predates the variant."""
+    fake = FakeRunner([[make_final_answer("done")]])
+    result = await run_with_fake(fake)
+
+    assert result.error is None
+    assert not [e for e in result.all_events if isinstance(e, RunCheckpoint)]

@@ -277,6 +277,7 @@ def make_default_config(
     text_message_compaction_keep_last_messages: int = 12,
     tool_call_compaction_keep_last_turns: int = 3,
     model: str = "gpt-5.4-mini",
+    emit_run_checkpoints: bool = False,
 ) -> EngineConfig:
     """Sensible defaults for an EngineConfig used in probes.
     The model name is irrelevant when ``FakeRunner`` is installed via
@@ -306,6 +307,7 @@ def make_default_config(
         maximum_parallel_subagents=maximum_parallel_subagents,
         text_message_compaction_keep_last_messages=text_message_compaction_keep_last_messages,
         tool_call_compaction_keep_last_turns=tool_call_compaction_keep_last_turns,
+        emit_run_checkpoints=emit_run_checkpoints,
     )
 
 
