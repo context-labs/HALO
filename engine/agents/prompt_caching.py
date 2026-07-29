@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from openai.types.chat import ChatCompletionSystemMessageParam
 
@@ -49,3 +49,79 @@ def as_cached_system_message(text: str) -> ChatCompletionSystemMessageParam:
         ],
     }
     return cast(ChatCompletionSystemMessageParam, message)
+
+
+# Responses API input messages carry ``input_text`` content parts (assistant
+# output uses ``output_text``, and ``function_call`` / ``function_call_output``
+# items have no content-part list at all). Only ``system`` and ``user`` items
+# are rewritten below, so ``input_text`` is always the correct part type.
+_CACHEABLE_INPUT_ROLES = frozenset({"system", "user"})
+
+
+def apply_prompt_cache_breakpoints(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark the stable head of a Responses ``input`` array as cacheable.
+
+    The main agent loop replays the entire conversation on every turn, so the
+    head of that array — the engine-rendered system prompt plus the task
+    prompt — is byte-identical across every turn of a run and across every
+    retry. It is also the largest static block HALO sends. Left unmarked,
+    Anthropic re-reads it at full price on all of them; a 50-turn run pays for
+    the same prefix 50 times.
+
+    Two breakpoints are placed (Anthropic allows four): the leading ``system``
+    item, and the last ``user`` item in the head run of input-role items.
+    Anthropic caches the longest matching prefix up to a breakpoint, so the
+    second one extends the cached region to cover the task prompt as well.
+    OpenAI ignores ``cache_control`` and does prefix caching automatically, so
+    this is a Pareto improvement rather than a provider trade-off — the same
+    reasoning as :func:`as_cached_system_message`.
+
+    Deliberately narrow: only ``system`` / ``user`` message items are rewritten.
+    Marking a trailing ``function_call_output`` would extend caching over the
+    growing tool-result history — a larger win — but that item's content shape
+    is not one this function can verify, and a malformed replay item is exactly
+    the failure that burned a whole retry budget deterministically in run
+    ba6fc95c. That extension needs a live wire test first.
+
+    Returns a new list; input items are not mutated. Items already carrying
+    list-shaped content are left alone rather than double-wrapped.
+    """
+    result = [dict(item) for item in items]
+
+    cacheable_head: list[int] = []
+    for index, item in enumerate(result):
+        if item.get("role") not in _CACHEABLE_INPUT_ROLES:
+            break
+        cacheable_head.append(index)
+
+    if not cacheable_head:
+        return result
+
+    breakpoints = {cacheable_head[0], cacheable_head[-1]}
+    for index in breakpoints:
+        marked = _as_cached_input_item(result[index])
+        if marked is not None:
+            result[index] = marked
+    return result
+
+
+def _as_cached_input_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Rewrite ``content`` as a single cache-marked ``input_text`` part.
+
+    ``None`` means "leave this item alone": empty content has nothing worth
+    caching, and content that is already a list came from somewhere that owns
+    its own block structure.
+    """
+    content = item.get("content")
+    if not isinstance(content, str) or not content:
+        return None
+    return {
+        **item,
+        "content": [
+            {
+                "type": "input_text",
+                "text": content,
+                "cache_control": CACHE_CONTROL_EPHEMERAL,
+            }
+        ],
+    }
