@@ -327,20 +327,15 @@ async def test_runner_retries_refusal_after_tool_result_without_replaying_tool_o
     assert len(calls) == 2
     assert calls[1] == [
         {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "query_traces", "arguments": '{"q":"x"}'},
-                }
-            ],
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "query_traces",
+            "arguments": '{"q":"x"}',
         },
         {
-            "role": "tool",
-            "content": "trace result",
-            "tool_call_id": "call_1",
-            "name": "query_traces",
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "trace result",
         },
         {
             "role": "user",
@@ -928,3 +923,108 @@ async def test_runner_propagates_terminal_400_mid_stream() -> None:
             is_root=True,
         )
     assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_replay_sends_wire_valid_responses_input() -> None:
+    """Regression (run ba6fc95c): a replayed history containing a completed
+    tool turn must render as Responses API ``function_call`` /
+    ``function_call_output`` items. The chat-completions shape — an assistant
+    item with ``tool_calls`` and no ``content`` — is rejected by the API with
+    ``400 missing_required_parameter: 'input[N].content'``, and because every
+    retry rebuilds the identical input, the run exhausts its whole retry
+    budget on the same deterministic rejection."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    calls: list[list[dict]] = []
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def stream_dies_after_completed_tool_turn(*, agent, input, context):
+        calls.append(input)
+        if len(calls) == 1:
+            return _StreamYieldsThenRaises(
+                [
+                    tool_call_event(call_id="call-q", name="query_traces", arguments='{"q":1}'),
+                    tool_output_event(call_id="call-q", output="42 traces"),
+                ],
+                APIConnectionError(request=fake_request),
+            )
+        return _FakeStream(_final_answer_events())
+
+    runner = OpenAiAgentRunner(
+        run_streamed=stream_dies_after_completed_tool_turn,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    await runner.run(
+        sdk_agent=object(),
+        agent_context=ctx,
+        agent_execution=execution,
+        output_bus=bus,
+        is_root=True,
+    )
+
+    assert len(calls) == 2
+    replay = calls[1]
+    # The completed tool turn replays as first-class Responses items.
+    assert {
+        "type": "function_call",
+        "call_id": "call-q",
+        "name": "query_traces",
+        "arguments": '{"q":1}',
+    } in replay
+    assert {
+        "type": "function_call_output",
+        "call_id": "call-q",
+        "output": "42 traces",
+    } in replay
+    # And no chat-shaped item that the Responses API would reject.
+    for item in replay:
+        if "role" in item:
+            assert "content" in item, f"message item missing content: {item}"
+            assert "tool_calls" not in item, f"chat-only field leaked: {item}"
+
+
+@pytest.mark.asyncio
+async def test_exhausted_error_message_carries_the_underlying_cause() -> None:
+    """The exhausted message is what the control plane persists on the run
+    row — it must name the underlying error, not just "exhausted"."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def always_fail(*, agent, input, context):
+        return _RaisingStream(APIConnectionError(request=fake_request))
+
+    runner = OpenAiAgentRunner(
+        run_streamed=always_fail,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError) as exc_info:
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert "APIConnectionError" in str(exc_info.value)

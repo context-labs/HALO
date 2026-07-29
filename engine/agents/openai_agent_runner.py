@@ -17,6 +17,7 @@ from engine.agents.llm_retry import (
     is_retriable_llm_error,
 )
 from engine.agents.openai_event_mapper import OpenAiEventMapper
+from engine.agents.responses_input import to_responses_input
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
@@ -117,7 +118,12 @@ class OpenAiAgentRunner:
             events_seen = 0
             items_before_attempt = len(agent_context.items)
             attempt_refusal_text: str | None = None
-            messages = [m.model_dump(exclude_none=True) for m in agent_context.to_messages_array()]
+            # Rendered as Responses API items — NOT chat-shaped dicts. A
+            # replayed tool turn must become ``function_call`` /
+            # ``function_call_output`` items; the chat shape (assistant with
+            # ``tool_calls`` and no ``content``) is rejected with a
+            # deterministic 400 that no amount of retrying can fix.
+            messages = to_responses_input(agent_context.to_messages_array())
             if pending_refusal_retry:
                 # Sometimes gpt 5.5 randomly refuses requests. We simply need to reprompt it to continue.
                 messages.append({"role": "user", "content": "Continue."})
@@ -253,6 +259,12 @@ class OpenAiAgentRunner:
             await agent_context.compact_old_items(self._client)
             return
 
+        # Carry the underlying error in the message: this string is what the
+        # control plane persists on the run row, so hiding the cause behind a
+        # bare "exhausted" forced operators to dig through provider logs to
+        # learn WHY a run died (run ba6fc95c).
+        cause = f": {type(last_exc).__name__}: {last_exc}" if last_exc else ""
         raise EngineAgentExhaustedError(
-            f"agent {agent_execution.agent_id} exhausted after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
+            f"agent {agent_execution.agent_id} exhausted after "
+            f"{MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures{cause}"
         ) from last_exc
