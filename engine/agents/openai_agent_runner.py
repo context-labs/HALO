@@ -17,7 +17,6 @@ from engine.agents.llm_retry import (
     is_retriable_llm_error,
 )
 from engine.agents.openai_event_mapper import OpenAiEventMapper
-from engine.agents.prompt_caching import apply_prompt_cache_breakpoints
 from engine.agents.responses_input import to_responses_input
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
 
@@ -124,12 +123,7 @@ class OpenAiAgentRunner:
             # ``function_call_output`` items; the chat shape (assistant with
             # ``tool_calls`` and no ``content``) is rejected with a
             # deterministic 400 that no amount of retrying can fix.
-            # The system + task-prompt head is byte-identical on every turn and
-            # every retry; marking it cacheable stops Anthropic re-reading the
-            # largest static block in the request at full price each turn.
-            messages = apply_prompt_cache_breakpoints(
-                to_responses_input(agent_context.to_messages_array())
-            )
+            messages = to_responses_input(agent_context.to_messages_array())
             if pending_refusal_retry:
                 # Sometimes gpt 5.5 randomly refuses requests. We simply need to reprompt it to continue.
                 messages.append({"role": "user", "content": "Continue."})

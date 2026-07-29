@@ -332,18 +332,7 @@ async def test_guarded_invoke_passes_parsed_input_not_raw_json(
     assert len(captured_inputs) == 1
     user_messages = [m for m in captured_inputs[0] if m.get("role") == "user"]
     assert len(user_messages) == 1
-    # The subagent's task prompt is part of the cacheable head, so it arrives
-    # as a cache-marked ``input_text`` part rather than a bare string. The point
-    # of this assertion is that the *parsed* input reaches the child, not the
-    # raw JSON envelope — read the text back out of the part to keep testing
-    # that.
-    assert user_messages[0]["content"] == [
-        {
-            "type": "input_text",
-            "text": "what is the failure rate?",
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
+    assert user_messages[0]["content"] == "what is the failure rate?"
 
 
 @pytest.mark.asyncio
