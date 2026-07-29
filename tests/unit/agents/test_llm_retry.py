@@ -45,7 +45,16 @@ def test_transport_and_5xx_are_retriable() -> None:
 
 @pytest.mark.parametrize(
     "code",
-    ["context_length_exceeded", "content_filter", "string_above_max_length"],
+    [
+        "context_length_exceeded",
+        "content_filter",
+        "string_above_max_length",
+        # Request-shape rejections rebuild identically on retry (run ba6fc95c
+        # burned all 10 attempts on one missing_required_parameter).
+        "missing_required_parameter",
+        "invalid_function_parameters",
+        "unknown_parameter",
+    ],
 )
 def test_terminal_400_codes_are_not_retriable(code: str) -> None:
     exc = _status_error(400, "no clean rerun fixes this", code=code)

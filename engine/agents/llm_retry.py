@@ -38,6 +38,13 @@ _TERMINAL_400_CODES = frozenset(
         "context_length_exceeded",
         "content_filter",
         "string_above_max_length",
+        # Request-shape rejections: the engine rebuilds the identical input on
+        # every retry, so a malformed-parameter 400 fails the same way each
+        # time — retrying only burns the breaker budget (run ba6fc95c burned
+        # all 10 attempts on one ``missing_required_parameter``).
+        "missing_required_parameter",
+        "invalid_function_parameters",
+        "unknown_parameter",
     }
 )
 
