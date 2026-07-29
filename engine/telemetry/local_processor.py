@@ -145,6 +145,7 @@ def span_to_otlp_line(
             "inference.llm.model_name": projection.get("llm_model_name"),
             "inference.llm.input_tokens": projection.get("input_tokens"),
             "inference.llm.output_tokens": projection.get("output_tokens"),
+            "inference.llm.cached_input_tokens": projection.get("cached_input_tokens"),
             "inference.llm.cost.total": projection.get(
                 "cost_total"
             ),  # we don't know cost client-side
@@ -210,6 +211,18 @@ def _agent_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     return _drop_none(attrs), {"agent_name": name}
 
 
+def _cached_input_tokens(usage: Mapping[str, Any]) -> int | None:
+    """Cached-input count from either API surface's usage details.
+
+    Cached tokens are billed at a fraction of fresh input, so without this
+    the exported token counts systematically overstate what a run costs —
+    a 20-turn loop replays a byte-stable prefix that the provider serves
+    almost entirely from cache.
+    """
+    details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    return _int(details.get("cached_tokens"))
+
+
 def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     model = d.get("model")
     usage = d.get("usage") or {}
@@ -228,6 +241,7 @@ def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, A
             usage.get("output_tokens") or usage.get("completion_tokens")
         ),
         "llm.token_count.total": _int(usage.get("total_tokens")),
+        "llm.token_count.prompt_cached": _cached_input_tokens(usage),
     }
 
     # Expand input/output into the flat OpenInference .N.message.* keys so
@@ -240,6 +254,7 @@ def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, A
         "llm_model_name": model,
         "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
+        "cached_input_tokens": _cached_input_tokens(usage),
     }
     return _drop_none(attrs), projection
 
@@ -258,11 +273,13 @@ def _response_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
             usage.get("output_tokens") or usage.get("completion_tokens")
         ),
         "llm.token_count.total": _int(usage.get("total_tokens")),
+        "llm.token_count.prompt_cached": _cached_input_tokens(usage),
     }
     projection = {
         "llm_provider": "openai",
         "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
+        "cached_input_tokens": _cached_input_tokens(usage),
     }
     return _drop_none(attrs), projection
 
