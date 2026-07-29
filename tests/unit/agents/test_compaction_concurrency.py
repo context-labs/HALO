@@ -162,39 +162,73 @@ async def test_all_summaries_are_committed(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_unit_commits_nothing_from_that_unit(monkeypatch) -> None:
+async def test_a_failed_item_discards_its_units_successful_siblings(
+    monkeypatch,
+) -> None:
     """The all-or-nothing contract survives the move to ``gather``.
 
-    A tool turn is one unit and must never render half-compacted, so a single
-    failed summary has to discard its unit's successful siblings too.
+    This is the invariant that actually matters, and it needs a MULTI-item
+    unit to test: single-item text units pass trivially whether or not
+    atomicity holds. A tool turn is one unit — the assistant ``tool_calls``
+    row plus each matching result — and a half-compacted one renders a
+    message array that the Responses API rejects with a deterministic 400,
+    which burns the whole retry budget (run ba6fc95c).
+
+    So: fail the *result* item and assert the assistant row, whose summary
+    succeeded, is discarded along with it.
     """
-    tool_call = AgentContextItem(
-        item_id="tool-turn-assistant",
-        role="assistant",
-        content=None,
-        tool_calls=[],
-    )
     items = [
         AgentContextItem(item_id="sys-0", role="system", content="sys"),
-        AgentContextItem(item_id="m-0", role="user", content="first"),
-        AgentContextItem(item_id="m-1", role="user", content="second"),
-        tool_call,
+        AgentContextItem(
+            item_id="asst-0",
+            role="assistant",
+            content=None,
+            tool_calls=[
+                AgentToolCall(
+                    id="call-0",
+                    function=AgentToolFunction(name="view_trace", arguments="{}"),
+                )
+            ],
+        ),
+        AgentContextItem(
+            item_id="tool-0",
+            role="tool",
+            content="rows",
+            tool_call_id="call-0",
+        ),
     ]
     context = AgentContext(
         items=items,
         compaction_model=ModelConfig(name="test-compactor"),
-        text_message_compaction_keep_last_messages=0,
-        tool_call_compaction_keep_last_turns=100,
+        text_message_compaction_keep_last_messages=100,
+        tool_call_compaction_keep_last_turns=0,
     )
 
-    probe = _ConcurrencyProbe(fail_on="m-1")
+    probe = _ConcurrencyProbe(fail_on="tool-0")
     monkeypatch.setattr(agent_context_module, "compact", probe)
     await context.compact_old_items(client=object())  # type: ignore[arg-type]
 
-    # m-0 and m-1 are separate text units, so m-0 still commits; the point is
-    # that the failure is contained and never raises out of compaction.
     by_id = {i.item_id: i for i in context.items}
-    assert by_id["m-1"].is_compacted is False
+    # Both items were summarized concurrently and asst-0 succeeded...
+    assert "asst-0" in probe.calls
+    # ...but neither is committed, because they share a unit.
+    assert by_id["asst-0"].is_compacted is False
+    assert by_id["tool-0"].is_compacted is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_unit_does_not_block_independent_units(monkeypatch) -> None:
+    """Containment: one unit's failure must not cost the others their work."""
+    context = _text_context(4, keep_last=0)
+    probe = _ConcurrencyProbe(fail_on="m-2")
+    monkeypatch.setattr(agent_context_module, "compact", probe)
+
+    await context.compact_old_items(client=object())  # type: ignore[arg-type]
+
+    by_id = {i.item_id: i for i in context.items}
+    assert by_id["m-2"].is_compacted is False
+    for other in ("m-0", "m-1", "m-3"):
+        assert by_id[other].is_compacted is True, f"{other} lost its summary"
 
 
 @pytest.mark.asyncio
