@@ -71,6 +71,13 @@ ROOT_SYSTEM_PROMPT_TEMPLATE = """\
 You are the root agent in the HALO engine. You explore OTel trace data
 using the tools the runtime provides.
 
+Budget rules:
+- You have a hard budget of {maximum_turns} turns; the run is cut off when it
+  is exhausted, so an unfinished analysis is worth less than a finished
+  narrower one. Spend your first turn planning the shortest path to an
+  answer, and call `final_answer` with comfortable margin — do not explore
+  right up to the limit.
+
 Depth rules:
 - You are at depth=0.
 - maximum_depth={maximum_depth}. Subagents you spawn are at depth=1.
@@ -199,6 +206,7 @@ def _render_git_repo_section(git_repo: "GitRepo | None") -> str:
 
 def render_root_system_prompt(
     *,
+    maximum_turns: int,
     maximum_depth: int,
     maximum_parallel_subagents: int,
     dataset_context: str | None,
@@ -214,6 +222,7 @@ def render_root_system_prompt(
     """
     return ROOT_SYSTEM_PROMPT_TEMPLATE.format(
         system_prompt=SYSTEM_PROMPT,
+        maximum_turns=maximum_turns,
         maximum_depth=maximum_depth,
         maximum_parallel_subagents=maximum_parallel_subagents,
         dataset_context_section=_render_dataset_context_section(dataset_context),
