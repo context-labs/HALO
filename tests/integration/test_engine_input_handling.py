@@ -108,7 +108,7 @@ async def test_root_run_emits_a_resumable_checkpoint_when_enabled() -> None:
     The checkpoint is emitted after compaction, so it carries the smaller
     history a resumed run would actually replay rather than the raw one.
     """
-    fake = FakeRunner([[make_assistant_text("looking"), make_final_answer("done")]])
+    fake = FakeRunner([[make_assistant_text("looking"), *make_final_answer("done")]])
     result = await run_with_fake(fake, config=make_default_config(emit_run_checkpoints=True))
 
     assert result.error is None
@@ -123,7 +123,7 @@ async def test_root_run_emits_a_resumable_checkpoint_when_enabled() -> None:
 async def test_no_checkpoints_by_default() -> None:
     """Off by default: widening the event union must not reach a host pinned to
     an engine that predates the variant."""
-    fake = FakeRunner([[make_final_answer("done")]])
+    fake = FakeRunner([[*make_final_answer("done")]])
     result = await run_with_fake(fake)
 
     assert result.error is None
@@ -151,7 +151,7 @@ async def test_happy_path_makes_no_compaction_calls(monkeypatch) -> None:
 
     # Enough scripted turns that old items would be eligible for compaction.
     fake = FakeRunner(
-        [[make_assistant_text(f"step {i}") for i in range(6)] + [make_final_answer("done")]]
+        [[make_assistant_text(f"step {i}") for i in range(6)] + [*make_final_answer("done")]]
     )
     config = make_default_config()
     config.text_message_compaction_keep_last_messages = 0
@@ -175,7 +175,7 @@ async def test_checkpointed_run_still_compacts(monkeypatch) -> None:
     monkeypatch.setattr(agent_context_module, "compact", _spy)
 
     fake = FakeRunner(
-        [[make_assistant_text(f"step {i}") for i in range(6)] + [make_final_answer("done")]]
+        [[make_assistant_text(f"step {i}") for i in range(6)] + [*make_final_answer("done")]]
     )
     config = make_default_config(emit_run_checkpoints=True)
     config.text_message_compaction_keep_last_messages = 0

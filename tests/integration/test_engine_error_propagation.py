@@ -20,7 +20,12 @@ import pytest
 from openai import APIConnectionError, BadRequestError
 
 from engine.errors import EngineAgentExhaustedError
-from tests.probes.probe_kit import FakeRunner, run_with_fake
+from tests.probes.probe_kit import (
+    FakeRunner,
+    make_default_config,
+    make_final_answer,
+    run_with_fake,
+)
 
 
 @pytest.mark.asyncio
@@ -62,3 +67,47 @@ async def test_circuit_breaker_exhaustion_propagates_through_engine() -> None:
 
     assert isinstance(result.error, EngineAgentExhaustedError)
     assert len(runner.calls) == 10
+
+
+@pytest.mark.asyncio
+async def test_root_max_turns_salvages_a_final_answer() -> None:
+    """A run that exhausts its turn budget produces a report, not a total loss.
+
+    The budget running out means real work was already paid for — history,
+    tool results, provider spend. Failing forfeits all of it (one observed
+    wandering run burned 812k input tokens and returned nothing). The engine
+    spends a final-reprompt slot on a rerun whose trailing directive demands
+    `final_answer` immediately.
+    """
+    from agents.exceptions import MaxTurnsExceeded
+
+    fake = FakeRunner(
+        MaxTurnsExceeded("Max turns (20) exceeded"),
+        [*make_final_answer("Truncated but real findings.")],
+    )
+    result = await run_with_fake(fake, config=make_default_config(final_answer_reprompts=1))
+
+    assert result.error is None
+    finals = [i for i in result.output_items if getattr(i, "final", False)]
+    assert len(finals) == 1
+    # The salvage rerun carries the forced final_answer directive.
+    assert any(
+        m.get("role") == "user" and "final_answer" in str(m.get("content"))
+        for m in fake.calls[-1]["input"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_max_turns_still_fails_once_salvage_budget_is_spent() -> None:
+    """A model that wanders through the salvage attempt too must not loop."""
+    from agents.exceptions import MaxTurnsExceeded
+
+    fake = FakeRunner(
+        MaxTurnsExceeded("Max turns (20) exceeded"),
+        MaxTurnsExceeded("Max turns (20) exceeded"),
+    )
+    result = await run_with_fake(fake, config=make_default_config(final_answer_reprompts=1))
+
+    assert isinstance(result.error, MaxTurnsExceeded)
+    # Exactly one salvage rerun happened — no unbounded retry.
+    assert len(fake.calls) == 2

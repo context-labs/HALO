@@ -278,6 +278,7 @@ def make_default_config(
     tool_call_compaction_keep_last_turns: int = 3,
     model: str = "gpt-5.4-mini",
     emit_run_checkpoints: bool = False,
+    final_answer_reprompts: int = 0,
 ) -> EngineConfig:
     """Sensible defaults for an EngineConfig used in probes.
     The model name is irrelevant when ``FakeRunner`` is installed via
@@ -296,7 +297,7 @@ def make_default_config(
         name="root",
         model=ModelConfig(name=model),
         maximum_turns=4,
-        final_answer_reprompts=0,
+        final_answer_reprompts=final_answer_reprompts,
     )
     return EngineConfig(
         root_agent=agent,

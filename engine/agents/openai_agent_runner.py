@@ -5,6 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agents.exceptions import MaxTurnsExceeded
 from openai import APIStatusError, AsyncOpenAI
 
 from engine.agents.agent_context import AgentContext
@@ -177,6 +178,38 @@ class OpenAiAgentRunner:
                     if mapped.delta is not None:
                         await output_bus.emit(mapped.delta)
             except Exception as exc:
+                if (
+                    isinstance(exc, MaxTurnsExceeded)
+                    and final_reprompt_attempts < self._final_reprompts
+                ):
+                    # The turn budget ran out with real work already paid for
+                    # — history, tool results, provider spend. Failing here
+                    # forfeits all of it (observed: one wandering run burned
+                    # 812k input tokens and returned nothing). Spend one
+                    # final-reprompt slot on a rerun whose trailing directive
+                    # demands `final_answer` immediately, converting a total
+                    # loss into a truncated report. Root-only in practice:
+                    # subagent runners are constructed with final_reprompts=0
+                    # and already degrade into a failure result their parent
+                    # survives.
+                    final_reprompt_attempts += 1
+                    pending_final_reprompt = True
+                    removed = agent_context.trim_incomplete_tool_turn(
+                        min_items=items_before_attempt
+                    )
+                    for item in removed:
+                        if item.role == "assistant" and item.tool_calls:
+                            agent_execution.tool_calls_made -= len(item.tool_calls)
+                        elif item.role == "assistant":
+                            agent_execution.turns_used -= 1
+                    logger.warning(
+                        "max turns exceeded for agent_id=%s; salvaging with a "
+                        "forced final_answer reprompt (%s of %s)",
+                        agent_execution.agent_id,
+                        final_reprompt_attempts,
+                        self._final_reprompts,
+                    )
+                    continue
                 if not is_retriable_llm_error(exc):
                     raise
                 if events_seen > 0:
