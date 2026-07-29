@@ -54,3 +54,25 @@ def test_absent_details_stay_absent_not_zero() -> None:
     )
     assert "llm.token_count.prompt_cached" not in attrs
     assert projection["cached_input_tokens"] is None
+
+
+REASONING_USAGE = {
+    "input_tokens": 1_000,
+    "output_tokens": 900,
+    "total_tokens": 1_900,
+    "output_tokens_details": {"reasoning_tokens": 640},
+}
+
+
+def test_response_span_exports_reasoning_tokens() -> None:
+    attrs, projection = _response_attrs({"response_id": "resp_3", "usage": REASONING_USAGE})
+    assert attrs["llm.token_count.completion_reasoning"] == 640
+    assert projection["reasoning_output_tokens"] == 640
+
+
+def test_absent_reasoning_details_stay_absent() -> None:
+    attrs, projection = _response_attrs(
+        {"response_id": "resp_4", "usage": {"input_tokens": 10, "output_tokens": 1}}
+    )
+    assert "llm.token_count.completion_reasoning" not in attrs
+    assert projection["reasoning_output_tokens"] is None
