@@ -76,3 +76,17 @@ def test_absent_reasoning_details_stay_absent() -> None:
     )
     assert "llm.token_count.completion_reasoning" not in attrs
     assert projection["reasoning_output_tokens"] is None
+
+
+def test_generation_span_exports_reasoning_tokens_from_chat_shape() -> None:
+    """Chat Completions nests the count under ``completion_tokens_details`` —
+    the compactor and synthesis tool run on that surface."""
+    usage = {
+        "prompt_tokens": 500,
+        "completion_tokens": 300,
+        "total_tokens": 800,
+        "completion_tokens_details": {"reasoning_tokens": 120},
+    }
+    attrs, projection = _generation_attrs({"model": "m", "usage": usage})
+    assert attrs["llm.token_count.completion_reasoning"] == 120
+    assert projection["reasoning_output_tokens"] == 120
