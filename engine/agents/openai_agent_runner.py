@@ -259,6 +259,12 @@ class OpenAiAgentRunner:
             await agent_context.compact_old_items(self._client)
             return
 
+        # Carry the underlying error in the message: this string is what the
+        # control plane persists on the run row, so hiding the cause behind a
+        # bare "exhausted" forced operators to dig through provider logs to
+        # learn WHY a run died (run ba6fc95c).
+        cause = f": {type(last_exc).__name__}: {last_exc}" if last_exc else ""
         raise EngineAgentExhaustedError(
-            f"agent {agent_execution.agent_id} exhausted after {MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures"
+            f"agent {agent_execution.agent_id} exhausted after "
+            f"{MAX_CONSECUTIVE_LLM_FAILURES} consecutive failures{cause}"
         ) from last_exc

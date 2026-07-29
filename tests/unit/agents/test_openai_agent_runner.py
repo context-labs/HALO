@@ -992,3 +992,39 @@ async def test_mid_stream_replay_sends_wire_valid_responses_input() -> None:
         if "role" in item:
             assert "content" in item, f"message item missing content: {item}"
             assert "tool_calls" not in item, f"chat-only field leaked: {item}"
+
+
+@pytest.mark.asyncio
+async def test_exhausted_error_message_carries_the_underlying_cause() -> None:
+    """The exhausted message is what the control plane persists on the run
+    row — it must name the underlying error, not just "exhausted"."""
+    bus = EngineOutputBus()
+    ctx = _context()
+    execution = AgentExecution(
+        agent_id="root",
+        agent_name="root",
+        depth=0,
+        parent_agent_id=None,
+        parent_tool_call_id=None,
+    )
+
+    fake_request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+
+    async def always_fail(*, agent, input, context):
+        return _RaisingStream(APIConnectionError(request=fake_request))
+
+    runner = OpenAiAgentRunner(
+        run_streamed=always_fail,
+        client=_DUMMY_CLIENT,
+        retry_backoff_base=0.0,
+    )
+
+    with pytest.raises(EngineAgentExhaustedError) as exc_info:
+        await runner.run(
+            sdk_agent=object(),
+            agent_context=ctx,
+            agent_execution=execution,
+            output_bus=bus,
+            is_root=True,
+        )
+    assert "APIConnectionError" in str(exc_info.value)
