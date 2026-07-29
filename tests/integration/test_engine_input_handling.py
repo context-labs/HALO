@@ -128,3 +128,58 @@ async def test_no_checkpoints_by_default() -> None:
 
     assert result.error is None
     assert not [e for e in result.all_events if isinstance(e, RunCheckpoint)]
+
+
+@pytest.mark.asyncio
+async def test_happy_path_makes_no_compaction_calls(monkeypatch) -> None:
+    """A completed run must not pay for summaries nothing reads.
+
+    End-of-run compaction's only consumer is the checkpoint event; with
+    checkpoints off (the default) the context is discarded on return, so any
+    compaction call here is a pure cost adder — one LLM round-trip per old
+    unit, per agent, per run.
+    """
+    from engine.agents import agent_context as agent_context_module
+
+    calls: list[str] = []
+
+    async def _spy(*, client, compaction_model, item):
+        calls.append(item.item_id)
+        return "summary"
+
+    monkeypatch.setattr(agent_context_module, "compact", _spy)
+
+    # Enough scripted turns that old items would be eligible for compaction.
+    fake = FakeRunner(
+        [[make_assistant_text(f"step {i}") for i in range(6)] + [make_final_answer("done")]]
+    )
+    config = make_default_config()
+    config.text_message_compaction_keep_last_messages = 0
+    result = await run_with_fake(fake, config=config)
+
+    assert result.error is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_checkpointed_run_still_compacts(monkeypatch) -> None:
+    """With checkpoints on, compaction runs so the checkpoint stays small."""
+    from engine.agents import agent_context as agent_context_module
+
+    calls: list[str] = []
+
+    async def _spy(*, client, compaction_model, item):
+        calls.append(item.item_id)
+        return "summary"
+
+    monkeypatch.setattr(agent_context_module, "compact", _spy)
+
+    fake = FakeRunner(
+        [[make_assistant_text(f"step {i}") for i in range(6)] + [make_final_answer("done")]]
+    )
+    config = make_default_config(emit_run_checkpoints=True)
+    config.text_message_compaction_keep_last_messages = 0
+    result = await run_with_fake(fake, config=config)
+
+    assert result.error is None
+    assert calls != []

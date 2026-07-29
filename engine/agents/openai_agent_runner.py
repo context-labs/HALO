@@ -261,10 +261,16 @@ class OpenAiAgentRunner:
                 continue
 
             agent_execution.record_llm_success()
-            await agent_context.compact_old_items(self._client)
-            # After compaction, so the checkpoint carries the smaller history a
-            # resumed run would actually replay.
+            # Compaction here has exactly one consumer: the checkpoint below.
+            # The run is over — this context is discarded on return, and every
+            # retry/reprompt path above rebuilds its messages before this line
+            # is ever reached. Compacting unconditionally charged one
+            # summarization call per old unit, per agent, per run, to shrink a
+            # history nothing else would read.
             if is_root and self._emit_run_checkpoints:
+                # Compact first, so the checkpoint carries the smaller history
+                # a resumed run would actually replay.
+                await agent_context.compact_old_items(self._client)
                 await output_bus.emit(
                     RunCheckpoint(
                         sequence=0,  # assigned by the bus under its lock

@@ -34,6 +34,12 @@ def _config() -> EngineConfig:
         tool_call_compaction_keep_last_turns=0,
         maximum_depth=0,
         maximum_parallel_subagents=1,
+        # Compaction's only consumer is the run checkpoint; with checkpoints
+        # off the engine skips it entirely (see
+        # test_happy_path_makes_no_compaction_calls). This test verifies the
+        # configured compactor is what gets used, so it runs the one path
+        # that compacts.
+        emit_run_checkpoints=True,
     )
 
 
