@@ -206,6 +206,10 @@ class AgentContext:
         # would peak at units x unit_size in-flight calls. The thing worth
         # limiting is concurrent requests to the provider, so that is what the
         # limit counts.
+        #
+        # The bound is per agent execution, not global: root and each subagent
+        # build their own AgentContext, so several finishing at once each get
+        # their own allowance.
         semaphore = asyncio.Semaphore(COMPACTION_CONCURRENCY)
         with engine_span(
             "halo.compaction",
@@ -214,7 +218,29 @@ class AgentContext:
                 "compaction.concurrency": COMPACTION_CONCURRENCY,
             },
         ):
-            await asyncio.gather(*(self._compact_unit(unit, client, semaphore) for unit in units))
+            # ``return_exceptions=True`` is load-bearing for two separate
+            # reasons. Compaction is an optimization that must never take down
+            # the run, and ``_compact_unit``'s own guard only covers a failing
+            # ``compact`` call — anything else it raised would escape to a
+            # caller with no handler. Worse, a bare gather does not cancel
+            # siblings when a child raises: the remaining units would keep
+            # running unsupervised and mutate ``self.items`` long after the
+            # turn had moved on. This waits for every unit either way.
+            outcomes = await asyncio.gather(
+                *(self._compact_unit(unit, client, semaphore) for unit in units),
+                return_exceptions=True,
+            )
+
+        for outcome in outcomes:
+            # Same split as inside a unit: process-teardown exceptions
+            # propagate, ordinary failures are logged and contained.
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
+            if isinstance(outcome, Exception):
+                logger.error(
+                    "Compaction unit raised unexpectedly; leaving it uncompacted",
+                    exc_info=outcome,
+                )
 
     async def _compact_unit(
         self, indices: list[int], client: AsyncOpenAI, semaphore: asyncio.Semaphore
@@ -242,7 +268,13 @@ class AgentContext:
 
         summaries: list[tuple[int, AgentContextItem, str]] = []
         for (idx, item), result in zip(items, results, strict=True):
-            if isinstance(result, BaseException):
+            # Cancellation and the other non-``Exception`` BaseExceptions
+            # (KeyboardInterrupt, SystemExit) must propagate: they mean the
+            # process is going away, not that a summary failed. Only a real
+            # ``Exception`` is an ordinary compaction failure.
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                raise result
+            if isinstance(result, Exception):
                 # Compaction is an optimization — a failed summarization call
                 # (after its own retries) must never take down the run, and must
                 # not partially compact a tool turn. Leave the whole unit

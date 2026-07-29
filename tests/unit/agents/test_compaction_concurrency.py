@@ -240,3 +240,52 @@ async def test_no_units_makes_no_calls(monkeypatch) -> None:
     await context.compact_old_items(client=object())  # type: ignore[arg-type]
 
     assert probe.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_unit_raising_outside_its_guard_never_escapes(monkeypatch) -> None:
+    """Compaction must never take down the run, whatever a unit throws.
+
+    ``_compact_unit`` only guards the ``compact`` call itself. Anything else it
+    raises — a commit-phase bug, a future fallible step — would escape to
+    ``openai_agent_runner``, which has no handler. A bare ``gather`` also does
+    not cancel siblings when a child raises, so the surviving units would keep
+    running unsupervised and mutate ``self.items`` after the turn moved on.
+    """
+    context = _text_context(4, keep_last=0)
+    probe = _ConcurrencyProbe()
+    monkeypatch.setattr(agent_context_module, "compact", probe)
+
+    original = AgentContext._compact_unit
+    exploded: list[int] = []
+
+    async def _explode_on_first(self, indices, client, semaphore):  # type: ignore[no-untyped-def]
+        if not exploded:
+            exploded.append(1)
+            raise RuntimeError("commit-phase bug")
+        return await original(self, indices, client, semaphore)
+
+    monkeypatch.setattr(AgentContext, "_compact_unit", _explode_on_first)
+
+    # Does not raise...
+    await context.compact_old_items(client=object())  # type: ignore[arg-type]
+
+    # ...and the surviving units finished before the call returned, rather
+    # than being left to mutate state later.
+    assert probe.in_flight == 0
+    compacted = [i.item_id for i in context.items if i.is_compacted]
+    assert len(compacted) == 3
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_not_absorbed_as_a_failure(monkeypatch) -> None:
+    """A cancelled run must cancel, not be filed as a compaction failure."""
+
+    async def _cancel(*, client: object, compaction_model: object, item: object) -> str:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(agent_context_module, "compact", _cancel)
+    context = _text_context(3, keep_last=0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await context.compact_old_items(client=object())  # type: ignore[arg-type]

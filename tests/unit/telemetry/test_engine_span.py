@@ -86,3 +86,34 @@ def test_is_a_noop_without_a_provider() -> None:
     with engine_span("halo.tool", **{"tool.name": "x"}) as span:
         span.set_attribute("tool.ok", True)
         assert span.is_recording() is False
+
+
+def test_a_failed_tool_span_carries_tool_ok_false(
+    exporter: InMemorySpanExporter,
+) -> None:
+    """A failing tool must leave ``tool.ok=False``, not an absent key.
+
+    The dispatcher converts tool exceptions into a string returned to the
+    model, so the span's ERROR status is the only other failure signal. If
+    ``tool.ok`` were set only on the success path it would be missing rather
+    than false on failures, and a ``tool.ok = false`` query would silently
+    match nothing — the exact opposite of what the attribute is for.
+    """
+    with pytest.raises(RuntimeError):
+        with engine_span("halo.tool", **{"tool.name": "view_trace", "tool.ok": False}):
+            raise RuntimeError("tool blew up")
+
+    attributes = exporter.get_finished_spans()[0].attributes
+    assert attributes is not None
+    assert attributes["tool.ok"] is False
+
+
+def test_a_successful_tool_span_flips_tool_ok_true(
+    exporter: InMemorySpanExporter,
+) -> None:
+    with engine_span("halo.tool", **{"tool.name": "view_trace", "tool.ok": False}) as span:
+        span.set_attribute("tool.ok", True)
+
+    attributes = exporter.get_finished_spans()[0].attributes
+    assert attributes is not None
+    assert attributes["tool.ok"] is True
