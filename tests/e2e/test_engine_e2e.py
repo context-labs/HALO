@@ -255,7 +255,14 @@ async def test_engine_uses_code_tools(tmp_path: Path, fixtures_dir: Path) -> Non
     trace_path = _trace_path(tmp_path, fixtures_dir)
     repo_path = tmp_path / "src"
     shutil.copytree(fixtures_dir / "tiny_repo", repo_path)
-    cfg = _engine_config(maximum_depth=0, maximum_turns=6, repo_path=repo_path)
+    # 10 rather than the 6 the other E2Es use: these two have to navigate a
+    # repo (grep -> read -> answer), and a single wrong path guess costs two
+    # turns. The model guessing `src/agent/config.py` and getting
+    # "not a file" blew the 6-turn budget twice in a row on release runs,
+    # failing before it could emit a final item — even though it had already
+    # called a code tool, which is what these tests actually assert. The
+    # assertions are unchanged; only the headroom is.
+    cfg = _engine_config(maximum_depth=0, maximum_turns=10, repo_path=repo_path)
 
     messages = [
         AgentMessage(
@@ -297,7 +304,14 @@ async def test_engine_uses_git_tools(tmp_path: Path, fixtures_dir: Path) -> None
 
     trace_path = _trace_path(tmp_path, fixtures_dir)
     repo_path = git_init_repo(tmp_path, fixtures_dir).root
-    cfg = _engine_config(maximum_depth=0, maximum_turns=6, repo_path=repo_path)
+    # 10 rather than the 6 the other E2Es use: these two have to navigate a
+    # repo (grep -> read -> answer), and a single wrong path guess costs two
+    # turns. The model guessing `src/agent/config.py` and getting
+    # "not a file" blew the 6-turn budget twice in a row on release runs,
+    # failing before it could emit a final item — even though it had already
+    # called a code tool, which is what these tests actually assert. The
+    # assertions are unchanged; only the headroom is.
+    cfg = _engine_config(maximum_depth=0, maximum_turns=10, repo_path=repo_path)
 
     messages = [
         AgentMessage(
