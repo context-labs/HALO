@@ -24,6 +24,7 @@ from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
 from engine.telemetry import resolve_run_id, setup_telemetry
+from engine.telemetry.spans import engine_span
 from engine.telemetry.tracing import halo_agent_span
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.models.trace_dataset_source import TraceDatasetSource
@@ -59,14 +60,22 @@ async def _resolve_trace_sources(
     """
     if not trace_paths:
         raise ValueError("at least one trace path is required")
-    sources: list[TraceDatasetSource] = []
-    for path in trace_paths:
-        index_path = await TraceIndexBuilder.ensure_index_exists(
-            trace_path=path,
-            config=config,
+    # Each file is indexed independently (see the docstring), so a multi-file
+    # dataset paid the SUM of every file's index build before the first turn
+    # could start. Indexing is I/O- and CPU-bound over disjoint files, so
+    # gather turns that into the slowest single file.
+    with engine_span("halo.build_trace_index", **{"trace.file_count": len(trace_paths)}):
+        index_paths = await asyncio.gather(
+            *(
+                TraceIndexBuilder.ensure_index_exists(trace_path=path, config=config)
+                for path in trace_paths
+            )
         )
-        sources.append(TraceDatasetSource(trace_path=path, index_path=index_path))
-    return sources
+    # gather preserves input order, so each index lines up with its trace.
+    return [
+        TraceDatasetSource(trace_path=path, index_path=index_path)
+        for path, index_path in zip(trace_paths, index_paths, strict=True)
+    ]
 
 
 async def stream_engine_async(
