@@ -1,6 +1,23 @@
 name: "[Engine] E2E Tests"
 
 on:
+  # E2E is the only suite that talks to a real provider, so it is the only
+  # one that can catch a wire-contract break: a payload the engine builds
+  # happily and the API rejects. Until this ran on PRs, such a change could
+  # pass every check and only fail at the release gate — which is exactly
+  # how `cache_control` on a Responses content block reached a release run
+  # (400 unknown_parameter; see tests/unit/agents/test_responses_input_wire_safety.py).
+  pull_request:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Taskfile.yml"
+      - "pyrightconfig.json"
+      - ".github/workflows/engine--e2e-tests.yml"
   workflow_dispatch:
   workflow_call:
     secrets:
