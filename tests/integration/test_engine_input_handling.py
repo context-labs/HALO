@@ -12,7 +12,13 @@ from __future__ import annotations
 import pytest
 
 from engine.models.messages import AgentMessage
-from tests.probes.probe_kit import FakeRunner, make_assistant_text, make_final_answer, run_with_fake
+from tests.probes.probe_kit import (
+    FakeRunner,
+    item_text,
+    make_assistant_text,
+    make_final_answer,
+    run_with_fake,
+)
 
 
 def _first_input(runner: FakeRunner) -> list[dict]:
@@ -35,9 +41,9 @@ async def test_no_system_message_prepends_rendered_root_prompt() -> None:
     msgs = _first_input(runner)
     assert len(msgs) == 2
     assert msgs[0]["role"] == "system"
-    assert msgs[0]["content"]
+    assert item_text(msgs[0])
     assert msgs[1]["role"] == "user"
-    assert msgs[1]["content"] == "hi there"
+    assert item_text(msgs[1]) == "hi there"
 
 
 @pytest.mark.asyncio
@@ -59,9 +65,9 @@ async def test_caller_supplied_system_message_passed_through_verbatim() -> None:
     msgs = _first_input(runner)
     assert len(msgs) == 2
     assert msgs[0]["role"] == "system"
-    assert msgs[0]["content"] == custom_sys
+    assert item_text(msgs[0]) == custom_sys
     assert msgs[1]["role"] == "user"
-    assert msgs[1]["content"] == "hi"
+    assert item_text(msgs[1]) == "hi"
 
 
 @pytest.mark.asyncio
@@ -85,4 +91,9 @@ async def test_multi_turn_continuation_preserves_role_and_content_order() -> Non
     msgs = _first_input(runner)
     assert len(msgs) == 4
     assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
-    assert [m["content"] for m in msgs] == [custom_sys, "first turn", "prior reply", "follow-up"]
+    assert [item_text(m) for m in msgs] == [
+        custom_sys,
+        "first turn",
+        "prior reply",
+        "follow-up",
+    ]

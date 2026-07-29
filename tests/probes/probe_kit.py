@@ -585,3 +585,22 @@ async def run_with_fake(
             result.error = exc
 
     return result
+
+
+def item_text(item: dict[str, Any]) -> str:
+    """Read an input item's text regardless of its content shape.
+
+    Items in the cacheable head carry ``content`` as a single cache-marked
+    ``input_text`` part (see ``apply_prompt_cache_breakpoints``); everything
+    else carries a plain string. Tests that care about *which message went
+    where* — role order, system-prompt passthrough, continuation ordering —
+    should assert through this rather than pinning one of the two shapes.
+    """
+    content = item.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, dict):
+            return str(first.get("text", ""))
+    return ""
