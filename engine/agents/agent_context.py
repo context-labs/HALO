@@ -195,26 +195,30 @@ class AgentContext:
         if not units:
             return
 
-        # Units are independent: each summarizes a disjoint set of item
-        # indices and commits only its own. Awaiting them one at a time made
-        # compaction cost the SUM of N LLM round-trips at the end of every
-        # agent execution — with a subagent tree that is paid once per agent.
-        # Bounded rather than unbounded: firing every unit at once would
-        # trade latency for provider rate-limit errors, and `call_with_retries`
-        # backoff would give the time straight back.
+        # Units are independent: each summarizes a disjoint set of item indices
+        # and commits only its own. Awaiting them one at a time made compaction
+        # cost the SUM of every unit's LLM round-trip, at the end of every agent
+        # execution — root and each subagent.
+        #
+        # One semaphore, shared by every unit and held around the individual
+        # `compact` calls. Bounding units instead would not actually bound
+        # anything: a tool-turn unit holds several items, so per-unit fan-out
+        # would peak at units x unit_size in-flight calls. The thing worth
+        # limiting is concurrent requests to the provider, so that is what the
+        # limit counts.
         semaphore = asyncio.Semaphore(COMPACTION_CONCURRENCY)
-
-        async def _guarded(unit: list[int]) -> None:
-            async with semaphore:
-                await self._compact_unit(unit, client)
-
         with engine_span(
             "halo.compaction",
-            **{"compaction.units": len(units), "compaction.concurrency": COMPACTION_CONCURRENCY},
+            **{
+                "compaction.units": len(units),
+                "compaction.concurrency": COMPACTION_CONCURRENCY,
+            },
         ):
-            await asyncio.gather(*(_guarded(unit) for unit in units))
+            await asyncio.gather(*(self._compact_unit(unit, client, semaphore) for unit in units))
 
-    async def _compact_unit(self, indices: list[int], client: AsyncOpenAI) -> None:
+    async def _compact_unit(
+        self, indices: list[int], client: AsyncOpenAI, semaphore: asyncio.Semaphore
+    ) -> None:
         """Summarize every item in one compaction unit, committing only if all
         succeed. A tool turn is a single unit, so it never renders half-compacted;
         any failed summary leaves the whole unit uncompacted for the next pass.
@@ -225,11 +229,14 @@ class AgentContext:
         # commit below is atomic. `return_exceptions` keeps the all-or-nothing
         # contract intact — one failure still leaves the WHOLE unit
         # uncompacted — while paying one round-trip of latency instead of N.
+        async def _summarize(item: AgentContextItem) -> str:
+            async with semaphore:
+                return await compact(
+                    client=client, compaction_model=self.compaction_model, item=item
+                )
+
         results = await asyncio.gather(
-            *(
-                compact(client=client, compaction_model=self.compaction_model, item=item)
-                for _, item in items
-            ),
+            *(_summarize(item) for _, item in items),
             return_exceptions=True,
         )
 

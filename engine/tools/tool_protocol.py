@@ -116,19 +116,19 @@ def to_sdk_function_tool(
         # UserError. Mirror the SDK's ``function_tool`` default: turn tool failures
         # (a model picking a bad path, malformed arguments) into a result string so
         # the model sees the error and can recover on the next turn.
-        # Every engine tool call funnels through here, so one span attributes
-        # all tool wall-clock by name without touching individual tools.
-        # ``tool.ok`` distinguishes a slow success from a slow failure — the
-        # error path below deliberately returns a string rather than raising,
-        # so without the flag both look identical in a trace.
         try:
+            # Every engine tool call funnels through here, so one span times
+            # them all by name without touching individual tools. ``tool.ok``
+            # is what distinguishes a slow success from a slow failure: the
+            # handler above returns errors as a string rather than raising, so
+            # without the flag the two are indistinguishable in a trace.
             with engine_span("halo.tool", **{"tool.name": tool.name}) as span:
                 parsed = arguments_model.model_validate_json(raw_arguments or "{}")
                 tool_context = context_factory(ctx)
                 result = await tool.run(tool_context, parsed)
                 payload = result.model_dump_json()
                 span.set_attribute("tool.ok", True)
-                span.set_attribute("tool.result_bytes", len(payload))
+                span.set_attribute("tool.result_chars", len(payload))
                 return payload
         except Exception as error:
             logger.warning(

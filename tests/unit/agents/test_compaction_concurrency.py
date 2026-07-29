@@ -19,6 +19,7 @@ from engine.agents import agent_context as agent_context_module
 from engine.agents.agent_context import COMPACTION_CONCURRENCY, AgentContext
 from engine.agents.agent_context_items import AgentContextItem
 from engine.model_config import ModelConfig
+from engine.models.messages import AgentToolCall, AgentToolFunction
 
 
 class _ConcurrencyProbe:
@@ -85,6 +86,62 @@ async def test_concurrency_is_bounded(monkeypatch) -> None:
     context = _text_context(COMPACTION_CONCURRENCY * 3, keep_last=0)
     await context.compact_old_items(client=object())  # type: ignore[arg-type]
 
+    assert probe.peak <= COMPACTION_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_multi_item_units_respect_the_same_global_bound(monkeypatch) -> None:
+    """The limit counts provider calls, not units.
+
+    Single-item text units can't catch this: with a per-unit semaphore the peak
+    would be ``units x unit_size``, which only diverges from ``units`` once a
+    unit holds more than one item. Tool turns do — an assistant ``tool_calls``
+    row plus each matching result — so this builds several multi-item tool
+    units and asserts the bound still holds on the calls themselves.
+    """
+    items: list[AgentContextItem] = [
+        AgentContextItem(item_id="sys-0", role="system", content="sys")
+    ]
+    unit_count = COMPACTION_CONCURRENCY * 2
+    for turn in range(unit_count):
+        call_id = f"call-{turn}"
+        items.append(
+            AgentContextItem(
+                item_id=f"asst-{turn}",
+                role="assistant",
+                content=None,
+                tool_calls=[
+                    AgentToolCall(
+                        id=call_id,
+                        function=AgentToolFunction(name="view_trace", arguments="{}"),
+                    )
+                ],
+            )
+        )
+        items.append(
+            AgentContextItem(
+                item_id=f"tool-{turn}",
+                role="tool",
+                content="rows",
+                tool_call_id=call_id,
+            )
+        )
+
+    context = AgentContext(
+        items=items,
+        compaction_model=ModelConfig(name="test-compactor"),
+        text_message_compaction_keep_last_messages=100,
+        tool_call_compaction_keep_last_turns=0,
+    )
+    probe = _ConcurrencyProbe()
+    monkeypatch.setattr(agent_context_module, "compact", probe)
+
+    await context.compact_old_items(client=object())  # type: ignore[arg-type]
+
+    # Every tool turn contributes 2 items, so there is genuinely more than
+    # ``COMPACTION_CONCURRENCY`` work available to over-subscribe with.
+    assert len(probe.calls) == unit_count * 2
+    assert probe.peak > 1, "multi-item units ran serially"
     assert probe.peak <= COMPACTION_CONCURRENCY
 
 

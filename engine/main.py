@@ -60,22 +60,21 @@ async def _resolve_trace_sources(
     """
     if not trace_paths:
         raise ValueError("at least one trace path is required")
-    # Each file is indexed independently (see the docstring), so a multi-file
-    # dataset paid the SUM of every file's index build before the first turn
-    # could start. Indexing is I/O- and CPU-bound over disjoint files, so
-    # gather turns that into the slowest single file.
+    # Deliberately serial across files. Each file's build already saturates
+    # the machine on its own — ``TraceIndexBuilder._run_build`` splits the
+    # file into ``_available_cpus()`` chunks and fans them out across a
+    # ProcessPoolExecutor. Gathering over files would stack
+    # files x cores worker processes, trading forkserver and memory overhead
+    # for no additional parallelism.
     with engine_span("halo.build_trace_index", **{"trace.file_count": len(trace_paths)}):
-        index_paths = await asyncio.gather(
-            *(
-                TraceIndexBuilder.ensure_index_exists(trace_path=path, config=config)
-                for path in trace_paths
+        sources: list[TraceDatasetSource] = []
+        for path in trace_paths:
+            index_path = await TraceIndexBuilder.ensure_index_exists(
+                trace_path=path,
+                config=config,
             )
-        )
-    # gather preserves input order, so each index lines up with its trace.
-    return [
-        TraceDatasetSource(trace_path=path, index_path=index_path)
-        for path, index_path in zip(trace_paths, index_paths, strict=True)
-    ]
+            sources.append(TraceDatasetSource(trace_path=path, index_path=index_path))
+    return sources
 
 
 async def stream_engine_async(
