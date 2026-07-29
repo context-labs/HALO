@@ -50,5 +50,10 @@ class EngineConfig(BaseModel):
     tool_call_compaction_keep_last_turns: int = Field(default=3, ge=0)
     maximum_depth: int = Field(default=2, ge=0)
     maximum_parallel_subagents: int = Field(default=4, gt=0)
+    #: Emit ``RunCheckpoint`` events carrying root conversation state, so a host
+    #: can persist them and resume a dead run mid-way instead of restarting it.
+    #: Off by default: it widens ``EngineStreamEvent``, and a host pinned to an
+    #: older engine must not receive a variant it cannot parse.
+    emit_run_checkpoints: bool = False
     dataset_context: str | None = None
     repo_path: Path | None = None

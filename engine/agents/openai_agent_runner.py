@@ -19,6 +19,7 @@ from engine.agents.llm_retry import (
 from engine.agents.openai_event_mapper import OpenAiEventMapper
 from engine.agents.responses_input import to_responses_input
 from engine.errors import EngineAgentExhaustedError, EngineAgentRefusedError
+from engine.models.engine_output import RunCheckpoint
 
 MAX_CONSECUTIVE_LLM_FAILURES = 10
 
@@ -53,6 +54,7 @@ class OpenAiAgentRunner:
         final_reprompts: int = 0,
         retry_backoff_base: float = DEFAULT_BACKOFF_BASE_SECONDS,
         retry_backoff_cap: float = DEFAULT_BACKOFF_CAP_SECONDS,
+        emit_run_checkpoints: bool = False,
     ) -> None:
         """``run_streamed`` is injected so root and subagent paths can supply their own
         max_turns and starting agent. ``client`` is the per-run AsyncOpenAI used for
@@ -61,7 +63,9 @@ class OpenAiAgentRunner:
         only meaningful with ``is_root=True`` (subagent paths leave it 0).
         ``retry_backoff_base``/``retry_backoff_cap`` shape the
         full-jitter exponential backoff between LLM retries (base <= 0 disables
-        sleeping; used by tests)."""
+        sleeping; used by tests). ``emit_run_checkpoints`` makes a root run emit
+        ``RunCheckpoint`` events a host can persist to resume mid-run; it has no
+        effect on subagent paths, which are never checkpointed."""
         self._run_streamed = run_streamed
         self._client = client
         self._mapper = event_mapper or OpenAiEventMapper()
@@ -69,6 +73,7 @@ class OpenAiAgentRunner:
         self._final_reprompts = final_reprompts
         self._retry_backoff_base = retry_backoff_base
         self._retry_backoff_cap = retry_backoff_cap
+        self._emit_run_checkpoints = emit_run_checkpoints
 
     async def run(
         self,
@@ -257,6 +262,17 @@ class OpenAiAgentRunner:
 
             agent_execution.record_llm_success()
             await agent_context.compact_old_items(self._client)
+            # After compaction, so the checkpoint carries the smaller history a
+            # resumed run would actually replay.
+            if is_root and self._emit_run_checkpoints:
+                await output_bus.emit(
+                    RunCheckpoint(
+                        sequence=0,  # assigned by the bus under its lock
+                        agent_id=agent_execution.agent_id,
+                        turns_used=agent_execution.turns_used,
+                        messages=agent_context.to_messages_array(),
+                    )
+                )
             return
 
         # Carry the underlying error in the message: this string is what the
