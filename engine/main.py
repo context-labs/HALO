@@ -24,6 +24,7 @@ from engine.models.engine_output import AgentOutputItem, EngineStreamEvent
 from engine.models.messages import AgentMessage
 from engine.sandbox.sandbox import Sandbox
 from engine.telemetry import resolve_run_id, setup_telemetry
+from engine.telemetry.spans import engine_span
 from engine.telemetry.tracing import halo_agent_span
 from engine.tools.subagent_tool_factory import build_root_sdk_agent
 from engine.traces.models.trace_dataset_source import TraceDatasetSource
@@ -59,13 +60,20 @@ async def _resolve_trace_sources(
     """
     if not trace_paths:
         raise ValueError("at least one trace path is required")
-    sources: list[TraceDatasetSource] = []
-    for path in trace_paths:
-        index_path = await TraceIndexBuilder.ensure_index_exists(
-            trace_path=path,
-            config=config,
-        )
-        sources.append(TraceDatasetSource(trace_path=path, index_path=index_path))
+    # Deliberately serial across files. Each file's build already saturates
+    # the machine on its own — ``TraceIndexBuilder._run_build`` splits the
+    # file into ``_available_cpus()`` chunks and fans them out across a
+    # ProcessPoolExecutor. Gathering over files would stack
+    # files x cores worker processes, trading forkserver and memory overhead
+    # for no additional parallelism.
+    with engine_span("halo.build_trace_index", **{"trace.file_count": len(trace_paths)}):
+        sources: list[TraceDatasetSource] = []
+        for path in trace_paths:
+            index_path = await TraceIndexBuilder.ensure_index_exists(
+                trace_path=path,
+                config=config,
+            )
+            sources.append(TraceDatasetSource(trace_path=path, index_path=index_path))
     return sources
 
 

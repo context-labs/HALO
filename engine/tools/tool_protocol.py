@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from agents import FunctionTool, RunContextWrapper, default_tool_error_function
 from pydantic import BaseModel, ConfigDict
 
+from engine.telemetry.spans import engine_span
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -115,10 +117,23 @@ def to_sdk_function_tool(
         # (a model picking a bad path, malformed arguments) into a result string so
         # the model sees the error and can recover on the next turn.
         try:
-            parsed = arguments_model.model_validate_json(raw_arguments or "{}")
-            tool_context = context_factory(ctx)
-            result = await tool.run(tool_context, parsed)
-            return result.model_dump_json()
+            # Every engine tool call funnels through here, so one span times
+            # them all by name without touching individual tools.
+            #
+            # ``tool.ok`` distinguishes a slow success from a slow failure —
+            # the handler above returns errors as a string rather than
+            # raising, so without it the two look identical. It starts False
+            # and flips on success: setting it only on the success path would
+            # leave a failed span with the key ABSENT, and a
+            # ``tool.ok = false`` query would then match nothing at all.
+            with engine_span("halo.tool", **{"tool.name": tool.name, "tool.ok": False}) as span:
+                parsed = arguments_model.model_validate_json(raw_arguments or "{}")
+                tool_context = context_factory(ctx)
+                result = await tool.run(tool_context, parsed)
+                payload = result.model_dump_json()
+                span.set_attribute("tool.ok", True)
+                span.set_attribute("tool.result_chars", len(payload))
+                return payload
         except Exception as error:
             logger.warning(
                 "tool %s failed; returning error to model: %s: %s",

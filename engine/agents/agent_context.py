@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from engine.agents.compactor import compact
 from engine.agents.prompt_templates import render_root_system_prompt
 from engine.model_config import ModelConfig
 from engine.models.messages import AgentMessage
+from engine.telemetry.spans import engine_span
 
 if TYPE_CHECKING:
     from engine.code.code_repo import CodeRepo
@@ -17,6 +19,12 @@ if TYPE_CHECKING:
     from engine.git.git_repo import GitRepo
 
 logger = logging.getLogger(__name__)
+
+# Parallel in-flight compaction calls. Matches the default for
+# ``maximum_parallel_subagents``: enough to collapse the serial chain, low
+# enough that a big compaction pass doesn't trip provider rate limits and
+# hand the latency back as retry backoff.
+COMPACTION_CONCURRENCY = 4
 
 
 class AgentContext:
@@ -184,22 +192,89 @@ class AgentContext:
             cutoff = len(tool_groups) - self.tool_call_compaction_keep_last_turns
             units.extend(tool_groups[:cutoff])
 
-        for unit in units:
-            await self._compact_unit(unit, client)
+        if not units:
+            return
 
-    async def _compact_unit(self, indices: list[int], client: AsyncOpenAI) -> None:
+        # Units are independent: each summarizes a disjoint set of item indices
+        # and commits only its own. Awaiting them one at a time made compaction
+        # cost the SUM of every unit's LLM round-trip, at the end of every agent
+        # execution — root and each subagent.
+        #
+        # One semaphore, shared by every unit and held around the individual
+        # `compact` calls. Bounding units instead would not actually bound
+        # anything: a tool-turn unit holds several items, so per-unit fan-out
+        # would peak at units x unit_size in-flight calls. The thing worth
+        # limiting is concurrent requests to the provider, so that is what the
+        # limit counts.
+        #
+        # The bound is per agent execution, not global: root and each subagent
+        # build their own AgentContext, so several finishing at once each get
+        # their own allowance.
+        semaphore = asyncio.Semaphore(COMPACTION_CONCURRENCY)
+        with engine_span(
+            "halo.compaction",
+            **{
+                "compaction.units": len(units),
+                "compaction.concurrency": COMPACTION_CONCURRENCY,
+            },
+        ):
+            # ``return_exceptions=True`` is load-bearing for two separate
+            # reasons. Compaction is an optimization that must never take down
+            # the run, and ``_compact_unit``'s own guard only covers a failing
+            # ``compact`` call — anything else it raised would escape to a
+            # caller with no handler. Worse, a bare gather does not cancel
+            # siblings when a child raises: the remaining units would keep
+            # running unsupervised and mutate ``self.items`` long after the
+            # turn had moved on. This waits for every unit either way.
+            outcomes = await asyncio.gather(
+                *(self._compact_unit(unit, client, semaphore) for unit in units),
+                return_exceptions=True,
+            )
+
+        for outcome in outcomes:
+            # Same split as inside a unit: process-teardown exceptions
+            # propagate, ordinary failures are logged and contained.
+            if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+                raise outcome
+            if isinstance(outcome, Exception):
+                logger.error(
+                    "Compaction unit raised unexpectedly; leaving it uncompacted",
+                    exc_info=outcome,
+                )
+
+    async def _compact_unit(
+        self, indices: list[int], client: AsyncOpenAI, semaphore: asyncio.Semaphore
+    ) -> None:
         """Summarize every item in one compaction unit, committing only if all
         succeed. A tool turn is a single unit, so it never renders half-compacted;
         any failed summary leaves the whole unit uncompacted for the next pass.
         """
-        summaries: list[tuple[int, AgentContextItem, str]] = []
-        for idx in indices:
-            item = self.items[idx]
-            try:
-                summary = await compact(
+        items = [(idx, self.items[idx]) for idx in indices]
+
+        # Items within a unit are independent summarization calls; only the
+        # commit below is atomic. `return_exceptions` keeps the all-or-nothing
+        # contract intact — one failure still leaves the WHOLE unit
+        # uncompacted — while paying one round-trip of latency instead of N.
+        async def _summarize(item: AgentContextItem) -> str:
+            async with semaphore:
+                return await compact(
                     client=client, compaction_model=self.compaction_model, item=item
                 )
-            except Exception:
+
+        results = await asyncio.gather(
+            *(_summarize(item) for _, item in items),
+            return_exceptions=True,
+        )
+
+        summaries: list[tuple[int, AgentContextItem, str]] = []
+        for (idx, item), result in zip(items, results, strict=True):
+            # Cancellation and the other non-``Exception`` BaseExceptions
+            # (KeyboardInterrupt, SystemExit) must propagate: they mean the
+            # process is going away, not that a summary failed. Only a real
+            # ``Exception`` is an ordinary compaction failure.
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                raise result
+            if isinstance(result, Exception):
                 # Compaction is an optimization — a failed summarization call
                 # (after its own retries) must never take down the run, and must
                 # not partially compact a tool turn. Leave the whole unit
@@ -207,10 +282,10 @@ class AgentContext:
                 logger.error(
                     "Compaction failed for unit containing item %s; leaving unit uncompacted",
                     item.item_id,
-                    exc_info=True,
+                    exc_info=result,
                 )
                 return
-            summaries.append((idx, item, summary))
+            summaries.append((idx, item, result))
         for idx, item, summary in summaries:
             self.items[idx] = item.model_copy(
                 update={"is_compacted": True, "compaction_summary": summary}
