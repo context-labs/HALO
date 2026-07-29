@@ -198,6 +198,7 @@ def _engine_config() -> EngineConfig:
 
 def _expected_system(cfg: EngineConfig) -> str:
     return render_root_system_prompt(
+        maximum_turns=cfg.root_agent.maximum_turns,
         maximum_depth=cfg.maximum_depth,
         maximum_parallel_subagents=cfg.maximum_parallel_subagents,
         dataset_context=cfg.dataset_context,

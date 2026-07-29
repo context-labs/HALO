@@ -31,6 +31,7 @@ def _git_repo(tmp_path: Path) -> GitRepo:
 
 def test_root_prompt_includes_final_answer_contract_system_prompt_and_caps() -> None:
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -46,6 +47,7 @@ def test_root_prompt_includes_final_answer_contract_system_prompt_and_caps() -> 
 
 def test_root_prompt_omits_code_section_without_repo() -> None:
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -58,6 +60,7 @@ def test_root_prompt_omits_code_section_without_repo() -> None:
 def test_root_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
     repo = _code_repo(tmp_path)
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -69,6 +72,7 @@ def test_root_prompt_includes_code_section_with_repo(tmp_path: Path) -> None:
 
 def test_root_prompt_omits_git_section_without_repo() -> None:
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -81,6 +85,7 @@ def test_root_prompt_omits_git_section_without_repo() -> None:
 def test_root_prompt_includes_git_section_with_repo(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -142,6 +147,7 @@ def test_compaction_and_synthesis_prompts_are_strings() -> None:
 
 def test_root_prompt_omits_dataset_context_when_unset() -> None:
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=None,
@@ -154,6 +160,7 @@ def test_root_prompt_omits_dataset_context_when_unset() -> None:
 def test_root_prompt_includes_dataset_context_section() -> None:
     context = "Each trace is one API request/response pair; payloads live in `input.value`."
     text = render_root_system_prompt(
+        maximum_turns=20,
         maximum_depth=2,
         maximum_parallel_subagents=4,
         dataset_context=context,
@@ -178,3 +185,22 @@ def test_subagent_prompt_includes_dataset_context_section() -> None:
     assert DATASET_CONTEXT_PROMPT_SECTION_TEMPLATE.format(dataset_context=context) in text
     assert SYSTEM_PROMPT in text
     assert "depth=1" in text
+
+
+def test_root_prompt_states_the_turn_budget() -> None:
+    """The model cannot budget a limit it has never been told.
+
+    Wandering past the cap forfeits the whole run's spend (see the
+    max-turns salvage), so the budget and the finish-early instruction
+    belong in the prompt, rendered from the same config the engine
+    enforces.
+    """
+    rendered = render_root_system_prompt(
+        maximum_turns=17,
+        maximum_depth=1,
+        maximum_parallel_subagents=2,
+        dataset_context=None,
+        code_repo=None,
+        git_repo=None,
+    )
+    assert "hard budget of 17 turns" in rendered
