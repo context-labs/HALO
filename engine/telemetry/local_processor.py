@@ -146,6 +146,7 @@ def span_to_otlp_line(
             "inference.llm.input_tokens": projection.get("input_tokens"),
             "inference.llm.output_tokens": projection.get("output_tokens"),
             "inference.llm.cached_input_tokens": projection.get("cached_input_tokens"),
+            "inference.llm.reasoning_output_tokens": projection.get("reasoning_output_tokens"),
             "inference.llm.cost.total": projection.get(
                 "cost_total"
             ),  # we don't know cost client-side
@@ -223,6 +224,17 @@ def _cached_input_tokens(usage: Mapping[str, Any]) -> int | None:
     return _int(details.get("cached_tokens"))
 
 
+def _reasoning_output_tokens(usage: Mapping[str, Any]) -> int | None:
+    """Reasoning-token count from either API surface's usage details.
+
+    Reasoning tokens are billed as output and scale with the requested
+    ``reasoning_effort``; without this the exported counts could not show
+    what an effort setting actually costs.
+    """
+    details = usage.get("output_tokens_details") or usage.get("completion_tokens_details") or {}
+    return _int(details.get("reasoning_tokens"))
+
+
 def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     model = d.get("model")
     usage = d.get("usage") or {}
@@ -242,6 +254,7 @@ def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, A
         ),
         "llm.token_count.total": _int(usage.get("total_tokens")),
         "llm.token_count.prompt_cached": _cached_input_tokens(usage),
+        "llm.token_count.completion_reasoning": _reasoning_output_tokens(usage),
     }
 
     # Expand input/output into the flat OpenInference .N.message.* keys so
@@ -255,6 +268,7 @@ def _generation_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, A
         "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
         "cached_input_tokens": _cached_input_tokens(usage),
+        "reasoning_output_tokens": _reasoning_output_tokens(usage),
     }
     return _drop_none(attrs), projection
 
@@ -274,12 +288,14 @@ def _response_attrs(d: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         ),
         "llm.token_count.total": _int(usage.get("total_tokens")),
         "llm.token_count.prompt_cached": _cached_input_tokens(usage),
+        "llm.token_count.completion_reasoning": _reasoning_output_tokens(usage),
     }
     projection = {
         "llm_provider": "openai",
         "input_tokens": _int(usage.get("input_tokens") or usage.get("prompt_tokens")),
         "output_tokens": _int(usage.get("output_tokens") or usage.get("completion_tokens")),
         "cached_input_tokens": _cached_input_tokens(usage),
+        "reasoning_output_tokens": _reasoning_output_tokens(usage),
     }
     return _drop_none(attrs), projection
 
