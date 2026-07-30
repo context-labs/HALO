@@ -14,6 +14,7 @@ from engine.traces.models.trace_index_models import TraceIndexRow
 if TYPE_CHECKING:
     from engine.traces.models.trace_query_models import (
         DatasetOverview,
+        ErrorTaxonomyGroup,
         SpanMatchRecord,
         SpanSearchResult,
         TraceCountResult,

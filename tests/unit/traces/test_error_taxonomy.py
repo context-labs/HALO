@@ -38,8 +38,7 @@ def test_taxonomy_span_totals_match_overview_error_count() -> None:
     overview = _store().get_overview(TraceFilters())
 
     assert (
-        sum(g.error_span_count for g in overview.error_taxonomy)
-        == overview.otel_error_span_count
+        sum(g.error_span_count for g in overview.error_taxonomy) == overview.otel_error_span_count
     )
 
 
