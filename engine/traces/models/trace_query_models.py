@@ -170,6 +170,22 @@ class TraceView(BaseModel):
     oversized: OversizedTraceSummary | None = None
 
 
+class ErrorTaxonomyGroup(BaseModel):
+    """One (span_name, status_message) error signature over the filtered subset.
+
+    Pre-aggregated so the agent verifies and narrates failure modes instead of
+    rediscovering them with dozens of count_traces/search calls.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    span_name: str
+    status_message: str
+    error_span_count: int
+    trace_count: int
+    example_trace_ids: list[str]
+
+
 class DatasetOverview(BaseModel):
     """Whole-dataset rollup over a filtered subset: counts, time bounds, distinct dims, totals.
 
@@ -195,6 +211,16 @@ class DatasetOverview(BaseModel):
     project_id_mismatch_count: int = Field(default=0, ge=0)
     otel_error_span_count: int = Field(default=0, ge=0)
     tool_error_span_count: int = Field(default=0, ge=0)
+    error_taxonomy: list[ErrorTaxonomyGroup] = Field(
+        default_factory=list,
+        description=(
+            "Top error signatures grouped by (span_name, status_message), "
+            "largest first, with distinct-trace counts and example trace ids. "
+            "Use these groups as the starting hypothesis set for failure-mode "
+            "analysis; verify with view_trace on the examples instead of "
+            "re-deriving the grouping."
+        ),
+    )
     total_input_tokens: int
     total_output_tokens: int
     raw_jsonl_bytes: int = Field(ge=0)

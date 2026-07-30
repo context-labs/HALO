@@ -176,6 +176,12 @@ def _build_match_record(
     )
 
 
+_TAXONOMY_MAX_ERROR_TRACES = 2_000
+_TAXONOMY_MESSAGE_CHARS = 200
+_TAXONOMY_TOP_GROUPS = 20
+_TAXONOMY_EXAMPLE_TRACE_IDS = 3
+
+
 class TraceStore:
     """Pure read/query/render API over built indexes plus the canonical JSONL file(s).
 
@@ -196,6 +202,7 @@ class TraceStore:
         ]
         self._rows = rows
         self._rows_by_id: dict[str, TraceIndexRow] = {r.trace_id: r for r in rows}
+        self._taxonomy_cache: dict[int, list] = {}
         self._path_by_trace_id: dict[str, Path] = {r.trace_id: trace_path for r in rows}
 
     @classmethod
@@ -458,6 +465,47 @@ class TraceStore:
 
         return TraceCountResult(total=len(self._apply_filters(filters)))
 
+    def _error_taxonomy(self, rows: list["TraceIndexRow"]) -> list["ErrorTaxonomyGroup"]:
+        """Group error spans in ``rows`` by (span_name, status_message).
+
+        Scans only traces flagged ``has_errors`` (bounded), reading spans from
+        disk once; the result is memoized by the trace-id set so repeated
+        overview calls stay cheap.
+        """
+        from engine.traces.models.trace_query_models import ErrorTaxonomyGroup
+
+        error_rows = [r for r in rows if r.has_errors][:_TAXONOMY_MAX_ERROR_TRACES]
+        cache_key = hash(frozenset(r.trace_id for r in error_rows))
+        cached = self._taxonomy_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        span_counts: Counter[tuple[str, str]] = Counter()
+        trace_ids: dict[tuple[str, str], set[str]] = {}
+        for row in error_rows:
+            with self._trace_file_for(row.trace_id).open("rb") as fh:
+                for offset, length in zip(row.byte_offsets, row.byte_lengths, strict=True):
+                    fh.seek(offset)
+                    span = SpanRecord.model_validate_json(fh.read(length))
+                    if span.status.code != "STATUS_CODE_ERROR":
+                        continue
+                    key = (span.name, (span.status.message or "")[:_TAXONOMY_MESSAGE_CHARS])
+                    span_counts[key] += 1
+                    trace_ids.setdefault(key, set()).add(row.trace_id)
+
+        taxonomy = [
+            ErrorTaxonomyGroup(
+                span_name=name,
+                status_message=message,
+                error_span_count=count,
+                trace_count=len(trace_ids[(name, message)]),
+                example_trace_ids=sorted(trace_ids[(name, message)])[:_TAXONOMY_EXAMPLE_TRACE_IDS],
+            )
+            for (name, message), count in span_counts.most_common(_TAXONOMY_TOP_GROUPS)
+        ]
+        self._taxonomy_cache[cache_key] = taxonomy
+        return taxonomy
+
     def get_overview(self, filters: "TraceFilters") -> "DatasetOverview":
         """Aggregate the filtered subset into a single DatasetOverview rollup row.
 
@@ -516,6 +564,7 @@ class TraceStore:
             total_output_tokens=sum(r.total_output_tokens for r in rows),
             raw_jsonl_bytes=sum(sum(r.byte_lengths) for r in rows),
             sample_trace_ids=[r.trace_id for r in rows[:_OVERVIEW_SAMPLE_TRACE_IDS]],
+            error_taxonomy=self._error_taxonomy(rows),
         )
 
     def search_trace(
