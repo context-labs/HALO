@@ -29,11 +29,20 @@ export const PROVIDER_MODEL_OPTIONS: Record<
     { label: "GPT-4o Mini", value: "gpt-4o-mini" },
     { label: "o4 Mini", value: "o4-mini" },
   ],
+  orcarouter: [
+    { label: "OrcaRouter Auto", value: "orcarouter/auto" },
+    { label: "GPT-5.5", value: "openai/gpt-5.5" },
+    { label: "GPT-5.4 Mini", value: "openai/gpt-5.4-mini" },
+    { label: "Claude Sonnet 4.6", value: "anthropic/claude-sonnet-4.6" },
+    { label: "Claude Haiku 4.5", value: "anthropic/claude-haiku-4.5" },
+    { label: "DeepSeek Chat", value: "deepseek/deepseek-chat" },
+  ],
 };
 
 export function defaultModelForProvider(providerType: HaloProviderType) {
   if (providerType === "openai") return "gpt-5.2";
   if (providerType === "anthropic_compat") return "claude-sonnet-4-5";
+  if (providerType === "orcarouter") return "openai/gpt-5.5";
   return "";
 }
 

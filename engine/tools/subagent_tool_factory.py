@@ -312,8 +312,14 @@ def _build_subagent_as_tool(
                 # never enter ``stream_engine_async`` and so never had
                 # a chance to set a process-global default in the first
                 # place. Per-call wiring keeps prod and tests symmetric.
+                # ``use_responses=False`` matches the root-agent path (see
+                # ``engine/main.py``): the SDK must target the chat-completions
+                # surface, not OpenAI's Responses API.
                 run_config = RunConfig(
-                    model_provider=OpenAIProvider(openai_client=run_state.openai_client),
+                    model_provider=OpenAIProvider(
+                        openai_client=run_state.openai_client,
+                        use_responses=False,
+                    ),
                     call_model_input_filter=TurnCounterInputFilter(
                         max_turns=engine_config.subagent.maximum_turns,
                         is_root=False,
