@@ -30,7 +30,7 @@ from inference_catalyst_tracing import AgentSpanHandle, agent_span
 from opentelemetry import trace
 
 _TRACER_NAME = "halo-engine"
-_SESSION_ID_ENV = "CATALYST_TRACING_CONVERSATION_ID"
+_SESSION_ID_ENV = "HALO_TRACING_CONVERSATION_ID"
 
 
 def _session_id_from_env() -> str | None:

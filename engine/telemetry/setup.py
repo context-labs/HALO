@@ -5,40 +5,39 @@ Callers pass ``telemetry=True`` to opt in.
 
 Routing rule (decided here, not by callers):
 
-* ``CATALYST_OTLP_TOKEN`` or ``INFERENCE_API_KEY`` is set → spans go to
-  inference.net over OTLP via ``inference_catalyst_tracing``. The token
-  is an inference.net API key under either name; ``CATALYST_OTLP_TOKEN``
-  wins when both are set so already-attributed environments keep their
-  attribution.
-* neither token is set → spans go to a local JSONL file at
+* ``INFERENCE_API_KEY`` is set → spans go to inference.net over OTLP
+  via ``inference_catalyst_tracing``. The token is an inference.net
+  API key.
+* no token is set → spans go to a local JSONL file at
   ``$HALO_TELEMETRY_PATH`` (default ``./halo-telemetry-{run_id}.jsonl``)
   via ``InferenceOtlpFileProcessor``.
 
 Both backends carry a ``halo.run.id`` resource attribute so traces can
 be filtered to a single HALO run server-side.
 
-Catalyst-deployed runs (HALO running inside a Catalyst-launched Modal
-sandbox) get extra identity stamped from the env vars Catalyst injects:
+Platform-deployed runs (HALO running inside an inference.net-launched
+Modal sandbox) get extra identity stamped from the env vars the HALO
+runtime injects:
 
-* ``CATALYST_TRACING_RUN_ID`` → consumed by ``resolve_run_id`` so a
+* ``HALO_TRACING_RUN_ID`` → consumed by ``resolve_run_id`` so a
   caller-injected run id flows through both backends. Falls back to a
   fresh ``uuid4().hex`` when unset.
-* Generic passthrough: **any** ``CATALYST_TRACING_<NAME>=<value>`` env
+* Generic passthrough: **any** ``HALO_TRACING_<NAME>=<value>`` env
   var becomes a ``halo.<name>=<value>`` resource attribute on every
   span, with ``<name>`` lowercased and ``_`` translated to ``.`` to
-  match the dotted convention the catalyst-side runtime uses
+  match the dotted convention the runtime side uses
   (``halo.run.id``, ``halo.team.id``, ``halo.project.id``, …; see
   ``halo/src/transport_client/otel_logger.py`` in the inference
-  monorepo). Lets Catalyst inject new metadata fields without HALO
-  releases.
+  monorepo). Lets the platform inject new metadata fields without
+  HALO releases.
 
 ``service.name`` is intentionally **constant** (`halo-engine`) — team /
 project / user grouping flows through the namespaced ``halo.*`` resource
 attributes above so a Catalyst dashboard filter is unambiguous and
 service.name stays a stable top-level identifier across all HALO runs.
 
-User-set ``CATALYST_SERVICE_NAME`` / ``CATALYST_SERVICE_VERSION`` always
-win over the defaults below.
+User-set ``INFERENCE_SERVICE_NAME`` / ``INFERENCE_SERVICE_VERSION``
+always win over the defaults below.
 """
 
 from __future__ import annotations
@@ -57,7 +56,7 @@ from inference_catalyst_tracing import setup as catalyst_setup
 
 from engine.telemetry.local_processor import attach_local_processor
 
-_CATALYST_TRACING_PREFIX = "CATALYST_TRACING_"
+_HALO_TRACING_PREFIX = "HALO_TRACING_"
 
 # A run id is interpolated into a local file path
 # (``halo-telemetry-{run_id}.jsonl``) and into otel resource attributes,
@@ -102,9 +101,9 @@ class TelemetryHandle:
 def resolve_run_id() -> str:
     """Return the HALO run id, honoring a Catalyst-injected override.
 
-    When HALO runs inside a Catalyst-launched sandbox, Catalyst sets
-    ``CATALYST_TRACING_RUN_ID`` so its own bookkeeping and HALO's
-    telemetry agree on the run identifier. Standalone runs get a fresh
+    When HALO runs inside a platform-launched sandbox, the runtime sets
+    ``HALO_TRACING_RUN_ID`` so its own bookkeeping and HALO's telemetry
+    agree on the run identifier. Standalone runs get a fresh
     ``uuid4().hex``.
 
     Validates the env value against ``_SAFE_RUN_ID_RE`` because the
@@ -114,13 +113,13 @@ def resolve_run_id() -> str:
     directory. Rejected values fall back to a fresh uuid and the
     rejection is logged at WARNING.
     """
-    raw = os.environ.get("CATALYST_TRACING_RUN_ID", "").strip()
+    raw = os.environ.get("HALO_TRACING_RUN_ID", "").strip()
     if not raw:
         return uuid.uuid4().hex
     if len(raw) <= _MAX_RUN_ID_LEN and _SAFE_RUN_ID_RE.match(raw):
         return raw
     _logger.warning(
-        "CATALYST_TRACING_RUN_ID rejected (length<=%d and charset %s required); "
+        "HALO_TRACING_RUN_ID rejected (length<=%d and charset %s required); "
         "falling back to a generated uuid.",
         _MAX_RUN_ID_LEN,
         _SAFE_RUN_ID_RE.pattern,
@@ -132,8 +131,7 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     """Initialize tracing. Returns None when ``enable`` is False.
 
     Routing rule:
-      - ``CATALYST_OTLP_TOKEN`` or ``INFERENCE_API_KEY`` set → OTLP via
-        ``inference_catalyst_tracing``
+      - ``INFERENCE_API_KEY`` set → OTLP via ``inference_catalyst_tracing``
       - otherwise → local JSONL via ``InferenceOtlpFileProcessor``
 
     Always clears the openai-agents SDK's default tracing processor list
@@ -143,13 +141,10 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     if not enable:
         return None
 
-    # The ingest token is an inference.net API key under either name.
-    # CATALYST_OTLP_TOKEN wins so runs launched with an explicit tracing
-    # token keep their attribution when INFERENCE_API_KEY is also set;
-    # INFERENCE_API_KEY is the going-forward name (INF-4801). Passed to
+    # The ingest token is an inference.net API key (INF-4801). Passed to
     # ``catalyst_setup`` explicitly so routing does not depend on which
     # env names the pinned SDK version reads.
-    token = os.environ.get("CATALYST_OTLP_TOKEN") or os.environ.get("INFERENCE_API_KEY")
+    token = os.environ.get("INFERENCE_API_KEY")
     if token:
         return _setup_catalyst(run_id=run_id, token=token)
     return _setup_local(run_id=run_id)
@@ -197,25 +192,25 @@ def _env_suffix_to_attr_name(suffix: str) -> str:
 
 
 def _collect_dynamic_halo_attrs(env: Mapping[str, str]) -> list[str]:
-    """Translate every ``CATALYST_TRACING_<NAME>=<value>`` env var into a
+    """Translate every ``HALO_TRACING_<NAME>=<value>`` env var into a
     ``halo.<name>=<value>`` token suitable for ``OTEL_RESOURCE_ATTRIBUTES``.
 
-    Convention: ``CATALYST_TRACING_TEAM_ID=team-7`` →
+    Convention: ``HALO_TRACING_TEAM_ID=team-7`` →
     ``halo.team.id=team-7`` (lowercased, ``_`` → ``.``). Empty /
-    whitespace-only values are skipped (Catalyst is more likely to
+    whitespace-only values are skipped (the runtime is more likely to
     leave a var as ``""`` than to actually unset it). Sorted iteration
     keeps ``OTEL_RESOURCE_ATTRIBUTES`` deterministic across runs.
     """
     out: list[str] = []
     for key in sorted(env):
-        if not key.startswith(_CATALYST_TRACING_PREFIX):
+        if not key.startswith(_HALO_TRACING_PREFIX):
             continue
         # halo.run.id is added explicitly from the resolved run_id (which
         # works even on standalone runs where this env is unset), so
         # skip the env var here to avoid emitting a duplicate token.
-        if key == "CATALYST_TRACING_RUN_ID":
+        if key == "HALO_TRACING_RUN_ID":
             continue
-        suffix = key.removeprefix(_CATALYST_TRACING_PREFIX)
+        suffix = key.removeprefix(_HALO_TRACING_PREFIX)
         if not suffix:
             continue
         value = env[key].strip()
@@ -228,18 +223,23 @@ def _collect_dynamic_halo_attrs(env: Mapping[str, str]) -> list[str]:
 def _setup_catalyst(*, run_id: str, token: str) -> TelemetryHandle:
     # service.name is intentionally constant. Team / project / user
     # grouping flows through the namespaced halo.* resource attributes
-    # produced by the generic CATALYST_TRACING_* passthrough below, so
+    # produced by the generic HALO_TRACING_* passthrough below, so
     # service.name stays a stable top-level identifier across all HALO
     # runs and dashboards filter by halo.team.id / halo.project.id /
-    # etc. for the secondary axes.
-    os.environ.setdefault("CATALYST_SERVICE_NAME", "halo-engine")
-    os.environ.setdefault("CATALYST_SERVICE_VERSION", _halo_engine_version())
+    # etc. for the secondary axes. setdefault keeps user overrides via
+    # the env names; the resolved values are ALSO passed to
+    # ``catalyst_setup`` explicitly so behavior does not depend on
+    # which env names the pinned SDK version reads.
+    service_name = os.environ.setdefault("INFERENCE_SERVICE_NAME", "halo-engine")
+    service_version = os.environ.setdefault(
+        "INFERENCE_SERVICE_VERSION", _halo_engine_version()
+    )
 
     existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
     # Drop any halo.* tokens we appended on a prior call so repeated
     # invocations in the same process (library usage / repeated setup
     # in tests) don't accumulate stale entries — including dynamic
-    # fields from CATALYST_TRACING_* env vars that may have been
+    # fields from HALO_TRACING_* env vars that may have been
     # unset between calls.
     kept = [t for t in existing.split(",") if t and not t.strip().startswith("halo.")]
     halo_attrs = [
@@ -249,7 +249,11 @@ def _setup_catalyst(*, run_id: str, token: str) -> TelemetryHandle:
     ]
     os.environ["OTEL_RESOURCE_ATTRIBUTES"] = ",".join([*kept, *halo_attrs])
 
-    backend = catalyst_setup(token=token)
+    backend = catalyst_setup(
+        token=token,
+        service_name=service_name,
+        service_version=service_version,
+    )
     return TelemetryHandle(backend=backend)
 
 

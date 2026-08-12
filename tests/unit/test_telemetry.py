@@ -14,20 +14,20 @@ from engine.telemetry import resolve_run_id, setup_telemetry
 
 @pytest.fixture(autouse=True)
 def _clear_catalyst_env(monkeypatch) -> None:
-    """Local-path tests rely on ``CATALYST_OTLP_TOKEN`` being unset; a stray
+    """Local-path tests rely on ``INFERENCE_API_KEY`` being unset; a stray
     value in a developer's shell would silently route them through
     ``_setup_catalyst``. Catalyst-path tests below re-set this themselves.
 
-    Also clears every ``CATALYST_TRACING_*`` env (the generic passthrough
+    Also clears every ``HALO_TRACING_*`` env (the generic passthrough
     in ``_setup_catalyst`` would otherwise turn any developer-set var
     into a ``halo.*`` resource attribute and break deterministic
     assertions), plus the explicit catalyst service config envs."""
-    monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
     monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
-    monkeypatch.delenv("CATALYST_SERVICE_NAME", raising=False)
-    monkeypatch.delenv("CATALYST_SERVICE_VERSION", raising=False)
+    monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
+    monkeypatch.delenv("INFERENCE_SERVICE_NAME", raising=False)
+    monkeypatch.delenv("INFERENCE_SERVICE_VERSION", raising=False)
     monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
-    for name in [k for k in os.environ if k.startswith("CATALYST_TRACING_")]:
+    for name in [k for k in os.environ if k.startswith("HALO_TRACING_")]:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -69,7 +69,7 @@ def test_halo_agent_span_passes_conversation_id_as_session_id(monkeypatch) -> No
         captured["session_id"] = session_id
         yield _FakeSpan()
 
-    monkeypatch.setenv("CATALYST_TRACING_CONVERSATION_ID", "  conv-123  ")
+    monkeypatch.setenv("HALO_TRACING_CONVERSATION_ID", "  conv-123  ")
     monkeypatch.setattr(tracing.trace, "get_tracer", lambda name: f"tracer:{name}")
     monkeypatch.setattr(tracing, "agent_span", _fake_agent_span)
 
@@ -283,9 +283,9 @@ def _install_stub_catalyst(monkeypatch) -> list[_StubCatalystBackend]:
 
 
 def test_setup_picks_catalyst_when_token_set(monkeypatch) -> None:
-    """When CATALYST_OTLP_TOKEN is set, setup_telemetry routes to the
+    """When INFERENCE_API_KEY is set, setup_telemetry routes to the
     Catalyst backend and does not touch the local file path."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.delenv("HALO_TELEMETRY_PATH", raising=False)
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
 
@@ -345,53 +345,37 @@ def test_setup_picks_catalyst_when_inference_api_key_set(monkeypatch) -> None:
     handle.shutdown()
 
 
-def test_catalyst_token_wins_over_inference_api_key(monkeypatch) -> None:
-    """CATALYST_OTLP_TOKEN keeps attribution when both names are set."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "catalyst-token")
-    monkeypatch.setenv("INFERENCE_API_KEY", "inference-key")
-    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
-
-    backends = _install_stub_catalyst(monkeypatch)
-
-    handle = setup_telemetry(enable=True, run_id="run-both")
-
-    assert handle is not None
-    assert len(backends) == 1
-    assert backends[0].token == "catalyst-token"
-    handle.shutdown()
-
-
 def test_catalyst_path_sets_service_name_default(monkeypatch) -> None:
-    """When the user has not set CATALYST_SERVICE_NAME, _setup_catalyst
+    """When the user has not set INFERENCE_SERVICE_NAME, _setup_catalyst
     defaults it to 'halo-engine' before calling setup()."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.delenv("CATALYST_SERVICE_NAME", raising=False)
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.delenv("INFERENCE_SERVICE_NAME", raising=False)
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="run-default")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_NAME") == "halo-engine"
+    assert os.environ.get("INFERENCE_SERVICE_NAME") == "halo-engine"
     handle.shutdown()
 
 
 def test_catalyst_path_respects_user_service_name(monkeypatch) -> None:
-    """A user-set CATALYST_SERVICE_NAME must NOT be overwritten."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_SERVICE_NAME", "my-service")
+    """A user-set INFERENCE_SERVICE_NAME must NOT be overwritten."""
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("INFERENCE_SERVICE_NAME", "my-service")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="run-user")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_NAME") == "my-service"
+    assert os.environ.get("INFERENCE_SERVICE_NAME") == "my-service"
     handle.shutdown()
 
 
 def test_catalyst_path_stamps_halo_run_id(monkeypatch) -> None:
     """halo.run.id is appended to OTEL_RESOURCE_ATTRIBUTES; pre-existing
     attributes must be preserved."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=dev")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
@@ -408,7 +392,7 @@ def test_catalyst_path_stamps_halo_run_id(monkeypatch) -> None:
 def test_catalyst_path_replaces_prior_halo_run_id(monkeypatch) -> None:
     """Repeated calls to setup_telemetry in the same process must not
     accumulate stale halo.run.id entries in OTEL_RESOURCE_ATTRIBUTES."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=dev")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
@@ -428,7 +412,7 @@ def test_catalyst_path_replaces_prior_halo_run_id(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Catalyst-deployed identity: CATALYST_TRACING_* resource attribute
+# Catalyst-deployed identity: HALO_TRACING_* resource attribute
 # passthrough (lowercased + ``_`` → ``.``), halo.engine.version stamping,
 # constant service.name. Together these form the contract HALO presents
 # to the Catalyst-launched Modal sandbox for trace identity.
@@ -442,30 +426,30 @@ def _attr_tokens(name: str) -> list[str]:
 
 
 def test_catalyst_team_id_does_not_change_service_name(monkeypatch) -> None:
-    """Regression: an injected CATALYST_TRACING_TEAM_ID must NOT mutate
+    """Regression: an injected HALO_TRACING_TEAM_ID must NOT mutate
     service.name. Team / project / etc. grouping flows entirely through
     namespaced halo.* resource attributes (via the generic passthrough)
     so service.name stays a stable top-level identifier across all HALO
     runs."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "team-7")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "team-7")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="r")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_NAME") == "halo-engine"
+    assert os.environ.get("INFERENCE_SERVICE_NAME") == "halo-engine"
     handle.shutdown()
 
 
 def test_catalyst_team_id_stamps_resource_attribute(monkeypatch) -> None:
-    """CATALYST_TRACING_TEAM_ID lands as a namespaced halo.team.id
+    """HALO_TRACING_TEAM_ID lands as a namespaced halo.team.id
     resource attribute via the generic passthrough. Dotted convention
     matches the catalyst-side runtime
     (``halo/src/transport_client/otel_logger.py``) so dashboard
     filters work uniformly across runtime + engine emitters."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "team-7")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "team-7")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -476,16 +460,16 @@ def test_catalyst_team_id_stamps_resource_attribute(monkeypatch) -> None:
 
 
 def test_catalyst_no_team_id_omits_team_attribute(monkeypatch) -> None:
-    """Standalone runs (no CATALYST_TRACING_TEAM_ID) don't stamp a
+    """Standalone runs (no HALO_TRACING_TEAM_ID) don't stamp a
     halo.team.id attribute and service.name stays the constant
     'halo-engine'."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="r")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_NAME") == "halo-engine"
+    assert os.environ.get("INFERENCE_SERVICE_NAME") == "halo-engine"
     assert _attr_tokens("halo.team.id") == []
     handle.shutdown()
 
@@ -493,15 +477,15 @@ def test_catalyst_no_team_id_omits_team_attribute(monkeypatch) -> None:
 def test_catalyst_team_id_replaces_prior_attribute(monkeypatch) -> None:
     """Re-running setup with a different team_id must not accumulate
     stale halo.team.id tokens, mirroring the halo.run.id contract."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "team-aaa")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "team-aaa")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     h1 = setup_telemetry(enable=True, run_id="r1")
     assert h1 is not None
 
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "team-bbb")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "team-bbb")
     h2 = setup_telemetry(enable=True, run_id="r2")
     assert h2 is not None
 
@@ -513,7 +497,7 @@ def test_catalyst_team_id_replaces_prior_attribute(monkeypatch) -> None:
 def test_catalyst_path_stamps_engine_version(monkeypatch) -> None:
     """halo.engine.version is stamped from importlib.metadata so a
     Catalyst dashboard can split spans by HALO release for regressions."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     monkeypatch.setattr("engine.telemetry.setup._halo_engine_version", lambda: "9.9.9-test")
     _install_stub_catalyst(monkeypatch)
@@ -525,51 +509,51 @@ def test_catalyst_path_stamps_engine_version(monkeypatch) -> None:
 
 
 def test_catalyst_path_defaults_service_version(monkeypatch) -> None:
-    """CATALYST_SERVICE_VERSION defaults to the halo-engine package
+    """INFERENCE_SERVICE_VERSION defaults to the halo-engine package
     version when unset; a user-pinned value wins."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     monkeypatch.setattr("engine.telemetry.setup._halo_engine_version", lambda: "9.9.9-test")
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="r")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_VERSION") == "9.9.9-test"
+    assert os.environ.get("INFERENCE_SERVICE_VERSION") == "9.9.9-test"
     handle.shutdown()
 
 
 def test_catalyst_path_respects_user_service_version(monkeypatch) -> None:
-    """A user-pinned CATALYST_SERVICE_VERSION must not be overwritten."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_SERVICE_VERSION", "custom-version")
+    """A user-pinned INFERENCE_SERVICE_VERSION must not be overwritten."""
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("INFERENCE_SERVICE_VERSION", "custom-version")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     monkeypatch.setattr("engine.telemetry.setup._halo_engine_version", lambda: "9.9.9-test")
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="r")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_VERSION") == "custom-version"
+    assert os.environ.get("INFERENCE_SERVICE_VERSION") == "custom-version"
     handle.shutdown()
 
 
 def test_catalyst_team_id_blank_treated_as_unset(monkeypatch) -> None:
-    """A whitespace-only CATALYST_TRACING_TEAM_ID must NOT produce an
+    """A whitespace-only HALO_TRACING_TEAM_ID must NOT produce an
     empty halo.team.id token — Catalyst is likely to leave the var as
     empty string rather than unsetting it."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "   ")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "   ")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="r")
     assert handle is not None
-    assert os.environ.get("CATALYST_SERVICE_NAME") == "halo-engine"
+    assert os.environ.get("INFERENCE_SERVICE_NAME") == "halo-engine"
     assert _attr_tokens("halo.team.id") == []
     handle.shutdown()
 
 
 # ---------------------------------------------------------------------------
-# resolve_run_id: caller-injectable run id via CATALYST_TRACING_RUN_ID.
+# resolve_run_id: caller-injectable run id via HALO_TRACING_RUN_ID.
 # ---------------------------------------------------------------------------
 
 
@@ -581,34 +565,34 @@ def test_resolve_run_id_returns_uuid_when_env_unset() -> None:
 
 
 def test_resolve_run_id_honors_env_override(monkeypatch) -> None:
-    """CATALYST_TRACING_RUN_ID set → returned verbatim so Catalyst's
+    """HALO_TRACING_RUN_ID set → returned verbatim so Catalyst's
     bookkeeping and HALO's telemetry agree on the run identifier."""
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "catalyst-injected-run-42")
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", "catalyst-injected-run-42")
     assert resolve_run_id() == "catalyst-injected-run-42"
 
 
 def test_resolve_run_id_treats_empty_env_as_unset(monkeypatch) -> None:
     """An empty string is not a valid run id; fall back to a uuid so we
     never produce traces with run_id=''."""
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "")
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", "")
     rid = resolve_run_id()
     assert rid != ""
     assert len(rid) == 32
 
 
 # ---------------------------------------------------------------------------
-# Generic CATALYST_TRACING_* → halo.<name> resource attribute passthrough.
+# Generic HALO_TRACING_* → halo.<name> resource attribute passthrough.
 # Lets Catalyst inject arbitrary metadata fields without HALO code changes.
 # ---------------------------------------------------------------------------
 
 
 def test_catalyst_passthrough_unknown_env_becomes_halo_attr(monkeypatch) -> None:
-    """Any CATALYST_TRACING_<NAME> env (one HALO has never heard of)
+    """Any HALO_TRACING_<NAME> env (one HALO has never heard of)
     lands as halo.<name> on every span. This is the contract that lets
     Catalyst evolve its injected metadata without HALO releases."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "user-123")
-    monkeypatch.setenv("CATALYST_TRACING_DEPLOYMENT_ENV", "staging")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "user-123")
+    monkeypatch.setenv("HALO_TRACING_DEPLOYMENT_ENV", "staging")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -620,15 +604,15 @@ def test_catalyst_passthrough_unknown_env_becomes_halo_attr(monkeypatch) -> None
 
 
 def test_catalyst_passthrough_translates_underscores_to_dots(monkeypatch) -> None:
-    """CATALYST_TRACING_TEAM_ID → halo.team.id (lowercased + ``_`` →
+    """HALO_TRACING_TEAM_ID → halo.team.id (lowercased + ``_`` →
     ``.``). The dotted form matches what the catalyst-side runtime
     already emits for its known fields (``halo.run.id``,
     ``halo.team.id``, ``halo.project.id`` in
     ``halo/src/transport_client/otel_logger.py``) so dashboard filters
     work uniformly across both emitters."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_TEAM_ID", "team-7")
-    monkeypatch.setenv("CATALYST_TRACING_PROJECT_ID", "proj-9")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_TEAM_ID", "team-7")
+    monkeypatch.setenv("HALO_TRACING_PROJECT_ID", "proj-9")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -647,9 +631,9 @@ def test_catalyst_passthrough_translates_underscores_to_dots(monkeypatch) -> Non
 def test_catalyst_passthrough_skips_run_id_to_avoid_duplicate(monkeypatch) -> None:
     """halo.run.id has a canonical source (the resolved run_id passed
     into _setup_catalyst); the generic loop must skip
-    CATALYST_TRACING_RUN_ID so we don't emit two halo.run.id tokens."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "catalyst-run-1")
+    HALO_TRACING_RUN_ID so we don't emit two halo.run.id tokens."""
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", "catalyst-run-1")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -664,9 +648,9 @@ def test_catalyst_passthrough_skips_blank_values(monkeypatch) -> None:
     """A whitespace-only value is treated as unset (Catalyst is more
     likely to leave a var blank than to actually unset it). No empty
     halo.<name>= token should appear."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "   ")
-    monkeypatch.setenv("CATALYST_TRACING_PROJECT_ID", "")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "   ")
+    monkeypatch.setenv("HALO_TRACING_PROJECT_ID", "")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -682,8 +666,8 @@ def test_catalyst_passthrough_dropped_on_repeat_setup(monkeypatch) -> None:
     """A passthrough key that's no longer in the env on a later setup
     must NOT linger in OTEL_RESOURCE_ATTRIBUTES. Generalizes the same
     contract as halo.run.id replacement to dynamic fields."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "user-aaa")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "user-aaa")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -691,7 +675,7 @@ def test_catalyst_passthrough_dropped_on_repeat_setup(monkeypatch) -> None:
     assert h1 is not None
     assert _attr_tokens("halo.user.id") == ["halo.user.id=user-aaa"]
 
-    monkeypatch.delenv("CATALYST_TRACING_USER_ID", raising=False)
+    monkeypatch.delenv("HALO_TRACING_USER_ID", raising=False)
     h2 = setup_telemetry(enable=True, run_id="r2")
     assert h2 is not None
     assert _attr_tokens("halo.user.id") == []
@@ -704,12 +688,12 @@ def test_catalyst_passthrough_preserves_non_halo_resource_attrs(monkeypatch) -> 
     """Pre-existing non-halo OTEL_RESOURCE_ATTRIBUTES tokens (e.g. a
     user-set deployment.environment from another tool) must survive the
     halo.* cleanup pass."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
     monkeypatch.setenv(
         "OTEL_RESOURCE_ATTRIBUTES",
         "deployment.environment=dev,team.owner=infra",
     )
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "user-1")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "user-1")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -726,10 +710,10 @@ def test_catalyst_passthrough_emits_deterministic_order(monkeypatch) -> None:
     """The generic-passthrough segment of OTEL_RESOURCE_ATTRIBUTES is
     emitted in sorted key order so the env value is stable across runs
     — important for tests and any consumer that string-compares."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_ZULU", "z")
-    monkeypatch.setenv("CATALYST_TRACING_ALPHA", "a")
-    monkeypatch.setenv("CATALYST_TRACING_MIKE", "m")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_ZULU", "z")
+    monkeypatch.setenv("HALO_TRACING_ALPHA", "a")
+    monkeypatch.setenv("HALO_TRACING_MIKE", "m")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -765,17 +749,17 @@ def test_catalyst_passthrough_emits_deterministic_order(monkeypatch) -> None:
 def test_resolve_run_id_rejects_unsafe_values_and_falls_back_to_uuid(
     monkeypatch, caplog, bad_value
 ) -> None:
-    """Unsafe CATALYST_TRACING_RUN_ID values (path traversal, control
+    """Unsafe HALO_TRACING_RUN_ID values (path traversal, control
     chars, oversized) must fall back to a fresh uuid so the value
     can't escape its intended use as a filename / attribute fragment.
     A WARNING is logged so the rejection isn't silent."""
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", bad_value)
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", bad_value)
     with caplog.at_level(logging.WARNING, logger="engine.telemetry.setup"):
         rid = resolve_run_id()
     assert rid != bad_value
     assert len(rid) == 32
     assert all(c in "0123456789abcdef" for c in rid)
-    assert "CATALYST_TRACING_RUN_ID rejected" in caplog.text
+    assert "HALO_TRACING_RUN_ID rejected" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -793,7 +777,7 @@ def test_resolve_run_id_accepts_safe_values(monkeypatch, good_value) -> None:
     """Values within the safe charset (alphanumerics, ``-_.``) and length
     cap pass through untouched. This is the contract for any caller
     (Catalyst, CI, manual smoke tests) injecting a run id."""
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", good_value)
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", good_value)
     assert resolve_run_id() == good_value
 
 
@@ -801,7 +785,7 @@ def test_resolve_run_id_strips_whitespace_before_validating(monkeypatch) -> None
     """Surrounding whitespace is treated as a leading/trailing accident
     rather than as part of the id; the trimmed value is what's
     validated. Matches how blank values are handled."""
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "  run-42  ")
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", "  run-42  ")
     assert resolve_run_id() == "run-42"
 
 
@@ -812,8 +796,8 @@ def test_catalyst_passthrough_value_with_comma_does_not_inject_attributes(
     sibling attribute into OTEL_RESOURCE_ATTRIBUTES. The value is
     percent-encoded on emit; the OTel resource detector decodes it
     losslessly so the attribute value carries the original literal."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "legit,injected.key=evil")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "legit,injected.key=evil")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -839,8 +823,8 @@ def test_catalyst_passthrough_value_with_equals_only_does_not_inject(
     that, the OTel parser would still see only one token but treat
     the second ``=`` as part of an oversized value, which is the
     contract for OTel but worth pinning."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_USER_ID", "k=v")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_USER_ID", "k=v")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
@@ -859,12 +843,27 @@ def test_safe_run_id_value_is_not_over_encoded_in_resource_attrs(
     appear verbatim in halo.run.id — encoding kicks in only for
     reserved characters. Catches accidentally-aggressive encoding
     that would force operators to decode every value."""
-    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "test-token")
-    monkeypatch.setenv("CATALYST_TRACING_RUN_ID", "run-abc-123")
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-token")
+    monkeypatch.setenv("HALO_TRACING_RUN_ID", "run-abc-123")
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
     _install_stub_catalyst(monkeypatch)
 
     handle = setup_telemetry(enable=True, run_id="run-abc-123")
     assert handle is not None
     assert _attr_tokens("halo.run.id") == ["halo.run.id=run-abc-123"]
+    handle.shutdown()
+
+
+def test_legacy_catalyst_token_name_is_not_read(monkeypatch) -> None:
+    """CATALYST_OTLP_TOKEN was removed entirely (INF-4801): the engine is
+    launched by the platform runtime, which now injects INFERENCE_API_KEY,
+    so the legacy name alone must route to the LOCAL backend."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "legacy-token")
+    monkeypatch.delenv("HALO_TELEMETRY_PATH", raising=False)
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-legacy")
+    assert handle is not None
+    assert backends == [], "legacy CATALYST_OTLP_TOKEN must not route to hosted export"
     handle.shutdown()
