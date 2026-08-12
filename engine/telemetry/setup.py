@@ -231,9 +231,7 @@ def _setup_catalyst(*, run_id: str, token: str) -> TelemetryHandle:
     # ``catalyst_setup`` explicitly so behavior does not depend on
     # which env names the pinned SDK version reads.
     service_name = os.environ.setdefault("INFERENCE_SERVICE_NAME", "halo-engine")
-    service_version = os.environ.setdefault(
-        "INFERENCE_SERVICE_VERSION", _halo_engine_version()
-    )
+    service_version = os.environ.setdefault("INFERENCE_SERVICE_VERSION", _halo_engine_version())
 
     existing = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").strip()
     # Drop any halo.* tokens we appended on a prior call so repeated
