@@ -23,6 +23,7 @@ def _clear_catalyst_env(monkeypatch) -> None:
     into a ``halo.*`` resource attribute and break deterministic
     assertions), plus the explicit catalyst service config envs."""
     monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
+    monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
     monkeypatch.delenv("CATALYST_SERVICE_NAME", raising=False)
     monkeypatch.delenv("CATALYST_SERVICE_VERSION", raising=False)
     monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
@@ -273,6 +274,7 @@ def _install_stub_catalyst(monkeypatch) -> list[_StubCatalystBackend]:
         batching: str | None = None,
     ) -> _StubCatalystBackend:
         be = _StubCatalystBackend()
+        be.token = token
         backends.append(be)
         return be
 
@@ -324,6 +326,39 @@ def test_setup_picks_catalyst_when_token_set(monkeypatch) -> None:
 
     handle.shutdown()
     assert backends[0].shutdown_calls == 1
+
+
+def test_setup_picks_catalyst_when_inference_api_key_set(monkeypatch) -> None:
+    """INFERENCE_API_KEY alone routes to the Catalyst backend and the key
+    is forwarded to catalyst_setup() explicitly (INF-4801)."""
+    monkeypatch.setenv("INFERENCE_API_KEY", "inference-key")
+    monkeypatch.delenv("HALO_TELEMETRY_PATH", raising=False)
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-ik")
+
+    assert handle is not None
+    assert len(backends) == 1
+    assert backends[0].token == "inference-key"
+    handle.shutdown()
+
+
+def test_catalyst_token_wins_over_inference_api_key(monkeypatch) -> None:
+    """CATALYST_OTLP_TOKEN keeps attribution when both names are set."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "catalyst-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "inference-key")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-both")
+
+    assert handle is not None
+    assert len(backends) == 1
+    assert backends[0].token == "catalyst-token"
+    handle.shutdown()
 
 
 def test_catalyst_path_sets_service_name_default(monkeypatch) -> None:

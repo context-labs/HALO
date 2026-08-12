@@ -5,9 +5,12 @@ Callers pass ``telemetry=True`` to opt in.
 
 Routing rule (decided here, not by callers):
 
-* ``CATALYST_OTLP_TOKEN`` is set → spans go to inference.net Catalyst
-  over OTLP via ``inference_catalyst_tracing``.
-* ``CATALYST_OTLP_TOKEN`` is unset → spans go to a local JSONL file at
+* ``CATALYST_OTLP_TOKEN`` or ``INFERENCE_API_KEY`` is set → spans go to
+  inference.net over OTLP via ``inference_catalyst_tracing``. The token
+  is an inference.net API key under either name; ``CATALYST_OTLP_TOKEN``
+  wins when both are set so already-attributed environments keep their
+  attribution.
+* neither token is set → spans go to a local JSONL file at
   ``$HALO_TELEMETRY_PATH`` (default ``./halo-telemetry-{run_id}.jsonl``)
   via ``InferenceOtlpFileProcessor``.
 
@@ -129,8 +132,9 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     """Initialize tracing. Returns None when ``enable`` is False.
 
     Routing rule:
-      - ``CATALYST_OTLP_TOKEN`` set → OTLP via ``inference_catalyst_tracing``
-      - otherwise                    → local JSONL via ``InferenceOtlpFileProcessor``
+      - ``CATALYST_OTLP_TOKEN`` or ``INFERENCE_API_KEY`` set → OTLP via
+        ``inference_catalyst_tracing``
+      - otherwise → local JSONL via ``InferenceOtlpFileProcessor``
 
     Always clears the openai-agents SDK's default tracing processor list
     so HALO's own LLM activity does not leak to the OpenAI dashboard.
@@ -139,8 +143,15 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     if not enable:
         return None
 
-    if os.environ.get("CATALYST_OTLP_TOKEN"):
-        return _setup_catalyst(run_id=run_id)
+    # The ingest token is an inference.net API key under either name.
+    # CATALYST_OTLP_TOKEN wins so runs launched with an explicit tracing
+    # token keep their attribution when INFERENCE_API_KEY is also set;
+    # INFERENCE_API_KEY is the going-forward name (INF-4801). Passed to
+    # ``catalyst_setup`` explicitly so routing does not depend on which
+    # env names the pinned SDK version reads.
+    token = os.environ.get("CATALYST_OTLP_TOKEN") or os.environ.get("INFERENCE_API_KEY")
+    if token:
+        return _setup_catalyst(run_id=run_id, token=token)
     return _setup_local(run_id=run_id)
 
 
@@ -214,7 +225,7 @@ def _collect_dynamic_halo_attrs(env: Mapping[str, str]) -> list[str]:
     return out
 
 
-def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
+def _setup_catalyst(*, run_id: str, token: str) -> TelemetryHandle:
     # service.name is intentionally constant. Team / project / user
     # grouping flows through the namespaced halo.* resource attributes
     # produced by the generic CATALYST_TRACING_* passthrough below, so
@@ -238,7 +249,7 @@ def _setup_catalyst(*, run_id: str) -> TelemetryHandle:
     ]
     os.environ["OTEL_RESOURCE_ATTRIBUTES"] = ",".join([*kept, *halo_attrs])
 
-    backend = catalyst_setup()
+    backend = catalyst_setup(token=token)
     return TelemetryHandle(backend=backend)
 
 

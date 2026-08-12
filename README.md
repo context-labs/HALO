@@ -220,16 +220,17 @@ HALO can emit OpenInference-shaped traces of its own LLM, tool, and agent activi
 halo TRACE_PATH --prompt "..." --telemetry
 ```
 
-When telemetry is enabled, `CATALYST_OTLP_TOKEN` uploads spans to inference.net Catalyst over OTLP. If it is unset, spans are written to a local JSONL file at `./halo-telemetry-{run_id}.jsonl` in the current working directory.
+When telemetry is enabled, setting `INFERENCE_API_KEY` (or the older `CATALYST_OTLP_TOKEN`, which wins when both are set) uploads spans to inference.net over OTLP. If neither is set, spans are written to a local JSONL file at `./halo-telemetry-{run_id}.jsonl` in the current working directory.
 
 | Var                       | Default                           | Purpose                                                                 |
 | ------------------------- | --------------------------------- | ----------------------------------------------------------------------- |
-| `CATALYST_OTLP_TOKEN`     | unset                             | If set, uploads to Catalyst over OTLP. If unset, writes JSONL locally   |
+| `INFERENCE_API_KEY`       | unset                             | inference.net API key. If set, uploads spans over OTLP                  |
+| `CATALYST_OTLP_TOKEN`     | unset                             | Older name for the ingest token; wins over `INFERENCE_API_KEY`          |
 | `CATALYST_OTLP_ENDPOINT`  | catalyst-tracing default          | OTLP endpoint base URL, for example `https://telemetry.inference.net`   |
 | `CATALYST_DEBUG`          | unset                             | Set to `1` to surface OTLP export errors                                |
 | `CATALYST_TRACING_RUN_ID` | unset                             | Uses this HALO run id instead of a generated uuid                       |
 | `CATALYST_TRACING_*`      | unset                             | Generic catalyst-tracing passthrough                                    |
-| `HALO_TELEMETRY_PATH`     | `./halo-telemetry-{run_id}.jsonl` | Local fallback file path. Only used when `CATALYST_OTLP_TOKEN` is unset |
+| `HALO_TELEMETRY_PATH`     | `./halo-telemetry-{run_id}.jsonl` | Local fallback file path. Only used when no ingest token is set         |
 
 We have provided a [simple demo](/demo/openai-agents-sdk-demo/) and an [AppWorld](#appworld) demo.
 
