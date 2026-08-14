@@ -32,7 +32,11 @@ export type FireTestSpansOptions = {
 export async function fireTestSpans(
   options: FireTestSpansOptions = {},
 ): Promise<FireTestSpansResult> {
-  const endpoint = options.endpoint ?? Bun.env.CATALYST_OTLP_ENDPOINT ?? DEFAULT_ENDPOINT;
+  const endpoint =
+    options.endpoint ??
+    Bun.env.CATALYST_OTLP_ENDPOINT ??
+    Bun.env.INFERENCE_OTLP_ENDPOINT ??
+    DEFAULT_ENDPOINT;
   const spanCount = options.spanCount ?? DEFAULT_SPAN_COUNT;
   const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;
   const traceId = randomHexId(16);
@@ -189,7 +193,9 @@ if (import.meta.main) {
     endpoint: stringFlag(
       args,
       "--endpoint",
-      Bun.env.CATALYST_OTLP_ENDPOINT ?? DEFAULT_ENDPOINT,
+      Bun.env.CATALYST_OTLP_ENDPOINT ??
+        Bun.env.INFERENCE_OTLP_ENDPOINT ??
+        DEFAULT_ENDPOINT,
     ),
     spanCount: numberFlag(args, "--count", DEFAULT_SPAN_COUNT),
   });

@@ -246,8 +246,8 @@ def _run(
         "--telemetry",
         help=(
             "Emit OpenInference traces of HALO's own LLM/tool/agent "
-            "activity. If CATALYST_OTLP_TOKEN is set, spans go to "
-            "inference.net Catalyst; otherwise to "
+            "activity. If INFERENCE_API_KEY is set, spans go to "
+            "inference.net; otherwise to "
             "$HALO_TELEMETRY_PATH (default: ./halo-telemetry-{run_id}.jsonl)."
         ),
     ),

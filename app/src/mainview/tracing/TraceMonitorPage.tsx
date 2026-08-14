@@ -418,7 +418,7 @@ export function TraceMonitorPage({
     ? traceFacetsQuery.data?.categorical
     : sessionFacetsQuery.data?.categorical;
   const ingestUrl = infoQuery.data?.ingestUrl ?? DEFAULT_INGEST_URL;
-  const catalystEnvLine = `CATALYST_OTLP_ENDPOINT=${ingestUrl}`;
+  const inferenceEnvLine = `INFERENCE_OTLP_ENDPOINT=${ingestUrl}`;
   const isTelemetryEmpty =
     Boolean(infoQuery.data) &&
     infoQuery.data?.traceCount === 0 &&
@@ -696,7 +696,7 @@ export function TraceMonitorPage({
         open={demoDialogOpen}
       />
       <LocalAgentSetupDialog
-        envLine={catalystEnvLine}
+        envLine={inferenceEnvLine}
         ingestUrl={ingestUrl}
         onOpenChange={setLocalAgentSetupOpen}
         open={localAgentSetupOpen}

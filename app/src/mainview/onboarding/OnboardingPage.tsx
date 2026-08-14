@@ -130,7 +130,7 @@ function ImportStep({
   const infoQuery = trpc.telemetry.info.useQuery();
 
   const ingestUrl = infoQuery.data?.ingestUrl ?? DEFAULT_INGEST_URL;
-  const catalystEnvLine = `CATALYST_OTLP_ENDPOINT=${ingestUrl}`;
+  const inferenceEnvLine = `INFERENCE_OTLP_ENDPOINT=${ingestUrl}`;
 
   const refreshTelemetry = useCallback(() => {
     void infoQuery.refetch();
@@ -205,7 +205,7 @@ function ImportStep({
         open={demoDialogOpen}
       />
       <LocalAgentSetupDialog
-        envLine={catalystEnvLine}
+        envLine={inferenceEnvLine}
         ingestUrl={ingestUrl}
         onOpenChange={setLocalAgentSetupOpen}
         open={localAgentSetupOpen}

@@ -1,6 +1,7 @@
 """Local-file JSONL processor for HALO engine telemetry.
 
-Used when telemetry is opted in but ``CATALYST_OTLP_TOKEN`` is unset.
+Used when telemetry is opted in but no ingest token
+(``INFERENCE_API_KEY``) is set.
 Writes one JSONL line per span in the inference.net OTLP-equivalent shape
 that HALO itself ingests, so dogfooded traces can be loaded back into
 HALO. Public entrypoint is ``attach_local_processor`` — the engine's

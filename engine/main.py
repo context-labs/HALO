@@ -100,8 +100,9 @@ async def stream_engine_async(
     subagents are interleaved with the root in monotonic ``sequence`` order.
 
     Set ``telemetry=True`` to emit OpenInference traces of HALO's own LLM /
-    tool / agent activity. Routing: if ``CATALYST_OTLP_TOKEN`` is set, spans
-    are uploaded to inference.net Catalyst over OTLP. Otherwise spans are
+    tool / agent activity. Routing: if ``INFERENCE_API_KEY`` is set,
+    spans are uploaded to inference.net over
+    OTLP. Otherwise spans are
     written to the local JSONL file at ``$HALO_TELEMETRY_PATH`` (default:
     ``./halo-telemetry-{run_id}.jsonl``). Off by default — no overhead, no
     file writes, no env var reads when ``telemetry=False``.
