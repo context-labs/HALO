@@ -195,8 +195,15 @@ async def stream_engine_async(
                     # ``subagent_tool_factory``, so test paths that invoke
                     # ``call_subagent.on_invoke_tool`` directly (bypassing
                     # ``stream_engine_async``) stay symmetric with production.
+                    #
+                    # ``use_responses=False`` pins the SDK to the
+                    # OpenAI-compatible chat-completions surface that HALO
+                    # targets (see ``ModelProviderConfig``). The SDK's default
+                    # Responses API (``/v1/responses``) is OpenAI-only and 404s
+                    # on every other endpoint — OpenRouter, OrcaRouter,
+                    # Anthropic's compat layer, vLLM, Together, Groq, etc.
                     run_config = RunConfig(
-                        model_provider=OpenAIProvider(openai_client=client),
+                        model_provider=OpenAIProvider(openai_client=client, use_responses=False),
                         call_model_input_filter=TurnCounterInputFilter(
                             max_turns=engine_config.root_agent.maximum_turns,
                             is_root=True,

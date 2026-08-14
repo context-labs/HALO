@@ -5,6 +5,7 @@ export const HALO_RUN_TARGET_TYPES = ["trace_group", "session_group"] as const;
 export const HALO_PROVIDER_TYPES = [
   "openai",
   "anthropic_compat",
+  "orcarouter",
   "custom",
 ] as const;
 export const HALO_RUN_STATUSES = [

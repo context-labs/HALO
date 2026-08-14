@@ -5,12 +5,13 @@ import { FilterSelect } from "~/components/FilterSelect";
 import { Button, Dialog, Input, toast } from "~/lib/ui";
 import { trpc } from "~/trpc";
 
-type ProviderType = "openai" | "anthropic_compat" | "custom";
+type ProviderType = "openai" | "anthropic_compat" | "orcarouter" | "custom";
 
 const PROVIDER_BASE_URL_HINTS: Record<ProviderType, string> = {
   anthropic_compat: "Anthropic /v1 endpoint.",
   custom: "OpenAI-compatible /v1 endpoint.",
   openai: "OpenAI /v1 endpoint.",
+  orcarouter: "OrcaRouter /v1 endpoint.",
 };
 
 export function ModelProviderDialog({
@@ -94,6 +95,9 @@ export function ModelProviderDialog({
             } else if (next === "anthropic_compat") {
               setName("Anthropic");
               setBaseUrl("https://api.anthropic.com/v1");
+            } else if (next === "orcarouter") {
+              setName("OrcaRouter");
+              setBaseUrl("https://api.orcarouter.ai/v1");
             } else {
               setName("Custom provider");
               setBaseUrl("");
@@ -102,6 +106,7 @@ export function ModelProviderDialog({
           options={[
             { label: "OpenAI", value: "openai" },
             { label: "Anthropic", value: "anthropic_compat" },
+            { label: "OrcaRouter", value: "orcarouter" },
             { label: "Custom OpenAI-compatible", value: "custom" },
           ]}
           triggerClassName="text-xs"

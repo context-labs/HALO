@@ -170,8 +170,10 @@ halo --help
 
 ```bash
 export OPENAI_API_KEY=...
-# Optional: point HALO at another OpenAI-compatible provider.
+# Optional: point HALO at another OpenAI-compatible provider, e.g. OpenRouter…
 export OPENAI_BASE_URL=https://openrouter.ai/api/v1
+# …or OrcaRouter, an OpenAI-compatible model-routing gateway.
+export OPENAI_BASE_URL=https://api.orcarouter.ai/v1
 
 halo path_to_your_traces.jsonl -p "Diagnose errors you find and suggest fixes"
 ```
