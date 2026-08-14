@@ -24,6 +24,7 @@ def _clear_catalyst_env(monkeypatch) -> None:
     assertions), plus the explicit catalyst service config envs."""
     monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
     monkeypatch.delenv("CATALYST_OTLP_TOKEN", raising=False)
+    monkeypatch.delenv("OTLP_INGEST_TOKEN", raising=False)
     monkeypatch.delenv("INFERENCE_SERVICE_NAME", raising=False)
     monkeypatch.delenv("INFERENCE_SERVICE_VERSION", raising=False)
     monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
@@ -854,10 +855,9 @@ def test_safe_run_id_value_is_not_over_encoded_in_resource_attrs(
     handle.shutdown()
 
 
-def test_legacy_catalyst_token_name_is_not_read(monkeypatch) -> None:
-    """CATALYST_OTLP_TOKEN was removed entirely (INF-4801): the engine is
-    launched by the platform runtime, which now injects INFERENCE_API_KEY,
-    so the legacy name alone must route to the LOCAL backend."""
+def test_legacy_catalyst_token_name_routes_to_hosted(monkeypatch) -> None:
+    """Standalone halo-engine is a customer entrypoint (INF-4801): the
+    undocumented legacy token name still enables hosted export."""
     monkeypatch.setenv("CATALYST_OTLP_TOKEN", "legacy-token")
     monkeypatch.delenv("HALO_TELEMETRY_PATH", raising=False)
     monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
@@ -865,5 +865,52 @@ def test_legacy_catalyst_token_name_is_not_read(monkeypatch) -> None:
 
     handle = setup_telemetry(enable=True, run_id="run-legacy")
     assert handle is not None
-    assert backends == [], "legacy CATALYST_OTLP_TOKEN must not route to hosted export"
+    assert len(backends) == 1
+    assert backends[0].token == "legacy-token"
+    handle.shutdown()
+
+
+def test_legacy_catalyst_token_name_wins_over_inference_api_key(
+    monkeypatch,
+) -> None:
+    """Old-name-wins: a leftover CATALYST_OTLP_TOKEN must not be
+    overwritten by INFERENCE_API_KEY (often a different team)."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "legacy-token")
+    monkeypatch.setenv("INFERENCE_API_KEY", "inference-key")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-both")
+    assert handle is not None
+    assert len(backends) == 1
+    assert backends[0].token == "legacy-token"
+    handle.shutdown()
+
+
+def test_empty_legacy_token_falls_through_to_inference_api_key(
+    monkeypatch,
+) -> None:
+    """A blank leftover CATALYST_OTLP_TOKEN must not block the new name."""
+    monkeypatch.setenv("CATALYST_OTLP_TOKEN", "   ")
+    monkeypatch.setenv("INFERENCE_API_KEY", "inference-key")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-empty-legacy")
+    assert handle is not None
+    assert len(backends) == 1
+    assert backends[0].token == "inference-key"
+    handle.shutdown()
+
+
+def test_otlp_ingest_token_name_routes_to_hosted(monkeypatch) -> None:
+    """OTLP_INGEST_TOKEN is the other undocumented SDK legacy name."""
+    monkeypatch.setenv("OTLP_INGEST_TOKEN", "otlp-token")
+    monkeypatch.setattr("engine.telemetry.setup.set_trace_processors", lambda procs: None)
+    backends = _install_stub_catalyst(monkeypatch)
+
+    handle = setup_telemetry(enable=True, run_id="run-otlp")
+    assert handle is not None
+    assert len(backends) == 1
+    assert backends[0].token == "otlp-token"
     handle.shutdown()

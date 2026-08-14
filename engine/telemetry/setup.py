@@ -5,9 +5,11 @@ Callers pass ``telemetry=True`` to opt in.
 
 Routing rule (decided here, not by callers):
 
-* ``INFERENCE_API_KEY`` is set → spans go to inference.net over OTLP
-  via ``inference_catalyst_tracing``. The token is an inference.net
-  API key.
+* an ingest token is set → spans go to inference.net over OTLP
+  via ``inference_catalyst_tracing``. The documented name is
+  ``INFERENCE_API_KEY`` (an inference.net API key). Older names are
+  still accepted at this boundary because standalone ``halo-engine``
+  is a customer entrypoint; they are not documented.
 * no token is set → spans go to a local JSONL file at
   ``$HALO_TELEMETRY_PATH`` (default ``./halo-telemetry-{run_id}.jsonl``)
   via ``InferenceOtlpFileProcessor``.
@@ -57,6 +59,17 @@ from inference_catalyst_tracing import setup as catalyst_setup
 from engine.telemetry.local_processor import attach_local_processor
 
 _HALO_TRACING_PREFIX = "HALO_TRACING_"
+
+# Documented ingest token plus undocumented legacy names. Order is
+# old-name-wins so a customer who already has both set (often under
+# different teams) does not silently re-attribute traces on upgrade.
+# Empty / whitespace values are skipped so a blank leftover cannot
+# block the next name.
+_INGEST_TOKEN_ENV_NAMES = (
+    "CATALYST_OTLP_TOKEN",
+    "OTLP_INGEST_TOKEN",
+    "INFERENCE_API_KEY",
+)
 
 # A run id is interpolated into a local file path
 # (``halo-telemetry-{run_id}.jsonl``) and into otel resource attributes,
@@ -131,7 +144,7 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     """Initialize tracing. Returns None when ``enable`` is False.
 
     Routing rule:
-      - ``INFERENCE_API_KEY`` set → OTLP via ``inference_catalyst_tracing``
+      - ingest token set → OTLP via ``inference_catalyst_tracing``
       - otherwise → local JSONL via ``InferenceOtlpFileProcessor``
 
     Always clears the openai-agents SDK's default tracing processor list
@@ -141,13 +154,31 @@ def setup_telemetry(*, enable: bool, run_id: str) -> TelemetryHandle | None:
     if not enable:
         return None
 
-    # The ingest token is an inference.net API key (INF-4801). Passed to
-    # ``catalyst_setup`` explicitly so routing does not depend on which
-    # env names the pinned SDK version reads.
-    token = os.environ.get("INFERENCE_API_KEY")
+    # Resolved here (not left to the SDK) because we pass ``token=``
+    # into ``catalyst_setup`` explicitly. That bypasses the SDK env
+    # chain, so this callsite *is* the customer-facing boundary.
+    token = _resolve_ingest_token()
     if token:
         return _setup_catalyst(run_id=run_id, token=token)
     return _setup_local(run_id=run_id)
+
+
+def _first_nonempty(*names: str) -> str | None:
+    """Return the first non-empty env value among ``names``.
+
+    Whitespace-only counts as unset so a blank leftover cannot block
+    a later fallback (matches the SDK ``firstNonEmpty`` / ``or`` rule).
+    """
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _resolve_ingest_token() -> str | None:
+    """Customer-boundary token read: undocumented legacy names win."""
+    return _first_nonempty(*_INGEST_TOKEN_ENV_NAMES)
 
 
 def _halo_engine_version() -> str:

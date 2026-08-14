@@ -190,7 +190,7 @@ curl -fsSL https://inference.net/halo/install.sh | sh
 Then launch HALO and send test spans:
 
 ```bash
-CATALYST_OTLP_ENDPOINT=http://127.0.0.1:8799/v1/traces bun run fire:test-spans
+INFERENCE_OTLP_ENDPOINT=http://127.0.0.1:8799/v1/traces bun run fire:test-spans
 ```
 
 ## Rollback

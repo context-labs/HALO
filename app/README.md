@@ -96,7 +96,7 @@ HALO engine install.
 Configure local agents to send OTLP traces here:
 
 ```bash
-export CATALYST_OTLP_ENDPOINT=http://127.0.0.1:8799/v1/traces
+export INFERENCE_OTLP_ENDPOINT=http://127.0.0.1:8799/v1/traces
 ```
 
 The current ingest endpoint supports:
@@ -222,7 +222,7 @@ Most development works without any `.env` file. These environment variables are 
 | `HALO_VIEW_URL` | `http://127.0.0.1:5173` in `bun run dev`; bundled `views://` in builds | Frontend URL ElectroBun should load. Useful when running a separate web dev server. |
 | `VITE_TRPC_HTTP_URL` | `http://127.0.0.1:8799/trpc` | Browser-side tRPC HTTP URL. |
 | `VITE_TRPC_WS_URL` | `ws://127.0.0.1:8800` | Browser-side tRPC WebSocket URL. |
-| `CATALYST_OTLP_ENDPOINT` | `http://127.0.0.1:8799/v1/traces` in helper scripts | OTLP endpoint used by local trace emitters and `fire:test-spans`. |
+| `INFERENCE_OTLP_ENDPOINT` | `http://127.0.0.1:8799/v1/traces` in helper scripts | OTLP endpoint used by local trace emitters and `fire:test-spans`. |
 
 Example with a temporary database:
 
