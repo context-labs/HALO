@@ -7,24 +7,38 @@ All previously known issues (wildcard CORS, unauthenticated tRPC, SSRF, credenti
 
 ---
 
-## Finding 1: Stored XSS via Mermaid Diagram Rendering
+## Finding 1: Stored XSS via Mermaid Diagram Rendering (securityLevel: "loose")
 
 **Severity:** HIGH
-**Location:** `app/src/mainview/lib/ui/components/custom/MermaidDiagram.tsx`, lines 215 and 366
+**Location:** `app/src/mainview/lib/ui/components/custom/MermaidDiagram.tsx`, lines 215 and 366; `app/src/mainview/lib/ui/utils/mermaidTheme.ts`, line 51
 
 **Description:**
-The `MermaidDiagram` component renders Mermaid-generated SVG output directly into the DOM using `dangerouslySetInnerHTML={{ __html: renderState.svg }}`. The `code` prop originates from HALO analysis run final answers (LLM-generated markdown), which are stored in the database as `final_answer` on `halo_runs`. An attacker who controls or poisons the LLM response (or directly writes to the database via the unauthenticated tRPC API) can inject a Mermaid code block that, when rendered by the Mermaid library, produces SVG containing embedded `<script>` tags or event handler attributes (`onload`, `onerror`, etc.).
+The `MermaidDiagram` component renders Mermaid-generated SVG output directly into the DOM using `dangerouslySetInnerHTML={{ __html: renderState.svg }}`. Critically, the Mermaid library is configured with `securityLevel: "loose"` in `mermaidTheme.ts` (line 51). With this setting, Mermaid explicitly enables:
+- **Click event handlers** (`click nodeId callback`) in diagram definitions, which generate inline `onclick` JavaScript in the SVG output
+- **HTML labels** that can contain arbitrary HTML elements
+
+The Mermaid library is initialized with a global configuration that persists across all `mermaid.render()` calls in the process. This setting enables Mermaid's `click` callback syntax and HTML label parsing, which produce SVG output containing inline `onclick` handlers and raw HTML elements.
+
+Currently, `MermaidDiagram` is only rendered in the gallery/demo page (`GalleryPage.tsx`) with hardcoded sample data — it is **not yet wired** into the HALO run report markdown renderer (`RunReportView.tsx`). However, the component is exported from the UI library (`lib/ui/index.ts`) and is clearly designed to render LLM-generated mermaid diagram code blocks from run answers. The `securityLevel: "loose"` setting is a latent HIGH-severity issue that becomes immediately exploitable the moment `MermaidDiagram` is used to render any user- or LLM-controlled content.
+
+Additionally, `mermaid.initialize()` sets **global** state. Any other call to `mermaid.render()` anywhere in the application (even outside `MermaidDiagram`) will inherit the `securityLevel: "loose"` setting after the first render of a `MermaidDiagram`.
 
 **Impact:**
-Arbitrary JavaScript execution in the context of the HALO desktop application or web UI. In the Electron/ElectroBun desktop context, this escalates to full native code execution via the `Utils.openExternal`, `Utils.openPath`, filesystem access, and the IPC bridge. An attacker can exfiltrate all stored API keys, provider credentials, and database contents.
+When connected to LLM-controlled content (the intended use): arbitrary JavaScript execution in the context of the HALO desktop application or web UI. In the Electron/ElectroBun desktop context, this escalates to full native code execution via `Utils.openExternal`, `Utils.openPath`, filesystem access, and the IPC bridge. An attacker could exfiltrate all stored API keys, provider credentials, and database contents.
 
-**Attack Path:**
-1. Attacker crafts OTLP span data containing a `final_answer` with a malicious Mermaid diagram (or manipulates a HALO model provider to return malicious output).
-2. The malicious Mermaid code renders to SVG with embedded JavaScript.
+**Attack Path (once wired to dynamic content):**
+1. Attacker crafts OTLP span data containing a `final_answer` with a malicious Mermaid diagram (e.g., `graph LR; A-->B; click A "javascript:alert(document.cookie)"`) or manipulates a HALO model provider to return malicious output.
+2. Mermaid's `securityLevel: "loose"` processes click callbacks and HTML labels, generating SVG with inline JavaScript event handlers.
 3. The SVG is injected into the DOM via `dangerouslySetInnerHTML`.
 4. Malicious script executes, accesses IPC bridge, exfiltrates credentials.
 
 **Evidence:**
+```typescript
+// mermaidTheme.ts:49-51
+return {
+  startOnLoad: false,
+  securityLevel: "loose",  // Enables click callbacks and HTML labels in SVG output
+```
 ```typescript
 // MermaidDiagram.tsx:215
 dangerouslySetInnerHTML={{ __html: renderState.svg }}
@@ -33,7 +47,8 @@ dangerouslySetInnerHTML={{ __html: renderState.svg }}
 ```
 
 **Remediation:**
-Sanitize SVG output with DOMPurify before injecting into the DOM, or render Mermaid into an `<img>` tag via a data URI or sandboxed iframe.
+1. Change `securityLevel` to `"strict"` (or at minimum `"sandbox"`) in `mermaidTheme.ts`. This disables click callbacks and encodes HTML in text labels.
+2. Additionally, sanitize SVG output with DOMPurify before injecting into the DOM, or render Mermaid into an `<img>` tag via a data URI.
 
 ---
 
