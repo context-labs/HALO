@@ -270,3 +270,48 @@ async def test_render_trace_truncates_when_over_budget(built_store: TraceStore) 
 async def test_paths_exposed_publicly(built_store: TraceStore) -> None:
     assert built_store.trace_path.is_file()
     assert built_store.index_path.is_file()
+
+
+# tiny_traces span windows (UTC): t-aaaa 05:32:00.0–05:32:01.0,
+# t-bbbb 06:00:00.0–06:00:02.0, t-cccc 07:00:00.0–07:00:00.5.
+
+
+async def _matching_ids(store: TraceStore, filters: TraceFilters) -> set[str]:
+    result = store.query_traces(filters=filters, limit=10, offset=0)
+    return {t.trace_id for t in result.traces}
+
+
+@pytest.mark.asyncio
+async def test_start_time_gte_is_inclusive_without_fractional_seconds(
+    built_store: TraceStore,
+) -> None:
+    # t-bbbb starts exactly at 06:00:00; a bound written without a fraction must keep it.
+    filters = TraceFilters(start_time_gte="2026-04-23T06:00:00Z")
+    assert await _matching_ids(built_store, filters) == {"t-bbbb", "t-cccc"}
+
+
+@pytest.mark.asyncio
+async def test_end_time_lte_excludes_traces_ending_later_in_the_same_second(
+    built_store: TraceStore,
+) -> None:
+    # t-cccc ends at 07:00:00.5, after the bound, so it must be excluded.
+    filters = TraceFilters(end_time_lte="2026-04-23T07:00:00Z")
+    assert await _matching_ids(built_store, filters) == {"t-aaaa", "t-bbbb"}
+
+
+@pytest.mark.asyncio
+async def test_end_time_lte_is_inclusive_at_the_exact_bound(built_store: TraceStore) -> None:
+    # t-aaaa ends exactly at 05:32:01.0; the bound written without a fraction must keep it.
+    filters = TraceFilters(end_time_lte="2026-04-23T05:32:01Z")
+    assert await _matching_ids(built_store, filters) == {"t-aaaa"}
+
+
+@pytest.mark.asyncio
+async def test_time_bounds_with_offsets_compare_as_instants(built_store: TraceStore) -> None:
+    # 08:00+02:00 is 06:00Z; 02:00:01-05:00 is 07:00:01Z.
+    filters = TraceFilters(
+        start_time_gte="2026-04-23T08:00:00+02:00",
+        end_time_lte="2026-04-23T02:00:01-05:00",
+    )
+    assert await _matching_ids(built_store, filters) == {"t-bbbb", "t-cccc"}
+    assert built_store.count_traces(filters).total == 2

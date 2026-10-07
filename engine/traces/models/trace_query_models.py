@@ -1,8 +1,64 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+from datetime import date, datetime, timedelta, timezone
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from engine.traces.models.canonical_span import SpanRecord
+
+# Hand-rolled instead of datetime.fromisoformat: that drops digits past
+# microseconds (stored spans carry nanoseconds) and on Python 3.10 rejects a
+# trailing "Z". re.ASCII keeps \d to 0-9.
+_ISO_TIMESTAMP = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})"
+    r"(?:[Tt ](?P<hour>\d{2}):(?P<minute>\d{2})"
+    r"(?::(?P<second>\d{2})(?:[.,](?P<fraction>\d{1,9}))?)?)?"
+    r"(?P<tz>[Zz]|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)?$",
+    re.ASCII,
+)
+
+
+def canonical_timestamp(value: str) -> str:
+    """Normalize an ISO-8601 timestamp to the trace contract's fixed-width form.
+
+    Span timestamps are stored as ``YYYY-MM-DDTHH:MM:SS.fffffffffZ`` (UTC,
+    nanosecond precision), and the index filters compare them as strings. That
+    only orders correctly when both sides use this exact width, so filter
+    bounds are normalized here: missing fractional seconds are zero-filled,
+    offsets are converted to UTC, and a bare date means midnight UTC. Input
+    with no offset is treated as UTC, matching the exporters.
+    """
+    match = _ISO_TIMESTAMP.match(value.strip())
+    if match is None:
+        raise ValueError(
+            f"invalid ISO-8601 timestamp {value!r}; expected e.g. '2026-04-23T05:00:00Z'"
+        )
+    parts = match.groupdict()
+    tz = parts["tz"]
+    try:
+        if tz is None or tz in ("Z", "z"):
+            offset = timezone.utc
+        else:
+            sign = -1 if tz[0] == "-" else 1
+            digits = tz[1:].replace(":", "")
+            hours, minutes = int(digits[:2]), int(digits[2:] or 0)
+            offset = timezone(sign * timedelta(hours=hours, minutes=minutes))
+        day = date.fromisoformat(parts["date"])
+        moment = datetime(
+            day.year,
+            day.month,
+            day.day,
+            int(parts["hour"] or 0),
+            int(parts["minute"] or 0),
+            int(parts["second"] or 0),
+            tzinfo=offset,
+        ).astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"invalid ISO-8601 timestamp {value!r}: {exc}") from exc
+    nanos = int((parts["fraction"] or "").ljust(9, "0"))
+    # Zero-pad the year explicitly: %Y is unpadded below 1000 on some platforms.
+    return f"{moment.year:04d}-{moment:%m-%dT%H:%M:%S}.{nanos:09d}Z"
 
 
 class TraceFilters(BaseModel):
@@ -26,9 +82,27 @@ class TraceFilters(BaseModel):
     service_names: list[str] | None = None
     agent_names: list[str] | None = None
     project_id: str | None = None
-    start_time_gte: str | None = None
-    end_time_lte: str | None = None
+    start_time_gte: str | None = Field(
+        default=None,
+        description=(
+            "Keep traces starting at or after this ISO-8601 time, e.g. 2026-04-23T05:00:00Z. "
+            "A bare date means 00:00:00Z that day."
+        ),
+    )
+    end_time_lte: str | None = Field(
+        default=None,
+        description=(
+            "Keep traces ending at or before this ISO-8601 time, e.g. 2026-04-23T06:00:00Z. "
+            "A bare date means 00:00:00Z that day."
+        ),
+    )
     regex_pattern: str | None = None
+
+    @field_validator("start_time_gte", "end_time_lte")
+    @classmethod
+    def _canonicalize_time_bound(cls, value: str | None) -> str | None:
+        """Compare bounds as instants, not text: normalize to the stored span format."""
+        return None if value is None else canonical_timestamp(value)
 
 
 class TraceSummary(BaseModel):
