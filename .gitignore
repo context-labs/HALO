@@ -10,6 +10,8 @@ __pycache__/
 
 # Local environment files (but keep the template)
 .env
+chatgpt.json
+chatgpt.json.lock
 !.env.example
 
 # Engine runtime artefacts

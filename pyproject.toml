@@ -31,10 +31,14 @@ dependencies = [
     # JSONL backend is in use, OTel's proxy tracer makes the wrapper a
     # no-op without any extra branching in engine code.
     "inference-catalyst-tracing[openai-agents]==0.1.10",
+    "filelock==4.0.12",
+    "pyjwt[crypto]==2.12.1",
+    "httpx==0.28.1",
 ]
 
 [project.scripts]
 halo = "halo_cli.main:app"
+halo-chatgpt = "halo_cli.chatgpt:app"
 
 [dependency-groups]
 dev = [

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class ModelProviderConfig(BaseModel):
     """Connection settings for the OpenAI-compatible HTTP endpoint backing a run.
+
+    ``auth_mode="chatgpt"`` selects HALO's independent OAuth session at
+    ``auth_file`` (or its app config path), fixes the public Responses endpoint,
+    and rejects API keys, alternate URLs and custom headers. The following
+    environment fallback behavior applies to the default ``api_key`` mode.
 
     HALO targets the OpenAI-compatible chat-completions surface (the de facto
     2025 standard exposed by OpenAI itself, OpenRouter, Anthropic's compat
@@ -23,3 +31,13 @@ class ModelProviderConfig(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     default_headers: dict[str, str] | None = None
+    auth_mode: Literal["api_key", "chatgpt"] = "api_key"
+    auth_file: Path | None = None
+
+    @model_validator(mode="after")
+    def validate_chatgpt(self) -> ModelProviderConfig:
+        if self.auth_mode == "chatgpt" and (self.base_url or self.api_key or self.default_headers):
+            raise ValueError(
+                "ChatGPT mode cannot be combined with API keys, base URLs, or headers."
+            )
+        return self

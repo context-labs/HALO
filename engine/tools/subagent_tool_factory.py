@@ -18,6 +18,7 @@ from engine.agents.engine_run_state import EngineRunState
 from engine.agents.openai_agent_runner import OpenAiAgentRunner
 from engine.agents.prompt_templates import render_subagent_system_prompt
 from engine.agents.turn_counter import TurnCounterInputFilter
+from engine.chatgpt_client import ChatGPTClient, ChatGPTProvider, plan_tools
 from engine.errors import EngineAgentExhaustedError, EngineMaxDepthExceededError
 from engine.telemetry.tracing import halo_agent_span
 from engine.tools.agent_context_tools import GetContextItemTool
@@ -98,7 +99,7 @@ def build_root_sdk_agent(
         instructions="",
         model=engine_config.root_agent.model.name,
         model_settings=engine_config.root_agent.model.to_sdk_model_settings(),
-        tools=tools,
+        tools=plan_tools(tools) if engine_config.model_provider.auth_mode == "chatgpt" else tools,
         tool_use_behavior=StopAtTools(stop_at_tool_names=[FINAL_ANSWER_TOOL_NAME]),
     )
 
@@ -296,6 +297,8 @@ def _build_subagent_as_tool(
                     parent_context=child_context,
                 ),
             )
+            if engine_config.model_provider.auth_mode == "chatgpt":
+                child_agent.tools = plan_tools(child_agent.tools)
 
             async def _run_streamed(*, agent, input, context):
                 # Fresh filter per SDK Runner.run_streamed invocation so
@@ -313,7 +316,16 @@ def _build_subagent_as_tool(
                 # a chance to set a process-global default in the first
                 # place. Per-call wiring keeps prod and tests symmetric.
                 run_config = RunConfig(
-                    model_provider=OpenAIProvider(openai_client=run_state.openai_client),
+                    model_provider=(
+                        ChatGPTProvider(
+                            openai_client=run_state.openai_client,
+                            use_responses=True,
+                            use_responses_websocket=False,
+                        )
+                        if isinstance(run_state.openai_client, ChatGPTClient)
+                        else OpenAIProvider(openai_client=run_state.openai_client)
+                    ),
+                    tracing_disabled=isinstance(run_state.openai_client, ChatGPTClient),
                     call_model_input_filter=TurnCounterInputFilter(
                         max_turns=engine_config.subagent.maximum_turns,
                         is_root=False,

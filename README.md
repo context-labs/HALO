@@ -106,6 +106,11 @@
 
 
 ## Quickstart
+
+The Python CLI/engine supports **Sign in with ChatGPT**. See
+[ChatGPT login and usage](docs/chatgpt-login.md) for setup, account selection,
+verification, and the scope of this adaptation. The desktop UI is unchanged.
+
 Install the HALO desktop app with:
 
 ```bash

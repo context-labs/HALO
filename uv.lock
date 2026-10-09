@@ -395,11 +395,20 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl", hash = "sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598", size = 16740, upload-time = "2025-11-21T23:01:53.443Z" },
+]
+
+[[package]]
+name = "filelock"
+version = "4.0.12"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/e4/34efcb869715cf299e47d1ac7b2624d2bcb6f2d3dffc2f0abe8417f65ab2/filelock-4.0.12.tar.gz", hash = "sha256:cf42711a7ac791818b299fab0332a088c65aeeefa36290de98db92c434303b0c", size = 253880, upload-time = "2026-10-05T13:17:43.677Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/a1/b047e1c486a2c66283633b7dbb73872ca16ca1ce6a426f70d4d037fc8e1c/filelock-4.0.12-py3-none-any.whl", hash = "sha256:5f17ee83ecee8a6f3e389c75822fb70a1c2f0506b99438a6dffa1d56793588c8", size = 111732, upload-time = "2026-10-05T13:17:42.361Z" },
 ]
 
 [[package]]
@@ -426,12 +435,15 @@ version = "0.3.5"
 source = { editable = "." }
 dependencies = [
     { name = "deno" },
+    { name = "filelock" },
+    { name = "httpx" },
     { name = "inference-catalyst-tracing", extra = ["openai-agents"] },
     { name = "numpy" },
     { name = "openai" },
     { name = "openai-agents" },
     { name = "pandas" },
     { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "rich" },
     { name = "ripgrep", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typer" },
@@ -448,12 +460,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "deno", specifier = "==2.7.14" },
+    { name = "filelock", specifier = "==4.0.12" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "inference-catalyst-tracing", extras = ["openai-agents"], specifier = "==0.1.10" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "openai", specifier = "==2.32.0" },
     { name = "openai-agents", specifier = "==0.14.7" },
     { name = "pandas", specifier = "==2.2.3" },
     { name = "pydantic", specifier = "==2.13.3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = "==2.12.1" },
     { name = "rich", specifier = "==15.0.0" },
     { name = "ripgrep", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')", specifier = "==15.1.0" },
     { name = "typer", specifier = "==0.25.0" },

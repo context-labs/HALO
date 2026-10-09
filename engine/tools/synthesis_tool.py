@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from engine.agents.llm_retry import call_with_retries
 from engine.agents.prompt_caching import as_cached_system_message
 from engine.agents.prompt_templates import SYNTHESIS_SYSTEM_PROMPT
+from engine.chatgpt_client import ChatGPTClient, plan_text
 from engine.model_config import ModelConfig
 from engine.tools.tool_protocol import ToolContext
 
@@ -67,6 +68,12 @@ class SynthesisTool:
         for tid in arguments.trace_ids:
             rendered = store.render_trace(tid, budget=8_000)
             user_text_parts.append(rendered)
+
+        if isinstance(self._client, ChatGPTClient):
+            summary = await plan_text(
+                self._client, self._model, SYNTHESIS_SYSTEM_PROMPT, "\n\n".join(user_text_parts)
+            )
+            return SynthesizeTracesResult(summary=summary)
 
         response = await call_with_retries(
             lambda: self._client.chat.completions.create(

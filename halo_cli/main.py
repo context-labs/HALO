@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import get_args
+from typing import Literal, get_args
 
 import typer
 from pydantic import TypeAdapter, ValidationError
@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.rule import Rule
 
 from engine.agents.agent_config import AgentConfig
+from engine.chatgpt_auth import CredentialStore, access_token
 from engine.code.code_repo import find_ripgrep
 from engine.engine_config import EngineConfig
 from engine.main import stream_engine_async
@@ -70,6 +71,8 @@ def _make_config(
     api_key: str | None,
     default_headers: dict[str, str] | None,
     repo_path: Path | None,
+    auth_mode: Literal["api_key", "chatgpt"] = "api_key",
+    auth_file: Path | None = None,
 ) -> EngineConfig:
     def make_model_config(name: str, reasoning_effort: ReasoningEffort | None) -> ModelConfig:
         return ModelConfig(
@@ -112,6 +115,8 @@ def _make_config(
         synthesis_model=synthesis,
         compaction_model=compaction,
         model_provider=ModelProviderConfig(
+            auth_mode=auth_mode,
+            auth_file=auth_file,
             base_url=base_url,
             api_key=api_key,
             default_headers=default_headers,
@@ -251,9 +256,26 @@ def _run(
             "$HALO_TELEMETRY_PATH (default: ./halo-telemetry-{run_id}.jsonl)."
         ),
     ),
+    auth_mode: Literal["api_key", "chatgpt"] = typer.Option("api_key", "--auth-mode"),
+    auth_file: Path | None = typer.Option(
+        None, "--auth-file", help="HALO ChatGPT credential file."
+    ),
 ) -> None:
     """Run the HALO engine against TRACE_PATH and stream output to stdout."""
-    if api_key is None and not os.environ.get("OPENAI_API_KEY"):
+    if auth_mode == "chatgpt":
+        if (
+            api_key
+            or base_url
+            or headers
+            or temperature is not None
+            or max_output_tokens is not None
+        ):
+            raise typer.BadParameter(
+                "ChatGPT mode does not accept API keys, base URLs, custom headers, temperature, or output-token limits."
+            )
+        # Explicit opt-in; ignores unrelated API-key/base-url environment values.
+        access_token(CredentialStore(auth_file))
+    if auth_mode == "api_key" and api_key is None and not os.environ.get("OPENAI_API_KEY"):
         typer.echo(
             "OPENAI_API_KEY not set; pass --api-key or export OPENAI_API_KEY.",
             err=True,
@@ -283,6 +305,8 @@ def _run(
         api_key=api_key,
         default_headers=_parse_headers(headers),
         repo_path=repo_path,
+        auth_mode=auth_mode,
+        auth_file=auth_file,
     )
     asyncio.run(_stream(trace_path, prompt, cfg, telemetry=telemetry))
 
@@ -293,7 +317,11 @@ cli.command()(_run)
 
 def app() -> None:
     """Entry point bound to `halo` in pyproject.toml."""
-    cli()
+    try:
+        cli()
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

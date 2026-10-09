@@ -6,6 +6,7 @@ from engine.agents.agent_context_items import AgentContextItem
 from engine.agents.llm_retry import call_with_retries
 from engine.agents.prompt_caching import as_cached_system_message
 from engine.agents.prompt_templates import COMPACTION_SYSTEM_PROMPT
+from engine.chatgpt_client import ChatGPTClient, plan_text
 from engine.model_config import ModelConfig
 
 
@@ -25,6 +26,8 @@ async def compact(
     across calls.
     """
     user_text = _item_as_prompt(item)
+    if isinstance(client, ChatGPTClient):
+        return await plan_text(client, compaction_model, COMPACTION_SYSTEM_PROMPT, user_text)
     # Frontier models (gpt-5.x, claude-opus-4-7+, …) reject ``temperature``
     # as deprecated; only forward it when explicitly set on the compaction
     # model.
