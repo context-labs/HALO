@@ -304,7 +304,7 @@ Run `task --list` for the full list. The ones you'll use most:
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://opensource.org/licenses/MIT)
 
 ## Contributing
 
